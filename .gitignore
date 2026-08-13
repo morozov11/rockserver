@@ -1,0 +1,21 @@
+# Rust build output
+/target/
+
+# IntelliJ IDEA / RustRover project files
+/.idea/
+*.iml
+
+# Local environment and secret files
+.env
+.env.*
+!.env.example
+
+# Local logs and temporary files
+*.log
+*.tmp
+*.swp
+*~
+
+# Operating system metadata
+.DS_Store
+Thumbs.db
