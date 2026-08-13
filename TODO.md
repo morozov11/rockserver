@@ -1,9 +1,9 @@
 # Near-term TODO
 
-1. Repository hygiene and documentation
+1. Repository hygiene and documentation — complete
    - Acceptance: Rust edition remains 2024; local build, IDE, and environment artifacts are ignored; repository purpose and boundaries are documented; formatting, linting, and tests pass.
 
-2. HTTP service skeleton
+2. HTTP service skeleton — complete
    - Add Axum routing, health endpoints, structured tracing, graceful shutdown, and router-level tests.
    - Acceptance: readiness and liveness endpoints return documented responses; shutdown is graceful; router tests require no network service; all required checks pass.
 

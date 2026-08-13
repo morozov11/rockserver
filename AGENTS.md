@@ -35,3 +35,11 @@ cargo test
 ```
 
 Update the OpenAPI contract and relevant tests whenever a public HTTP behavior changes.
+
+## Project documentation
+
+- Every task that changes the project must update `docs/status.md` and `docs/tasks.md` before completion.
+- `docs/status.md` records the current working state, current stage, known limitations, latest verification results, and next step.
+- `docs/tasks.md` is a chronological task log recording each task's goal, scope, result, checks, and status.
+- Documentation must describe verified, actual behavior rather than planned or assumed behavior.
+- Do not create a separate document for every small task unless the task genuinely needs one.

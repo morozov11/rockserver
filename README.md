@@ -4,7 +4,7 @@ RockServer is a planned Rust service for AI-assisted internet radio discovery. A
 
 ## Current status
 
-The repository is at the bootstrap stage. It contains only a Rust edition 2024 binary that prints Hello World plus project documentation. There is no HTTP API, database, search implementation, LLM integration, or RockCast integration yet.
+The repository contains a Rust edition 2024 Axum service skeleton. `GET /health/live` and `GET /health/ready` return `{"status":"ok"}` as JSON. The application emits structured JSON logs, traces HTTP requests, and shuts down gracefully on Ctrl+C. There is no search API, database, LLM integration, or RockCast integration yet.
 
 ## Intended architecture
 
@@ -46,3 +46,13 @@ cargo test
 ```
 
 Tests must be deterministic and must not access real LLM providers or the external network.
+
+## Run locally
+
+By default, RockServer listens only on `127.0.0.1:3000`. Override the complete socket address with `ROCKSERVER_BIND_ADDR`, for example:
+
+```text
+ROCKSERVER_BIND_ADDR=127.0.0.1:8080 cargo run
+```
+
+Use `RUST_LOG` to adjust the tracing filter. If it is unset or invalid, the service uses `info`.
