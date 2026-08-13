@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RockServer — схемы сервиса</title>
+  <style>
+    :root { color-scheme: light; --ink:#182230; --muted:#536273; --line:#bac6d3; --panel:#f6f8fb; --current:#dff4e7; --next:#fff1c9; --future:#e9e5ff; --accent:#2457a6; }
+    * { box-sizing:border-box; }
+    body { margin:0; font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--ink); background:#fff; }
+    header, main, footer { width:min(1180px,92vw); margin:auto; }
+    header { padding:2.5rem 0 1rem; }
+    h1 { margin:0 0 .5rem; font-size:clamp(2rem,5vw,3.5rem); }
+    h2 { margin-top:2.8rem; border-bottom:2px solid var(--line); padding-bottom:.35rem; }
+    h3 { margin:.3rem 0; }
+    a { color:var(--accent); }
+    nav { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:1rem 1.4rem; }
+    nav ol { columns:2; margin:.4rem 0; padding-left:1.3rem; }
+    .legend, .flow, .grid { display:flex; flex-wrap:wrap; gap:.75rem; align-items:stretch; }
+    .legend { margin:1rem 0; }
+    .badge { display:inline-block; padding:.15rem .5rem; border:1px solid var(--line); border-radius:999px; font-size:.78rem; font-weight:700; letter-spacing:.04em; }
+    .current { background:var(--current); }
+    .next { background:var(--next); }
+    .future { background:var(--future); }
+    .node { flex:1 1 150px; min-width:140px; padding:.8rem; border:1px solid var(--line); border-radius:10px; background:white; position:relative; }
+    .node::after { content:"→"; position:absolute; right:-.65rem; top:40%; font-weight:800; color:var(--muted); }
+    .node:last-child::after, .grid .node::after { content:""; }
+    .node p, .card p { margin:.3rem 0 0; color:var(--muted); font-size:.92rem; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); }
+    .card { border:1px solid var(--line); border-radius:12px; padding:1rem; background:var(--panel); }
+    .diagram { overflow-x:auto; border:1px solid var(--line); border-radius:12px; padding:1rem; background:#fcfdff; }
+    svg { display:block; width:100%; min-width:720px; height:auto; }
+    svg text { font-family:system-ui,-apple-system,"Segoe UI",sans-serif; fill:var(--ink); font-size:14px; }
+    svg .small { font-size:12px; fill:var(--muted); }
+    svg .box { stroke:#7e8fa2; stroke-width:1.5; rx:9; }
+    svg .arrow { stroke:#61758a; stroke-width:2; fill:none; marker-end:url(#arrow); }
+    code { background:#edf1f6; padding:.1rem .3rem; border-radius:4px; }
+    table { width:100%; border-collapse:collapse; margin-top:.8rem; }
+    th, td { text-align:left; vertical-align:top; border:1px solid var(--line); padding:.65rem; }
+    th { background:var(--panel); }
+    footer { margin-top:3rem; padding:1.5rem 0 3rem; color:var(--muted); }
+    @media (max-width:700px) { nav ol { columns:1; } .flow { flex-direction:column; } .node::after { content:"↓"; right:50%; top:auto; bottom:-.9rem; } .node:last-child::after { content:""; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>RockServer: схемы сервиса</h1>
+    <p>Автономная карта текущего и планового устройства поиска интернет-радио. Статусы не дают планам выглядеть реализованными.</p>
+    <div class="legend" aria-label="Легенда статусов">
+      <span class="badge current">CURRENT — работает или определено сейчас</span>
+      <span class="badge next">NEXT — ближайший этап</span>
+      <span class="badge future">FUTURE — дальнейший план</span>
+    </div>
+    <nav aria-label="Оглавление">
+      <strong>Оглавление</strong>
+      <ol>
+        <li><a href="#ecosystem">Общая экосистема</a></li>
+        <li><a href="#text-search">Поток текстового AI-поиска</a></li>
+        <li><a href="#inside">Внутри RockServer</a></li>
+        <li><a href="#catalog">Данные каталога</a></li>
+        <li><a href="#contract">Контракт и ошибки</a></li>
+        <li><a href="#delivery">Этапы поставки</a></li>
+      </ol>
+    </nav>
+  </header>
+  <main>
+    <section id="ecosystem">
+      <h2>1. Общая экосистема</h2>
+      <div class="flow">
+        <article class="node future"><span class="badge future">FUTURE</span><h3>Пользователь / голос</h3><p>Голосовой ввод, STT и ESP32-клиент.</p></article>
+        <article class="node future"><span class="badge future">FUTURE</span><h3>RockCast Windows</h3><p>Удалённый текстовый поиск через RockServer; локальный каталог остаётся fallback.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>RockServer</h3><p>HTTP API, health routes и детерминированный <code>POST /v1/search</code>.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>Каталог / поиск</h3><p>PostgreSQL при <code>DATABASE_URL</code>; иначе встроенный in-memory fallback.</p></article>
+        <article class="node future"><span class="badge future">FUTURE</span><h3>StationResult</h3><p>Результат будет передан RockCast после интеграции.</p></article>
+        <article class="node future"><span class="badge future">FUTURE</span><h3>PlaybackController</h3><p>Уже существует в RockCast, но не интегрирован с RockServer.</p></article>
+      </div>
+      <div class="grid" style="margin-top:.75rem">
+        <article class="node future"><h3>LocalPlayer</h3><p>Существующий путь воспроизведения RockCast.</p></article>
+        <article class="node future"><h3>CastService / StreamRelay</h3><p>Существующий клиентский путь к Chromecast/саундбару; вне этого репозитория.</p></article>
+        <article class="node future"><h3>Chromecast / саундбар</h3><p>Конечное устройство воспроизведения.</p></article>
+      </div>
+    </section>
+
+    <section id="text-search">
+      <h2>2. Поток текстового AI-поиска</h2>
+      <div class="flow">
+        <article class="node future"><h3>Ввод текста</h3><span class="badge future">FUTURE integration</span></article>
+        <article class="node current"><h3><code>POST /v1/search</code></h3><span class="badge current">CURRENT</span></article>
+        <article class="node current"><h3>Валидация</h3><span class="badge current">CURRENT: 400 / 422 + request_id</span></article>
+        <article class="node future"><h3>QueryParser</h3><span class="badge future">FUTURE</span></article>
+        <article class="node current"><h3>filters / metadata query</h3><span class="badge current">CURRENT</span></article>
+        <article class="node current"><h3>ranking</h3><span class="badge current">CURRENT: score, then station ID</span></article>
+        <article class="node future"><h3>Результаты → выбор → playback</h3><span class="badge future">FUTURE</span></article>
+      </div>
+      <p><strong>Сейчас:</strong> Axum обрабатывает health routes и <code>POST /v1/search</code>. DTO валидируются по контракту, выбранный repository фильтрует и ранжирует каталог детерминированно, а равные scores упорядочиваются по station ID. PostgreSQL выполняет эти правила в SQL; in-memory остаётся fallback. LLM parser, vector query и внешние каталоги отсутствуют.</p>
+    </section>
+
+    <section id="inside">
+      <h2>3. Внутренняя схема RockServer</h2>
+      <div class="grid">
+        <article class="card current"><span class="badge current">CURRENT</span><h3>Axum API</h3><p><code>GET /health/live</code>, DB-aware <code>GET /health/ready</code>, <code>POST /v1/search</code>.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>tracing / config</h3><p>JSON tracing, <code>RUST_LOG</code>, <code>ROCKSERVER_BIND_ADDR</code>, <code>DATABASE_URL</code>, graceful shutdown.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>DTO / validation</h3><p>Transport DTO, request_id и contract-compliant ошибки.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>SearchService</h3><p>Нормализованный запрос и стабильное repository-neutral ранжирование.</p></article>
+        <article class="card future"><span class="badge future">FUTURE</span><h3>QueryParser trait</h3><p>Детерминированный fallback и заменяемый LLM provider.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>StationRepository</h3><p>PostgreSQL + migrations/seed или встроенный in-memory fallback.</p></article>
+        <article class="card next"><span class="badge next">NEXT</span><h3>CatalogImporter</h3><p>Контролируемый фоновый Radio Browser import, не в request path.</p></article>
+        <article class="card future"><span class="badge future">FUTURE</span><h3>StreamHealthChecker</h3><p>Фоновая проверка потоков, не в request path.</p></article>
+      </div>
+    </section>
+
+    <section id="catalog">
+      <h2>4. Данные каталога</h2>
+      <p><strong>CURRENT:</strong> versioned migrations создают таблицы <code>stations</code> и <code>station_streams</code>, ограничения, timestamps и индексы. Embedding и import run показаны только как будущие понятия.</p>
+      <div class="diagram">
+        <svg viewBox="0 0 940 350" role="img" aria-labelledby="catalog-title catalog-desc">
+          <title id="catalog-title">Текущие и будущие связи данных каталога</title>
+          <desc id="catalog-desc">Station и StationStream существуют в PostgreSQL; embedding и import остаются будущими этапами.</desc>
+          <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#61758a"/></marker></defs>
+          <rect class="box" x="355" y="125" width="230" height="95" fill="#dff4e7"/><text x="375" y="155">Station</text><text class="small" x="375" y="180">id, name, tags, language, country</text><text class="small" x="375" y="200">CURRENT: PostgreSQL + fallback</text>
+          <rect class="box" x="35" y="35" width="245" height="85" fill="#dff4e7"/><text x="55" y="65">StationStream</text><text class="small" x="55" y="88">CURRENT: URL, codec, bitrate, health</text>
+          <rect class="box" x="660" y="35" width="245" height="85" fill="#e9e5ff"/><text x="680" y="65">Embedding</text><text class="small" x="680" y="88">vector для semantic ranking</text>
+          <rect class="box" x="35" y="255" width="245" height="65" fill="#fff1c9"/><text x="55" y="285">ImportRun</text><text class="small" x="55" y="305">NEXT: источник, время, результат</text>
+          <rect class="box" x="660" y="255" width="245" height="65" fill="#e9e5ff"/><text x="680" y="285">Stream health</text><text class="small" x="680" y="305">healthy / degraded / unknown</text>
+          <path class="arrow" d="M355 150 L280 100"/><path class="arrow" d="M585 150 L660 100"/><path class="arrow" d="M280 280 L355 205"/><path class="arrow" d="M585 205 L660 280"/>
+        </svg>
+      </div>
+    </section>
+
+    <section id="contract">
+      <h2>5. Контракт и ошибки</h2>
+      <div class="flow">
+        <article class="node current"><h3>SearchRequest</h3><p><code>query</code>, <code>locale</code>, <code>limit</code>, <code>exclude_station_ids</code>.</p></article>
+        <article class="node current"><h3>200 SearchResponse</h3><p><code>NormalizedQuery</code> + массив <code>StationResult</code>.</p></article>
+        <article class="node current"><h3>StationResult</h3><p>Стабильный id, URL, метаданные, score, reason и health.</p></article>
+      </div>
+      <table>
+        <thead><tr><th>Код</th><th>Значение контракта</th><th>Тело</th></tr></thead>
+        <tbody>
+          <tr><td>200</td><td>Успешный ранжированный ответ.</td><td><code>SearchResponse</code></td></tr>
+          <tr><td>400</td><td>Тело отсутствует, не JSON или JSON синтаксически повреждён.</td><td><code>ErrorResponse</code></td></tr>
+          <tr><td>422</td><td>JSON синтаксически корректен, но нарушает схему или семантическую валидацию.</td><td><code>ErrorResponse</code></td></tr>
+          <tr><td>429</td><td>Превышен лимит запросов.</td><td><code>ErrorResponse</code></td></tr>
+          <tr><td>500</td><td>Неожиданная серверная ошибка.</td><td><code>ErrorResponse</code></td></tr>
+        </tbody>
+      </table>
+      <p><code>ErrorResponse</code> всегда содержит <code>code</code>, <code>message</code>, <code>request_id</code> и <code>details</code>. Search реализует 200, 400, 422 и 500; 429 остаётся FUTURE. Readiness отдельно возвращает 503 + <code>{"status":"not_ready"}</code> при потере PostgreSQL.</p>
+    </section>
+
+    <section id="delivery">
+      <h2>6. Этапы поставки</h2>
+      <ol class="grid">
+        <li class="card current"><span class="badge current">CURRENT ✓</span><h3>Repository foundation</h3></li>
+        <li class="card current"><span class="badge current">CURRENT ✓</span><h3>HTTP skeleton</h3></li>
+        <li class="card current"><span class="badge current">CURRENT ✓</span><h3>OpenAPI contract</h3></li>
+        <li class="card current"><span class="badge current">CURRENT ✓</span><h3>In-memory search</h3></li>
+        <li class="card current"><span class="badge current">CURRENT ✓</span><h3>PostgreSQL persistence</h3></li>
+        <li class="card next"><span class="badge next">NEXT</span><h3>Radio Browser import</h3></li>
+        <li class="card future"><span class="badge future">FUTURE</span><h3>Semantic / LLM</h3></li>
+        <li class="card future"><span class="badge future">FUTURE</span><h3>RockCast integration</h3></li>
+        <li class="card future"><span class="badge future">FUTURE</span><h3>Voice / operations</h3></li>
+      </ol>
+    </section>
+  </main>
+  <footer>Документ отражает состояние RS-004 PostgreSQL persistence foundation на 2026-08-13. HTML автономен; для PostgreSQL-режима используется локальный Compose или внешний <code>DATABASE_URL</code>.</footer>
+</body>
+</html>

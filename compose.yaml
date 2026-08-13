@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${ROCKSERVER_POSTGRES_DB:-rockserver}
+      POSTGRES_USER: ${ROCKSERVER_POSTGRES_USER:-rockserver}
+      POSTGRES_PASSWORD: ${ROCKSERVER_POSTGRES_PASSWORD:-rockserver_dev}
+    ports:
+      - "${ROCKSERVER_POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    volumes:
+      - rockserver-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  rockserver-postgres-data:

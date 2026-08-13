@@ -24,6 +24,14 @@ RockServer is a Rust service that will turn natural-language radio requests into
 - Keep changes small and aligned with one roadmap stage.
 - Keep the crate on Rust edition 2024.
 
+## Code comments
+
+- All new or modified public functions, methods, types, and modules must have meaningful Rustdoc comments (`///` or `//!`).
+- Complex private functions and methods must have a short comment explaining their purpose, invariants, non-obvious design choices, errors, or side effects.
+- Do not add comments that merely restate an obvious line of code.
+- When changing an existing method's behavior, verify that its comments remain accurate.
+- Apply these rules to code created or substantially changed by the task; do not perform unrelated mass comment rewrites.
+
 ## Required checks
 
 Run all of the following before handing off a change:
@@ -43,3 +51,17 @@ Update the OpenAPI contract and relevant tests whenever a public HTTP behavior c
 - `docs/tasks.md` is a chronological task log recording each task's goal, scope, result, checks, and status.
 - Documentation must describe verified, actual behavior rather than planned or assumed behavior.
 - Do not create a separate document for every small task unless the task genuinely needs one.
+- When architecture or the public API changes, check `docs/service-diagrams.html` for accuracy. Update it only to reflect verified current behavior or explicitly labeled planned state.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

@@ -19,3 +19,4 @@
 # Operating system metadata
 .DS_Store
 Thumbs.db
+/graphify-out/
