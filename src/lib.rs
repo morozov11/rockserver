@@ -1,9 +1,13 @@
+/// Controlled catalog-import orchestration and provider-neutral models.
+pub mod catalog_import;
 /// Service configuration loaded from the process environment.
 pub mod config;
 /// HTTP routes and transport types.
 pub mod http;
 /// Persistent station-catalog backends and startup selection.
 pub mod persistence;
+/// External catalog providers used only by explicit background workflows.
+pub mod providers;
 /// Deterministic station-search domain and catalog boundary.
 pub mod search;
 /// Structured tracing setup.

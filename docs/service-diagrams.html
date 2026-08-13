@@ -92,35 +92,35 @@
         <article class="node current"><h3>ranking</h3><span class="badge current">CURRENT: score, then station ID</span></article>
         <article class="node future"><h3>Результаты → выбор → playback</h3><span class="badge future">FUTURE</span></article>
       </div>
-      <p><strong>Сейчас:</strong> Axum обрабатывает health routes и <code>POST /v1/search</code>. DTO валидируются по контракту, выбранный repository фильтрует и ранжирует каталог детерминированно, а равные scores упорядочиваются по station ID. PostgreSQL выполняет эти правила в SQL; in-memory остаётся fallback. LLM parser, vector query и внешние каталоги отсутствуют.</p>
+      <p><strong>Сейчас:</strong> Axum обрабатывает health routes и <code>POST /v1/search</code>. DTO валидируются по контракту, выбранный repository фильтрует и ранжирует каталог детерминированно, а равные scores упорядочиваются по station ID. PostgreSQL выполняет эти правила в SQL; in-memory остаётся fallback. Radio Browser импортируется отдельной CLI-командой и никогда не вызывается из этого request path. LLM parser и vector query отсутствуют.</p>
     </section>
 
     <section id="inside">
       <h2>3. Внутренняя схема RockServer</h2>
       <div class="grid">
         <article class="card current"><span class="badge current">CURRENT</span><h3>Axum API</h3><p><code>GET /health/live</code>, DB-aware <code>GET /health/ready</code>, <code>POST /v1/search</code>.</p></article>
-        <article class="card current"><span class="badge current">CURRENT</span><h3>tracing / config</h3><p>JSON tracing, <code>RUST_LOG</code>, <code>ROCKSERVER_BIND_ADDR</code>, <code>DATABASE_URL</code>, graceful shutdown.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>tracing / config</h3><p>JSON tracing, HTTP и import config, run/page/count logs, graceful shutdown.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>DTO / validation</h3><p>Transport DTO, request_id и contract-compliant ошибки.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>SearchService</h3><p>Нормализованный запрос и стабильное repository-neutral ранжирование.</p></article>
         <article class="card future"><span class="badge future">FUTURE</span><h3>QueryParser trait</h3><p>Детерминированный fallback и заменяемый LLM provider.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>StationRepository</h3><p>PostgreSQL + migrations/seed или встроенный in-memory fallback.</p></article>
-        <article class="card next"><span class="badge next">NEXT</span><h3>CatalogImporter</h3><p>Контролируемый фоновый Radio Browser import, не в request path.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>CatalogImporter</h3><p>Ограниченный Radio Browser client + import store; отдельный CLI, не request path и не HTTP startup.</p></article>
         <article class="card future"><span class="badge future">FUTURE</span><h3>StreamHealthChecker</h3><p>Фоновая проверка потоков, не в request path.</p></article>
       </div>
     </section>
 
     <section id="catalog">
       <h2>4. Данные каталога</h2>
-      <p><strong>CURRENT:</strong> versioned migrations создают таблицы <code>stations</code> и <code>station_streams</code>, ограничения, timestamps и индексы. Embedding и import run показаны только как будущие понятия.</p>
+      <p><strong>CURRENT:</strong> versioned migrations создают <code>stations</code>, <code>station_streams</code>, source identity и <code>import_runs</code>. Radio Browser upsert идемпотентен, built-in seed сохраняется, отсутствующие upstream записи автоматически не удаляются. <strong>NEXT:</strong> pgvector embedding.</p>
       <div class="diagram">
         <svg viewBox="0 0 940 350" role="img" aria-labelledby="catalog-title catalog-desc">
           <title id="catalog-title">Текущие и будущие связи данных каталога</title>
-          <desc id="catalog-desc">Station и StationStream существуют в PostgreSQL; embedding и import остаются будущими этапами.</desc>
+          <desc id="catalog-desc">Station, StationStream, source identity и ImportRun существуют в PostgreSQL; embedding является следующим этапом.</desc>
           <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#61758a"/></marker></defs>
-          <rect class="box" x="355" y="125" width="230" height="95" fill="#dff4e7"/><text x="375" y="155">Station</text><text class="small" x="375" y="180">id, name, tags, language, country</text><text class="small" x="375" y="200">CURRENT: PostgreSQL + fallback</text>
-          <rect class="box" x="35" y="35" width="245" height="85" fill="#dff4e7"/><text x="55" y="65">StationStream</text><text class="small" x="55" y="88">CURRENT: URL, codec, bitrate, health</text>
-          <rect class="box" x="660" y="35" width="245" height="85" fill="#e9e5ff"/><text x="680" y="65">Embedding</text><text class="small" x="680" y="88">vector для semantic ranking</text>
-          <rect class="box" x="35" y="255" width="245" height="65" fill="#fff1c9"/><text x="55" y="285">ImportRun</text><text class="small" x="55" y="305">NEXT: источник, время, результат</text>
+          <rect class="box" x="355" y="125" width="230" height="95" fill="#dff4e7"/><text x="375" y="155">Station</text><text class="small" x="375" y="180">id, source identity, metadata</text><text class="small" x="375" y="200">CURRENT: PostgreSQL + fallback</text>
+          <rect class="box" x="35" y="35" width="245" height="85" fill="#dff4e7"/><text x="55" y="65">StationStream</text><text class="small" x="55" y="88">CURRENT: source identity, URL, codec, health</text>
+          <rect class="box" x="660" y="35" width="245" height="85" fill="#fff1c9"/><text x="680" y="65">Embedding</text><text class="small" x="680" y="88">NEXT: pgvector semantic ranking</text>
+          <rect class="box" x="35" y="255" width="245" height="65" fill="#dff4e7"/><text x="55" y="285">ImportRun</text><text class="small" x="55" y="305">CURRENT: status, counts, timestamps</text>
           <rect class="box" x="660" y="255" width="245" height="65" fill="#e9e5ff"/><text x="680" y="285">Stream health</text><text class="small" x="680" y="305">healthy / degraded / unknown</text>
           <path class="arrow" d="M355 150 L280 100"/><path class="arrow" d="M585 150 L660 100"/><path class="arrow" d="M280 280 L355 205"/><path class="arrow" d="M585 205 L660 280"/>
         </svg>
@@ -155,13 +155,13 @@
         <li class="card current"><span class="badge current">CURRENT ✓</span><h3>OpenAPI contract</h3></li>
         <li class="card current"><span class="badge current">CURRENT ✓</span><h3>In-memory search</h3></li>
         <li class="card current"><span class="badge current">CURRENT ✓</span><h3>PostgreSQL persistence</h3></li>
-        <li class="card next"><span class="badge next">NEXT</span><h3>Radio Browser import</h3></li>
-        <li class="card future"><span class="badge future">FUTURE</span><h3>Semantic / LLM</h3></li>
+        <li class="card current"><span class="badge current">CURRENT ✓</span><h3>Radio Browser import</h3></li>
+        <li class="card next"><span class="badge next">NEXT</span><h3>Semantic / LLM</h3></li>
         <li class="card future"><span class="badge future">FUTURE</span><h3>RockCast integration</h3></li>
         <li class="card future"><span class="badge future">FUTURE</span><h3>Voice / operations</h3></li>
       </ol>
     </section>
   </main>
-  <footer>Документ отражает состояние RS-004 PostgreSQL persistence foundation на 2026-08-13. HTML автономен; для PostgreSQL-режима используется локальный Compose или внешний <code>DATABASE_URL</code>.</footer>
+  <footer>Документ отражает состояние RS-006 Controlled Radio Browser import на 2026-08-13. HTML автономен; importer требует <code>DATABASE_URL</code>, запускается отдельно и не меняет HTTP/OpenAPI contract.</footer>
 </body>
 </html>

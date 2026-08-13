@@ -1,9 +1,11 @@
 //! Persistent catalog implementations and environment-driven backend selection.
 
+mod import_postgres;
 mod postgres;
 
 use std::{env, sync::Arc};
 
+pub use import_postgres::PostgresImportStore;
 pub use postgres::PostgresStationRepository;
 
 use crate::search::{InMemoryStationRepository, StationRepository};

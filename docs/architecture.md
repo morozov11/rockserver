@@ -16,6 +16,21 @@ RockServer owns remote station discovery: accepting a natural-language query, in
 
 Future provider failures must degrade predictably. Query parsing and embeddings will live behind traits, allowing deterministic fake implementations in unit tests. The request path must not depend on crawling Radio Browser or probing streams; importing and health checking are background concerns.
 
+## Current catalog import flow
+
+Radio Browser import is a separate one-shot process, not part of the HTTP router, search service, readiness probe, or server startup:
+
+1. `import_radio_browser` validates that `DATABASE_URL` is present and loads bounded Radio Browser configuration.
+2. `PostgresImportStore` connects and applies the same embedded versioned migrations used by the HTTP PostgreSQL backend.
+3. `CatalogImporter` creates a durable `started` run through the import-only persistence trait.
+4. `RadioBrowserClient`, behind the import-provider trait, requests bounded pages from `/json/stations/search` with `hidebroken=true`, stable name ordering, absolute offset, explicit limit, timeout, response-size cap, and descriptive User-Agent.
+5. The provider maps each upstream DTO into the provider-neutral `ImportedStation` model or increments the skip count. Mapping validates provider UUID, last upstream check, name, and resolved stream URL; it deterministically normalizes optional homepage, tags, language code, country code, codec, and bitrate. Language selection scans all valid codes, prefers the first two-letter code, and falls back to the first three-letter code only when no two-letter code exists.
+6. Before persistence, `CatalogImporter` requires every record source to equal the provider source that owns the run. A mismatch rejects the whole normalized page, increments failed counts, records a sanitized terminal failure, and performs no upsert.
+7. `PostgresImportStore` transactionally upserts each page by `(source, source_station_id)` and the matching stream identity. It verifies that the explicit source belongs to the still-started run and uses that argument for writes instead of trusting record source fields. Only Radio Browser-owned rows are updated; built-in rows use a separate `builtin` ownership namespace.
+8. A short upstream page or the configured maximum page count ends a successful run. Provider or persistence failure records a terminal failed run with partial counts and a sanitized summary. Missing upstream rows are retained; RS-006 performs no deletion or disable sweep.
+
+The provider does not depend on `StationRepository`, and HTTP search does not depend on the provider client. PostgreSQL search sees imported rows through the existing catalog schema after a successful transaction, without introducing network I/O into the request path.
+
 ## Current HTTP service
 
 The crate is split into a reusable library and a thin process entry point. The library builds the Axum router, owns configuration and telemetry setup, and exposes the serving boundary so application behavior can be tested without starting a process. The binary loads configuration, binds the listener, and supplies the Ctrl+C shutdown signal.
@@ -35,9 +50,11 @@ The HTTP layer owns DTO deserialization, defaults, validation, request IDs, and 
 
 ## Persistence
 
-When `DATABASE_URL` is present, startup connects through SQLx, applies embedded versioned migrations from `migrations/`, and selects `PostgresStationRepository`. The schema separates station metadata from playable stream URLs, enforces stable IDs, positive bitrates, valid health states, at most one primary stream per station, timestamps, and useful metadata/relationship indexes. A second idempotent migration seeds PostgreSQL with the same six development stations as the offline in-memory fallback.
+When `DATABASE_URL` is present, startup connects through SQLx, applies embedded versioned migrations from `migrations/`, and selects `PostgresStationRepository`. The schema separates station metadata from playable stream URLs, enforces stable IDs, positive bitrates, valid health states, at most one primary stream per station, timestamps, and useful metadata/relationship indexes. A second idempotent migration seeds PostgreSQL with the same six development stations as the offline in-memory fallback. The RS-006 migration adds provider ownership to stations and streams, unique source identities for idempotent upsert, and `import_runs` with status, counts, timestamps, and safe error summaries. Existing seed rows are backfilled as `builtin`; Radio Browser rows use `radio_browser`.
 
-When `DATABASE_URL` is absent, startup selects `InMemoryStationRepository`; both choices are logged by backend name without logging a DSN or password. SQL uses runtime-checked queries rather than compile-time query macros, so normal builds do not require a live database. `compose.yaml` is development-only and has a PostgreSQL healthcheck. Radio Browser import and pgvector remain outside the current stage.
+When `DATABASE_URL` is absent, startup selects `InMemoryStationRepository`; both choices are logged by backend name without logging a DSN or password. SQL uses runtime-checked queries rather than compile-time query macros, so normal builds do not require a live database. `compose.yaml` is development-only and has a PostgreSQL healthcheck. The importer always requires `DATABASE_URL` and never falls back to memory. pgvector remains outside the current stage.
+
+The Radio Browser field selection follows the official [API usage guidance](https://docs.radio-browser.info/#using-the-api), [Station structure](https://docs.radio-browser.info/#station), [advanced search parameters](https://docs.radio-browser.info/#advanced-station-search), and [mirror discovery guidance](https://docs.radio-browser.info/#server-mirrors). RS-006 consumes `stationuuid`, `name`, `url_resolved`, `homepage`, `tags`, `languagecodes`, `countrycode`, `codec`, `bitrate`, and `lastcheckok`. The canonical UUID is the provider identity and resolved URL is the only accepted stream field. The official implementation is maintained in the [Radio Browser API repository](https://gitlab.com/radiobrowser/radiobrowser-api-rust).
 
 The standalone [service diagrams](service-diagrams.html) summarize the current, next, and future architecture in Russian and work locally without a server or network access.
 
@@ -45,8 +62,8 @@ The standalone [service diagrams](service-diagrams.html) summarize the current, 
 
 - **API:** Axum health and search routing, DTO validation, error mapping, and request IDs are present.
 - **Domain:** normalized queries, filters, station candidates, scoring, and stable ranking are present.
-- **Persistence:** PostgreSQL migrations, development seed, SQL repository, startup backend selection, and in-memory fallback are present; controlled Radio Browser import is next and pgvector remains future work.
-- **Providers:** replaceable query-parser and embedding implementations.
-- **Operations:** tracing, process liveness, backend-aware readiness, configurable binding, local PostgreSQL Compose, and Ctrl+C shutdown are present; metrics, rate limiting, broader shutdown triggers, and deployment configuration remain planned.
+- **Persistence:** PostgreSQL migrations, development seed, SQL search repository, provider ownership, import-run history, import-only upsert store, startup backend selection, and in-memory fallback are present; pgvector is next.
+- **Providers:** the bounded Radio Browser import provider is present outside the request path; replaceable query-parser and embedding implementations are next.
+- **Operations:** tracing, import run/page/count logs, process liveness, backend-aware readiness, configurable binding, local PostgreSQL Compose, and Ctrl+C shutdown are present; metrics, rate limiting, broader shutdown triggers, stream probing, and deployment configuration remain planned.
 
 Dependencies should point inward toward domain concepts. HTTP, database, and provider-specific types must not leak into the core ranking model.

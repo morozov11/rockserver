@@ -19,6 +19,11 @@
    - Added versioned station/stream migrations, an idempotent six-station development seed, PostgreSQL `StationRepository`, automatic startup migrations, `DATABASE_URL` backend selection, in-memory fallback, database-aware readiness, and a local Compose service.
    - Acceptance met: SQL preserves language/country/exclusion filters, limit, score-descending order and station-ID tie-break; unit and real PostgreSQL integration tests cover conversions, migrations, seed, search, exclusions, limit, ranking, and readiness; no compile-time SQL query macros require a live database.
 
-6. Controlled Radio Browser import — next
-   - Import catalog data through a bounded background workflow outside the request path, with explicit source identity, update rules, observability, and deterministic tests.
-   - Do not add pgvector, embeddings, LLM parsing, authentication, or rate limiting as part of the import stage.
+6. Controlled Radio Browser import — complete
+   - Added separate provider/import-store boundaries, a bounded Radio Browser client, deterministic validation and normalization, provider-owned idempotent PostgreSQL upserts, durable import-run accounting, and a manual one-shot CLI outside HTTP startup and search.
+   - Acceptance met: the importer requires `DATABASE_URL`, sends an explicit User-Agent, bounds timeout/page size/page count/response bytes, preserves the six built-in stations, never deletes missing upstream records, logs run/page/count progress without credentials or stream URLs, and is covered by deterministic unit, local mock HTTP, and opt-in real PostgreSQL tests.
+   - pgvector, embeddings, LLM parsing, authentication, rate limiting, stream probing, and RockCast changes remain excluded.
+
+7. Semantic ranking — next
+   - Add query-parser and embedding provider traits with deterministic fakes, pgvector persistence, and a metadata-safe ranking path that never sends the full catalog to an LLM.
+   - Preserve the current HTTP contract and deterministic fallback while semantic behavior is introduced incrementally.
