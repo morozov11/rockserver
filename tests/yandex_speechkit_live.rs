@@ -34,8 +34,12 @@ async fn recognizes_real_ogg_opus_voice_command_with_safe_logs() {
 
     let api_key = required_env("YANDEX_AI_API_KEY");
     let folder_id = required_env("YANDEX_FOLDER_ID");
-    let audio_path = required_env(TEST_AUDIO_PATH_ENV);
-    let expected_transcript = required_env(TEST_EXPECTED_TRANSCRIPT_ENV);
+    let audio_path = env::var(TEST_AUDIO_PATH_ENV)
+        .unwrap_or_else(|_| fixture_path("calm-jazz-command.ogg").display().to_string());
+    let expected_transcript = env::var(TEST_EXPECTED_TRANSCRIPT_ENV).unwrap_or_else(|_| {
+        fs::read_to_string(fixture_path("calm-jazz-command.expected.txt"))
+            .expect("the committed expected transcript fixture must be readable")
+    });
     let locale = env::var(TEST_LOCALE_ENV).unwrap_or_else(|_| "ru-RU".to_owned());
     let audio = fs::read(&audio_path)
         .unwrap_or_else(|_| panic!("{TEST_AUDIO_PATH_ENV} must name a readable file"));
@@ -121,6 +125,15 @@ struct RecognitionResponse {
 
 fn required_env(name: &str) -> String {
     env::var(name).unwrap_or_else(|_| panic!("{name} must be set to run this live test"))
+}
+
+/// Resolves a committed SpeechKit fixture relative to the repository root.
+fn fixture_path(file_name: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("speechkit")
+        .join(file_name)
 }
 
 fn normalize(value: &str) -> String {
