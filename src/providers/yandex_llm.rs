@@ -5,7 +5,7 @@ use std::{env, error::Error, fmt, time::Duration};
 use async_trait::async_trait;
 use reqwest::{Url, header};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::search::{LlmProvider, LlmProviderError, LlmRequest, MAX_LLM_INTENT_JSON_BYTES};
 
@@ -205,13 +205,25 @@ impl YandexLlmProvider {
             .map_err(|_| YandexLlmConfigError::InvalidTimeout)?;
         Ok(Self { config, client })
     }
-}
 
-#[async_trait]
-impl LlmProvider for YandexLlmProvider {
-    async fn generate_json(&self, request: &LlmRequest) -> Result<String, LlmProviderError> {
-        let body = json!({
-            "modelUri": self.config.model_uri(),
+    /// Returns a diagnostic request body with the folder identifier redacted.
+    pub fn safe_request_body(&self, request: &LlmRequest) -> Value {
+        self.request_body(request, true)
+    }
+
+    /// Returns the non-secret official endpoint used by this provider.
+    pub fn endpoint(&self) -> &Url {
+        &self.config.endpoint
+    }
+
+    fn request_body(&self, request: &LlmRequest, redact_folder: bool) -> Value {
+        let model_uri = if redact_folder {
+            format!("gpt://[REDACTED]/{}/latest", self.config.model)
+        } else {
+            self.config.model_uri()
+        };
+        json!({
+            "modelUri": model_uri,
             "completionOptions": {
                 "stream": false,
                 "temperature": 0.0,
@@ -223,7 +235,21 @@ impl LlmProvider for YandexLlmProvider {
                 {"role": "user", "text": json!({"command": request.command(), "locale": request.locale()}).to_string()}
             ],
             "jsonSchema": {"schema": request.response_schema()}
-        });
+        })
+    }
+}
+
+#[async_trait]
+impl LlmProvider for YandexLlmProvider {
+    async fn generate_json(&self, request: &LlmRequest) -> Result<String, LlmProviderError> {
+        let body = self.request_body(request, false);
+        tracing::debug!(
+            method = "POST",
+            endpoint = %self.config.endpoint,
+            authorization = "Api-Key [REDACTED]",
+            request_body = %self.safe_request_body(request),
+            "Yandex LLM request"
+        );
         let response = self
             .client
             .post(self.config.endpoint.clone())
@@ -241,13 +267,31 @@ impl LlmProvider for YandexLlmProvider {
                     LlmProviderError::safe("Yandex LLM request failed")
                 }
             })?;
-        if !response.status().is_success() {
+        let status = response.status();
+        if !status.is_success() {
+            let bytes = read_bounded(response).await?;
+            let safe_response = String::from_utf8_lossy(&bytes)
+                .replace(&self.config.api_key, "[REDACTED]")
+                .replace(&self.config.folder_id, "[REDACTED]");
+            tracing::debug!(
+                status = status.as_u16(),
+                response_body = %safe_response,
+                "Yandex LLM error response"
+            );
             return Err(LlmProviderError::safe(format!(
                 "Yandex LLM returned HTTP {}",
-                response.status().as_u16()
+                status.as_u16()
             )));
         }
         let bytes = read_bounded(response).await?;
+        let safe_response = String::from_utf8_lossy(&bytes)
+            .replace(&self.config.api_key, "[REDACTED]")
+            .replace(&self.config.folder_id, "[REDACTED]");
+        tracing::debug!(
+            status = status.as_u16(),
+            response_body = %safe_response,
+            "Yandex LLM response"
+        );
         let envelope = serde_json::from_slice::<CompletionEnvelope>(&bytes)
             .map_err(|_| LlmProviderError::safe("Yandex LLM returned a malformed response"))?;
         let text = envelope

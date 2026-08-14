@@ -14,6 +14,8 @@ pub mod search;
 pub mod speech;
 /// Structured tracing setup.
 pub mod telemetry;
+/// Typed voice-command models and replaceable interpretation boundary.
+pub mod voice_command;
 
 use std::{future::Future, io};
 

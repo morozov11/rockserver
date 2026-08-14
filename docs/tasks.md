@@ -157,3 +157,11 @@
 - Goal: make a live SpeechKit recognition mismatch directly inspectable by the developer.
 - Result: `TEST_YANDEX_STT_DEBUG=1` logs the endpoint, non-secret query fields, audio path and size, expected transcript, raw successful JSON response, and recognized transcript. The `Authorization` header is represented only as `Api-Key [REDACTED]`.
 - Status: complete.
+
+## RS-015 — 2026-08-14 — Structured voice-command interpretation
+
+- Goal: turn final SpeechKit text into a strict typed player command through Yandex structured output, while keeping the LLM provider replaceable and ordinary tests offline.
+- Scope: serde-backed `VoiceCommand`, `Intent`, and `RadioQuery`; provider-neutral `CommandInterpreter`; strict Yandex-compatible JSON Schema; semantic validation and normalization; secret-safe bounded HTTP diagnostics; unit coverage; and a separate ignored `yandex_llm_live` target with calm-jazz, Russian-rock, next-station, and volume exact tests.
+- Result: `LlmCommandInterpreter` sends only transcript and locale through the existing `LlmProvider`, deserializes the provider JSON directly, and rejects invalid intent/field combinations without an heuristic parser. Yandex diagnostics log method, endpoint, redacted authorization/folder, request body, status, and bounded response body; configured API keys and folder IDs are removed. Yandex requires every schema field to be listed as required, with nullable values used for intent-specific omissions; both voice-command and existing search-intent schemas now follow that constraint.
+- Checks: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test` passed with 50 regular tests, four Yandex LLM live tests ignored, the existing SpeechKit live test ignored, and the PostgreSQL integration ignored. `cargo test --test yandex_llm_live -- --ignored --exact interprets_real_voice_command_with_safe_logs --nocapture` passed live with HTTP 200 and a typed calm-jazz command; logs exposed no credential or folder identifier. `graphify update .` rebuilt the local graph to 774 nodes, 1,692 edges, and 37 communities, with only the known zero-node `hooks.json` warning and stale community labels.
+- Status: complete.
