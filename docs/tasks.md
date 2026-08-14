@@ -144,7 +144,7 @@
 
 - Goal: create the repository's real voice-command fixture through Yandex TTS using the configured environment without exposing credentials.
 - Result: added opt-in `generate_speechkit_fixture`, which sends only the fixed command text to the documented TTS v1 endpoint, bounds and validates the Ogg response, and writes the Ogg fixture and expected transcript only after success. It uses service-account API-key authentication and does not send or require `folderId`, as SpeechKit derives the folder from the key's service account. The live STT test now uses these committed files by default and retains optional overrides. Two explicit TTS runs, before and after that correction, returned HTTP 401; no audio fixture was generated and no secret or provider body was logged.
-- Status: implementation complete; fixture generation is blocked until `YANDEX_AI_API_KEY` is replaced with a valid Yandex Cloud service-account API key that has SpeechKit TTS/STT permission (or the environment is otherwise corrected).
+- Status: complete. After local authorization was corrected, the generated Ogg fixture was sent to the live STT test on 2026-08-14 and returned HTTP 200 with a normalized expected-command match. No credential or transcript was logged.
 
 ## RS-013 вЂ” 2026-08-14 вЂ” Safe SpeechKit fixture diagnostics
 
