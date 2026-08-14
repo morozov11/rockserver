@@ -22,19 +22,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     dotenvy::dotenv().ok();
 
     let api_key = required_env("YANDEX_AI_API_KEY")?;
-    let folder_id = required_env("YANDEX_FOLDER_ID")?;
+    required_env("YANDEX_FOLDER_ID")?;
     let started = std::time::Instant::now();
     let response = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()?
         .post(TTS_SYNTHESIZE_URL)
         .header(header::AUTHORIZATION, format!("Api-Key {api_key}"))
-        .form(&[
-            ("text", COMMAND_TEXT),
-            ("lang", LANGUAGE),
-            ("voice", VOICE),
-            ("folderId", folder_id.as_str()),
-        ])
+        .form(&[("text", COMMAND_TEXT), ("lang", LANGUAGE), ("voice", VOICE)])
         .send()
         .await?;
     let status = response.status();

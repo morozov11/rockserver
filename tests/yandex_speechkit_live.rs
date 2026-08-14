@@ -33,7 +33,7 @@ async fn recognizes_real_ogg_opus_voice_command_with_safe_logs() {
     dotenvy::dotenv().ok();
 
     let api_key = required_env("YANDEX_AI_API_KEY");
-    let folder_id = required_env("YANDEX_FOLDER_ID");
+    required_env("YANDEX_FOLDER_ID");
     let audio_path = env::var(TEST_AUDIO_PATH_ENV)
         .unwrap_or_else(|_| fixture_path("calm-jazz-command.ogg").display().to_string());
     let expected_transcript = env::var(TEST_EXPECTED_TRANSCRIPT_ENV).unwrap_or_else(|_| {
@@ -68,7 +68,6 @@ async fn recognizes_real_ogg_opus_voice_command_with_safe_logs() {
         .query(&[
             ("topic", "general"),
             ("lang", locale.as_str()),
-            ("folderId", folder_id.as_str()),
             ("format", "oggopus"),
         ])
         .body(audio)
