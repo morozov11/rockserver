@@ -86,7 +86,7 @@ limits, and terminal errors.
 
 ## Opt-in real SpeechKit voice test
 
-`tests/yandex_speechkit_live.rs` is an ignored, billable integration test for a real pre-recorded mono Ogg/Opus voice command. Its committed fixture is `tests/fixtures/speechkit/calm-jazz-command.ogg`, and `calm-jazz-command.expected.txt` holds the expected phrase. Generate or refresh that fixture explicitly through Yandex TTS (also billable) with `cargo run --bin generate_speechkit_fixture`; it uses `YANDEX_AI_API_KEY` and `YANDEX_FOLDER_ID` from the environment (or optional ignored local `.env`) and never prints the key or provider response body. The recognition test logs only a generated test ID, HTTP status, elapsed time, recognized character count, and whether the expected command matched; it never logs the key, recording, transcript, or expected phrase.
+`tests/yandex_speechkit_live.rs` is an ignored, billable integration test for a real pre-recorded mono Ogg/Opus voice command. Its committed fixture is `tests/fixtures/speechkit/calm-jazz-command.ogg`, and `calm-jazz-command.expected.txt` holds the expected phrase. Generate or refresh that fixture explicitly through Yandex TTS (also billable) with `cargo run --bin generate_speechkit_fixture`; it reads `YANDEX_AI_API_KEY` from the environment (or optional ignored local `.env`) and never prints the key or provider response body. The recognition test logs only a generated test ID, HTTP status, elapsed time, recognized character count, and whether the expected command matched; it never logs the key, recording, transcript, or expected phrase.
 
 ```text
 cargo test --test yandex_speechkit_live -- --ignored --exact recognizes_real_ogg_opus_voice_command_with_safe_logs --nocapture

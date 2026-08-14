@@ -22,7 +22,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     dotenvy::dotenv().ok();
 
     let api_key = required_env("YANDEX_AI_API_KEY")?;
-    required_env("YANDEX_FOLDER_ID")?;
     let started = std::time::Instant::now();
     let response = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
