@@ -84,6 +84,18 @@ The streaming endpoint is `ws://127.0.0.1:3000/api/v1/voice/stream`. Send a text
 little-endian mono frames, then `{"type":"commit"}`. See `api/openapi.yaml` for all events,
 limits, and terminal errors.
 
+## Opt-in real SpeechKit voice test
+
+`tests/yandex_speechkit_live.rs` is an ignored, billable integration test for a real pre-recorded mono Ogg/Opus voice command. It uses `YANDEX_AI_API_KEY` and `YANDEX_FOLDER_ID` from the environment (or optional ignored local `.env`), plus a local untracked recording and its expected command. It logs only a generated test ID, HTTP status, elapsed time, recognized character count, and whether the expected command matched; it never logs the key, recording, transcript, or expected phrase.
+
+```text
+TEST_YANDEX_STT_AUDIO_PATH=C:\path\to\voice-command.ogg \
+TEST_YANDEX_STT_EXPECTED_TRANSCRIPT="включи спокойный джаз" \
+cargo test --test yandex_speechkit_live -- --ignored --exact recognizes_real_ogg_opus_voice_command_with_safe_logs --nocapture
+```
+
+The recording must be one channel, Ogg/Opus, at most 1 MiB and 30 seconds. The API key needs a SpeechKit STT scope in addition to any AI Studio permissions. This test is intentionally separate from the provider-neutral streaming API: it verifies Yandex's synchronous pre-recorded-audio endpoint and does not add a production SpeechKit adapter.
+
 The real database integration test is opt-in so ordinary tests need no Docker or network:
 
 ```text
