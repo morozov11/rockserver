@@ -149,5 +149,5 @@
 ## RS-013 вЂ” 2026-08-14 вЂ” Safe SpeechKit fixture diagnostics
 
 - Goal: make the failed live TTS request inspectable without exposing the configured API key.
-- Result: `YANDEX_SPEECHKIT_DEBUG=1 cargo run --bin generate_speechkit_fixture` prints the fixed non-secret request fields, redacted authorization, response status/headers, and a 16 KiB bounded redacted non-success response body. It intentionally does not print the credential or raw unbounded provider content.
+- Result: `YANDEX_SPEECHKIT_DEBUG=1 cargo run --bin generate_speechkit_fixture` prints the fixed non-secret request fields, redacted authorization, response status/headers, and a 16 KiB bounded redacted non-success response body. It also removes provider-echoed key-like fragments. It intentionally does not print the credential or raw unbounded provider content.
 - Status: complete.

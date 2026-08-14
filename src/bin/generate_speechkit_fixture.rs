@@ -125,6 +125,19 @@ fn redact(value: &str) -> String {
             search_start = value_start + "[REDACTED]".len();
         }
     }
+    let mut search_start = 0;
+    loop {
+        let lowercased_suffix = sanitized[search_start..].to_ascii_lowercase();
+        let Some(offset) = lowercased_suffix.find("api key '") else {
+            break;
+        };
+        let value_start = search_start + offset + "api key '".len();
+        let value_end = sanitized[value_start..]
+            .find('\'')
+            .map_or(sanitized.len(), |offset| value_start + offset);
+        sanitized.replace_range(value_start..value_end, "[REDACTED]");
+        search_start = value_start + "[REDACTED]".len();
+    }
     sanitized
 }
 
@@ -142,12 +155,16 @@ mod tests {
 
     #[test]
     fn diagnostic_redaction_removes_each_authorization_value() {
-        let value = "Api-Key first-token; Bearer second-token";
+        let value = "Api-Key first-token; Bearer second-token; Unknown api key 'fingerprint'";
 
         let redacted = redact(value);
 
         assert!(!redacted.contains("first-token"));
         assert!(!redacted.contains("second-token"));
-        assert_eq!(redacted, "Api-Key [REDACTED] Bearer [REDACTED]");
+        assert!(!redacted.contains("fingerprint"));
+        assert_eq!(
+            redacted,
+            "Api-Key [REDACTED] Bearer [REDACTED] Unknown api key '[REDACTED]'"
+        );
     }
 }
