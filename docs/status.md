@@ -4,9 +4,19 @@ Last updated: 2026-08-14
 
 ## Current state
 
-Stages 0–7 are complete in the current working tree: repository bootstrap, Axum HTTP skeleton, OpenAPI search contract, deterministic in-memory search, PostgreSQL persistence, controlled Radio Browser import, and RS-007 semantic ranking foundation.
+The active product direction is Windows-first: RockCast text search, Windows microphone capture, the RockServer voice/STT path, and production hardening will be completed and validated before any ESP32 work. The ordered plan is recorded in `docs/windows-production-roadmap.md`. ESP32 is future backlog, not a current delivery stage.
+
+RS-007 was re-verified on 2026-08-14 against the disposable local `rockserver` database on PostgreSQL 18.1 with pgvector 0.8.6. A clean `public` schema accepted migrations 1–4, the ignored real integration test passed, and two deterministic development backfills produced seven unique 32-dimensional station embeddings with no duplicate provenance keys. A live HTTP smoke check reported both health endpoints ready and returned hybrid-ranked `jazz` results. Credentials remain environment-only.
+
+Stages 0–9 are complete in the current working tree: repository bootstrap, Axum HTTP skeleton, OpenAPI search contract, deterministic in-memory search, PostgreSQL persistence, controlled Radio Browser import, RS-007 semantic ranking foundation, RS-008 voice-command JSON contract, and the provider-neutral streaming voice API.
 
 `POST /v1/search` keeps the existing request and response schemas. `SearchService` now owns request-only query interpretation and optional query embedding before calling `StationRepository`. The in-memory repository remains metadata-only. PostgreSQL uses exact pgvector cosine similarity when the query and station embedding provenance match, and otherwise preserves metadata fallback.
+
+RS-008 stabilizes the Windows voice-command transport contract without introducing audio upload or an STT provider. The canonical route is `POST /api/v1/voice/command`; `POST /v1/voice/command` is a deprecated compatibility alias with identical behavior. Both accept only an already-recognized `transcript` plus the established locale, limit, and station-exclusion controls, then delegate to the existing `SearchService`. A successful response returns the trimmed transcript, normalized query, full deterministic result list, and `selected_station` equal to the first result or `null` when there is no match. Existing `POST /v1/search` remains unchanged.
+
+The JSON voice route retains its existing limits and error behavior. Canonical WebSocket `GET /api/v1/voice/stream` (deprecated alias `/v1/voice/stream`) now accepts a validated start event and bounded PCM16 mono binary chunks, emits partial/final transcript events, and resolves the final transcript through `SearchService`. Chunks are limited to 65,536 bytes, sessions to 10 MiB, provider operations to ten seconds, and search to five seconds. Terminal WebSocket errors retain `code`, `message`, `request_id`, and `details`.
+
+The new `StreamingSpeechRecognizer`/`SpeechStreamSession` traits make Yandex and OpenAI replaceable without exposing credentials or upstream protocol details to clients. Startup currently installs an unavailable recognizer, so the wire protocol is implemented and deterministically tested but real audio decoding requires the next provider-adapter task.
 
 The query parser and embedding provider are traits. The deterministic metadata parser is the default and the parser failure fallback. The only concrete embedding provider is `deterministic-dev`, an explicitly non-production, hash-based local fixture. No LLM, OpenAI, or external model provider is present, and ordinary tests make no provider or external network call.
 
@@ -52,11 +62,13 @@ The unbounded vector column deliberately avoids locking schema to a random test/
 - The backfill currently visits all stations and upserts every embedding; it does not yet skip unchanged station/model inputs or resume a failed run from durable workflow state.
 - A model/version is expected to imply one dimension, but RS-007 records/enforces compatibility per row rather than introducing a separate model registry.
 - Existing Radio Browser pagination, stale-run, language-code, and upstream-health limitations from RS-006 remain.
-- Authentication, rate limiting, metrics, scheduler, stream probing, voice input, deployment hardening, and RockCast client integration remain out of scope.
+- RockCast does not yet call the canonical voice-command route or distinguish its timeout/error outcomes in the UI.
+- The streaming wire protocol and validation are implemented, but no production Yandex/OpenAI adapter, provider retries/circuit breaking, credentials, or RockCast microphone client is configured yet.
+- Authentication, rate limiting, metrics, scheduler, stream probing, and deployment hardening remain out of scope.
 
 ## Verification
 
-The regular all-target/all-feature suite passes with deterministic unit and HTTP coverage; the real PostgreSQL integration is opt-in. Unit coverage includes query-parser request boundaries, parser and embedding failure fallback, deterministic fake embeddings, model/dimension/value validation, controlled backfill, hybrid weights, exclusions, limits, and stable station-ID ordering.
+The regular all-target/all-feature suite passes with 41 deterministic unit, HTTP, contract, and WebSocket tests; the real PostgreSQL integration remains opt-in and ignored by default. Coverage includes a real loopback WebSocket upgrade with fake recognition, binary audio delivery, partial/final transcripts, request-ID propagation, and final station selection, alongside the existing query, provider-fallback, embedding, ranking, and persistence boundaries.
 
 Docker Engine 29.7.2 and Compose 5.3.1 ran isolated project `rockserver-rs007-test` on host port 55438 with `pgvector/pgvector:pg17`. The real integration test passed for extension/migrations, embedding insert and repeat update, provenance/dimension storage, exact cosine similarity, hard filters, exclusions, final limit, semantic tie-break, metadata fallback, HTTP search, and repository-only readiness. The real deterministic backfill command also completed twice; inspection showed seven unique development rows for `rockserver-deterministic-dev:1:8`. Only that project's container, network, and volume were removed afterward.
 
@@ -64,4 +76,4 @@ Final formatting, strict Clippy, all-target/all-feature tests, diff whitespace, 
 
 ## Next step
 
-Make the smallest RockCast change needed for remote text search while retaining its local station catalog as offline/unavailable-service fallback. Do not add voice input or broader operations in that stage.
+Implement and select the first production `StreamingSpeechRecognizer` adapter (Yandex SpeechKit v3 is the preferred Russian MVP), then connect RockCast microphone capture with timeout/cancellation and local-catalog fallback. Add OpenAI behind the same trait after the shared conformance tests pass.

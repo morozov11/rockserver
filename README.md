@@ -4,7 +4,7 @@ RockServer is a planned Rust service for AI-assisted internet radio discovery. A
 
 ## Current status
 
-The repository contains a Rust edition 2024 Axum service. `POST /v1/search` uses provider-neutral query interpretation, optional embeddings, and a replaceable repository boundary. PostgreSQL provides exact pgvector-backed hybrid ranking when compatible query and station embeddings exist; otherwise the established deterministic metadata ranking remains authoritative. Without `DATABASE_URL`, the same six-station catalog runs in memory with metadata fallback. Versioned migrations create catalog, import-run, and provenance-aware embedding storage. Separate one-shot CLIs import Radio Browser data and backfill embeddings outside HTTP startup and the request path. `GET /health/live` depends only on the process, while `GET /health/ready` checks only PostgreSQL in database mode. There is no production LLM/embedding provider, authentication, rate limiting, stream probing, or RockCast integration yet.
+The repository contains a Rust edition 2024 Axum service. `POST /v1/search` uses provider-neutral query interpretation, optional embeddings, and a replaceable repository boundary. Canonical `POST /api/v1/voice/command` accepts an already-recognized text transcript. Canonical WebSocket `GET /api/v1/voice/stream` accepts bounded PCM16 mono chunks, emits incremental/final transcripts through a replaceable streaming recognizer, and resolves the final transcript through the same search path. Deprecated `/v1/voice/*` aliases remain for compatibility. PostgreSQL provides exact pgvector-backed hybrid ranking when compatible query and station embeddings exist; otherwise deterministic metadata ranking remains authoritative. No production Yandex/OpenAI recognizer is selected at startup yet, so an unconfigured stream terminates with `speech_provider_unavailable`.
 
 ## Intended architecture
 
@@ -31,10 +31,11 @@ See [docs/architecture.md](docs/architecture.md) for boundaries and the planned 
 5. PostgreSQL persistence, migrations, development seed, and dependency-aware readiness — complete.
 6. Controlled Radio Browser import outside the request path — complete.
 7. Semantic ranking behind query-parser and embedding provider traits — complete.
-8. Small RockCast integration changes for remote search with local fallback — next.
-9. Voice input only after text search is stable, followed by stream health checks, metrics, rate limiting, and deployment.
+8. Stable server-side voice-command JSON contract with request IDs, validation, body/time boundaries, and deterministic search reuse — complete.
+9. Provider-neutral WebSocket audio/STT contract and deterministic integration coverage — complete.
+10. Configure a production Yandex or OpenAI recognizer and connect RockCast microphone capture — next.
 
-RS-007 is complete. The next work is a small RockCast integration for remote text search with the existing local catalog retained as fallback; detailed acceptance criteria remain in [TODO.md](TODO.md).
+RS-008 stabilizes the voice-command JSON contract. The next work is a small RockCast integration using its recognized transcript output, retaining the local catalog as fallback; detailed acceptance criteria remain in [TODO.md](TODO.md).
 
 ## Build and test
 
@@ -73,7 +74,14 @@ Check readiness and seeded search after startup:
 ```text
 curl http://127.0.0.1:3000/health/ready
 curl -X POST http://127.0.0.1:3000/v1/search -H "content-type: application/json" -d '{"query":"calm instrumental jazz"}'
+
+curl -X POST http://127.0.0.1:3000/api/v1/voice/command -H "content-type: application/json" -H "x-request-id: windows-voice-1" -d '{"transcript":"calm instrumental jazz"}'
 ```
+
+The streaming endpoint is `ws://127.0.0.1:3000/api/v1/voice/stream`. Send a text frame
+`{"type":"start","locale":"ru-RU","sample_rate_hz":16000}`, binary PCM signed 16-bit
+little-endian mono frames, then `{"type":"commit"}`. See `api/openapi.yaml` for all events,
+limits, and terminal errors.
 
 The real database integration test is opt-in so ordinary tests need no Docker or network:
 

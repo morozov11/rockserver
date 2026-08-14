@@ -10,6 +10,8 @@ pub mod persistence;
 pub mod providers;
 /// Deterministic station-search domain and catalog boundary.
 pub mod search;
+/// Provider-neutral streaming speech recognition boundaries.
+pub mod speech;
 /// Structured tracing setup.
 pub mod telemetry;
 

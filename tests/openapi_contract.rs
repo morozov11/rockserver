@@ -18,7 +18,15 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         .expect("OpenAPI version must be a string");
     assert!(version.starts_with("3."), "expected OpenAPI 3.x");
 
-    for path in ["/health/live", "/health/ready", "/v1/search"] {
+    for path in [
+        "/health/live",
+        "/health/ready",
+        "/v1/search",
+        "/api/v1/voice/command",
+        "/v1/voice/command",
+        "/api/v1/voice/stream",
+        "/v1/voice/stream",
+    ] {
         assert!(
             value_at(&document, "paths")
                 .and_then(|paths| paths.get(path))
@@ -33,6 +41,46 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
             .and_then(|search| search.get("post"))
             .is_some(),
         "search path must define POST"
+    );
+    let voice = value_at(&document, "paths")
+        .and_then(|paths| paths.get("/api/v1/voice/command"))
+        .and_then(|command| command.get("post"))
+        .expect("canonical voice-command path must define POST");
+    for status in ["200", "400", "413", "422", "500", "504"] {
+        assert!(
+            voice
+                .get("responses")
+                .and_then(|responses| responses.get(status))
+                .is_some(),
+            "voice command must document {status}"
+        );
+    }
+    assert_eq!(
+        value_at(&document, "paths")
+            .and_then(|paths| paths.get("/v1/voice/command"))
+            .and_then(|command| command.get("post"))
+            .and_then(|operation| operation.get("deprecated"))
+            .and_then(Value::as_bool),
+        Some(true),
+        "the /v1 voice route must remain an explicitly deprecated compatibility alias"
+    );
+    let voice_stream = value_at(&document, "paths")
+        .and_then(|paths| paths.get("/api/v1/voice/stream"))
+        .and_then(|stream| stream.get("get"))
+        .expect("canonical voice stream path must define GET upgrade");
+    assert!(
+        voice_stream.get("x-websocket-client-messages").is_some()
+            && voice_stream.get("x-websocket-server-messages").is_some(),
+        "voice stream must document both WebSocket message directions"
+    );
+    assert_eq!(
+        value_at(&document, "paths")
+            .and_then(|paths| paths.get("/v1/voice/stream"))
+            .and_then(|stream| stream.get("get"))
+            .and_then(|operation| operation.get("deprecated"))
+            .and_then(Value::as_bool),
+        Some(true),
+        "the /v1 stream route must remain an explicitly deprecated compatibility alias"
     );
     assert!(
         value_at(&document, "paths")
@@ -50,6 +98,14 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
     for schema in [
         "SearchRequest",
         "SearchResponse",
+        "VoiceCommandRequest",
+        "VoiceCommandResponse",
+        "VoiceStreamStart",
+        "VoiceStreamCommit",
+        "VoiceStreamReady",
+        "VoiceStreamTranscript",
+        "VoiceStreamResult",
+        "VoiceStreamError",
         "NormalizedQuery",
         "StationResult",
         "ErrorResponse",

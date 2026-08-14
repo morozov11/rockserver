@@ -1,9 +1,13 @@
 openapi: 3.1.0
 info:
   title: RockServer API
-  version: 0.2.0
+  version: 0.3.0
   description: >-
-    Contract for RockServer operational health checks and deterministic station search.
+    Contract for RockServer operational health checks, deterministic station search, and the
+    Windows voice-command JSON and streaming boundaries. `POST /api/v1/voice/command` is the canonical
+    voice-command route; `POST /v1/voice/command` is a compatibility alias with the same
+    request and response contract. `GET /api/v1/voice/stream` upgrades to the canonical
+    provider-neutral WebSocket protocol for raw PCM audio and incremental transcripts.
     PostgreSQL may use provenance-compatible semantic ranking; metadata fallback preserves
     the same schemas when embeddings are absent or unavailable.
 servers:
@@ -142,6 +146,12 @@ paths:
                 request_id: req_01JAZ400
                 details:
                   body: unexpected end of input
+        "413":
+          description: The JSON request body exceeds the 65,536-byte HTTP boundary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: The JSON is well formed but fails schema or semantic validation.
           content:
@@ -168,6 +178,252 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: An unexpected server error occurred.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/voice/command:
+    post:
+      operationId: resolveVoiceCommand
+      summary: Resolve an already-recognized voice command to a playable station
+      description: >-
+        Canonical Windows voice-command endpoint. The client supplies a bounded text transcript,
+        not audio. RockServer validates it and delegates exactly once to the existing query
+        interpretation and station-search flow. `X-Request-Id` is echoed when it contains 1–128
+        ASCII letters, digits, `_`, or `-`; otherwise RockServer generates a request ID. The same
+        ID is returned in the response JSON and `X-Request-Id` response header. The server limits
+        the JSON body to 65,536 bytes and the interpretation/search portion to five seconds.
+      parameters:
+        - name: X-Request-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9_-]+$"
+          description: Optional caller correlation ID; valid values are echoed in the response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VoiceCommandRequest"
+            example:
+              transcript: play calm instrumental jazz
+              locale: en-US
+              limit: 3
+              exclude_station_ids: [station-jazz-legacy]
+      responses:
+        "200":
+          description: The transcript was interpreted and ranked stations were returned.
+          headers:
+            X-Request-Id:
+              description: RockServer request ID, identical to `request_id` in the body.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceCommandResponse"
+              example:
+                request_id: win-voice-0001
+                transcript: play calm instrumental jazz
+                normalized_query:
+                  original: play calm instrumental jazz
+                  locale: en-US
+                  terms: [play, calm, instrumental, jazz]
+                  tags: [calm, instrumental, jazz]
+                  language: en
+                  country_code: null
+                selected_station:
+                  id: station-jazz-001
+                  name: Quiet Jazz Radio
+                  stream_url: https://streams.example.com/quiet-jazz.mp3
+                  homepage_url: https://example.com/quiet-jazz
+                  tags: [jazz, instrumental, calm]
+                  language: en
+                  country_code: US
+                  codec: MP3
+                  bitrate_kbps: 192
+                  score: 0.94
+                  reason: Matches calm instrumental jazz.
+                  health: healthy
+                stations:
+                  - id: station-jazz-001
+                    name: Quiet Jazz Radio
+                    stream_url: https://streams.example.com/quiet-jazz.mp3
+                    homepage_url: https://example.com/quiet-jazz
+                    tags: [jazz, instrumental, calm]
+                    language: en
+                    country_code: US
+                    codec: MP3
+                    bitrate_kbps: 192
+                    score: 0.94
+                    reason: Matches calm instrumental jazz.
+                    health: healthy
+        "400":
+          description: The request body is missing, is not JSON, or contains malformed JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: The JSON request body exceeds 65,536 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: request_too_large
+                message: Request body exceeds the allowed size.
+                request_id: req_01JAZ413
+                details:
+                  max_bytes: 65536
+        "422":
+          description: The JSON is well formed but fails schema or semantic validation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: validation_failed
+                message: Request validation failed.
+                request_id: req_01JAZ422
+                details:
+                  transcript: must not be empty or whitespace only
+        "500":
+          description: An unexpected catalog/search failure occurred.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Query interpretation or station search exceeded the five-second boundary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: search_timeout
+                message: Voice command search timed out.
+                request_id: req_01JAZ504
+                details:
+                  timeout_ms: 5000
+  /api/v1/voice/stream:
+    get:
+      operationId: streamVoiceCommand
+      summary: Stream microphone audio and resolve the final transcript
+      description: >-
+        Canonical WebSocket endpoint. After the HTTP upgrade the client sends one JSON
+        `VoiceStreamStart` text frame, then binary PCM signed 16-bit little-endian mono chunks,
+        and finally one JSON `VoiceStreamCommit` text frame. RockServer emits `ready`, zero or
+        more `transcript`, and one terminal `result` or `error` event. Each binary message is
+        limited to 65,536 bytes and the session to 10 MiB. Provider operations time out after
+        ten seconds; final station search retains the five-second voice-command boundary.
+      parameters:
+        - name: X-Request-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9_-]+$"
+      responses:
+        "101":
+          description: >-
+            Switching Protocols. WebSocket text frames conform to the schemas referenced by
+            `x-websocket-client-messages` and `x-websocket-server-messages`.
+          headers:
+            X-Request-Id:
+              schema:
+                type: string
+        "400":
+          description: The HTTP request is not a valid WebSocket upgrade request.
+      x-websocket-client-messages:
+        oneOf:
+          - $ref: "#/components/schemas/VoiceStreamStart"
+          - $ref: "#/components/schemas/VoiceStreamCommit"
+      x-websocket-server-messages:
+        oneOf:
+          - $ref: "#/components/schemas/VoiceStreamReady"
+          - $ref: "#/components/schemas/VoiceStreamTranscript"
+          - $ref: "#/components/schemas/VoiceStreamResult"
+          - $ref: "#/components/schemas/VoiceStreamError"
+  /v1/voice/stream:
+    get:
+      operationId: streamVoiceCommandCompatibility
+      deprecated: true
+      summary: Compatibility alias for the canonical voice streaming endpoint
+      responses:
+        "101":
+          description: Same WebSocket protocol as `/api/v1/voice/stream`.
+        "400":
+          description: The HTTP request is not a valid WebSocket upgrade request.
+  /v1/voice/command:
+    post:
+      operationId: resolveVoiceCommandCompatibility
+      deprecated: true
+      summary: Compatibility alias for the canonical voice-command endpoint
+      description: >-
+        Compatibility alias for `POST /api/v1/voice/command`. It has exactly the same request,
+        response, validation, timeout, and error semantics. New Windows clients must use the
+        canonical `/api/v1/voice/command` route.
+      parameters:
+        - name: X-Request-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9_-]+$"
+          description: Optional caller correlation ID; valid values are echoed in the response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VoiceCommandRequest"
+      responses:
+        "200":
+          description: Same response as the canonical endpoint.
+          headers:
+            X-Request-Id:
+              description: RockServer request ID, identical to `request_id` in the body.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceCommandResponse"
+        "400":
+          description: Same error semantics as the canonical endpoint.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Same error semantics as the canonical endpoint.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Same error semantics as the canonical endpoint.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Same error semantics as the canonical endpoint.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Same error semantics as the canonical endpoint.
           content:
             application/json:
               schema:
@@ -227,6 +483,158 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/StationResult"
+    VoiceCommandRequest:
+      type: object
+      additionalProperties: false
+      required: [transcript]
+      properties:
+        transcript:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: >-
+            Already-recognized command text. Whitespace-only values are invalid. Audio bytes,
+            STT-provider options, and provider credentials are deliberately not accepted.
+        locale:
+          type: string
+          default: en-US
+          pattern: "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+          description: Maximum number of ranked stations, including `selected_station` when one exists.
+        exclude_station_ids:
+          type: array
+          default: []
+          uniqueItems: true
+          maxItems: 100
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+    VoiceCommandResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, transcript, normalized_query, selected_station, stations]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+        transcript:
+          type: string
+          description: Accepted transcript after trimming leading and trailing whitespace.
+        normalized_query:
+          $ref: "#/components/schemas/NormalizedQuery"
+        selected_station:
+          oneOf:
+            - $ref: "#/components/schemas/StationResult"
+            - type: "null"
+          description: First ranked station, or null when no station matches the command.
+        stations:
+          type: array
+          description: All ranked matches in the established deterministic order; the first equals `selected_station` when present.
+          items:
+            $ref: "#/components/schemas/StationResult"
+    VoiceStreamStart:
+      type: object
+      additionalProperties: false
+      required: [type, sample_rate_hz]
+      properties:
+        type:
+          const: start
+        locale:
+          type: string
+          default: en-US
+          pattern: "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+        sample_rate_hz:
+          type: integer
+          enum: [8000, 16000, 24000, 48000]
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+        exclude_station_ids:
+          type: array
+          default: []
+          uniqueItems: true
+          maxItems: 100
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+    VoiceStreamCommit:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: commit
+    VoiceStreamReady:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, audio_format, sample_rate_hz]
+      properties:
+        type:
+          const: ready
+        request_id:
+          type: string
+        audio_format:
+          const: pcm_s16le
+        sample_rate_hz:
+          type: integer
+    VoiceStreamTranscript:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, transcript, is_final]
+      properties:
+        type:
+          const: transcript
+        request_id:
+          type: string
+        transcript:
+          type: string
+        is_final:
+          type: boolean
+    VoiceStreamResult:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, transcript, normalized_query, selected_station, stations]
+      properties:
+        type:
+          const: result
+        request_id:
+          type: string
+        transcript:
+          type: string
+        normalized_query:
+          $ref: "#/components/schemas/NormalizedQuery"
+        selected_station:
+          oneOf:
+            - $ref: "#/components/schemas/StationResult"
+            - type: "null"
+        stations:
+          type: array
+          items:
+            $ref: "#/components/schemas/StationResult"
+    VoiceStreamError:
+      type: object
+      additionalProperties: false
+      required: [type, code, message, request_id, details]
+      properties:
+        type:
+          const: error
+        code:
+          type: string
+        message:
+          type: string
+        request_id:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
     NormalizedQuery:
       type: object
       additionalProperties: false

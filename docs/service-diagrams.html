@@ -98,7 +98,7 @@
     <section id="inside">
       <h2>3. Внутренняя схема RockServer</h2>
       <div class="grid">
-        <article class="card current"><span class="badge current">CURRENT</span><h3>Axum API</h3><p><code>GET /health/live</code>, DB-aware <code>GET /health/ready</code>, <code>POST /v1/search</code>.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>Axum API</h3><p><code>GET /health/live</code>, DB-aware <code>GET /health/ready</code>, <code>POST /v1/search</code>, canonical JSON <code>POST /api/v1/voice/command</code>, and WebSocket <code>GET /api/v1/voice/stream</code>.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>tracing / config</h3><p>JSON tracing, HTTP и import config, run/page/count logs, graceful shutdown.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>DTO / validation</h3><p>Transport DTO, request_id и contract-compliant ошибки.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>SearchService</h3><p>Нормализованный запрос и стабильное repository-neutral ранжирование.</p></article>
@@ -129,6 +129,7 @@
     </section>
 
     <section id="contract">
+      <p><strong>CURRENT:</strong> JSON voice commands remain stable. WebSocket <code>GET /api/v1/voice/stream</code> adds bounded PCM16 mono chunks, partial/final transcript events, provider-neutral STT sessions, and final <code>SearchService</code> resolution. The default production process reports <code>speech_provider_unavailable</code> until a Yandex/OpenAI adapter is configured.</p>
       <h2>5. Контракт и ошибки</h2>
       <div class="flow">
         <article class="node current"><h3>SearchRequest</h3><p><code>query</code>, <code>locale</code>, <code>limit</code>, <code>exclude_station_ids</code>.</p></article>
@@ -159,7 +160,8 @@
         <li class="card current"><span class="badge current">CURRENT ✓</span><h3>Radio Browser import</h3></li>
         <li class="card current"><span class="badge current">CURRENT ✓</span><h3>Semantic foundation</h3></li>
         <li class="card next"><span class="badge next">NEXT</span><h3>RockCast integration</h3></li>
-        <li class="card future"><span class="badge future">FUTURE</span><h3>Voice / operations</h3></li>
+        <li class="card current"><span class="badge current">CURRENT ✓</span><h3>Voice-command contract</h3></li>
+        <li class="card next"><span class="badge next">NEXT</span><h3>Yandex/OpenAI adapter + RockCast capture</h3></li>
       </ol>
     </section>
   </main>
