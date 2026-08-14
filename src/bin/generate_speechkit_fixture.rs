@@ -13,8 +13,10 @@ const COMMAND_TEXT: &str = "Включи спокойный джаз";
 const LANGUAGE: &str = "ru-RU";
 const VOICE: &str = "filipp";
 const MAX_AUDIO_BYTES: usize = 1_024 * 1_024;
+const MAX_ERROR_BODY_BYTES: usize = 16 * 1_024;
 const AUDIO_OUTPUT: &str = "tests/fixtures/speechkit/calm-jazz-command.ogg";
 const TRANSCRIPT_OUTPUT: &str = "tests/fixtures/speechkit/calm-jazz-command.expected.txt";
+const DEBUG_ENV: &str = "YANDEX_SPEECHKIT_DEBUG";
 
 /// Synthesizes the repository's opt-in SpeechKit recognition fixture.
 #[tokio::main]
@@ -22,6 +24,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     dotenvy::dotenv().ok();
 
     let api_key = required_env("YANDEX_AI_API_KEY")?;
+    let debug = env::var(DEBUG_ENV).is_ok_and(|value| value == "1");
+    if debug {
+        eprintln!(
+            "Yandex TTS request: method=POST url={TTS_SYNTHESIZE_URL} authorization=Api-Key [REDACTED] content_type=application/x-www-form-urlencoded text={COMMAND_TEXT:?} lang={LANGUAGE} voice={VOICE}"
+        );
+    }
     let started = std::time::Instant::now();
     let response = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
@@ -32,7 +40,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .send()
         .await?;
     let status = response.status();
+    if debug {
+        eprintln!(
+            "Yandex TTS response: status={} headers={:?} elapsed_ms={}",
+            status.as_u16(),
+            response.headers(),
+            started.elapsed().as_millis()
+        );
+    }
     if status != StatusCode::OK {
+        if debug {
+            let error_body = read_bounded_with_limit(response, MAX_ERROR_BODY_BYTES).await?;
+            eprintln!(
+                "Yandex TTS error body (redacted, {} byte limit): {}",
+                MAX_ERROR_BODY_BYTES,
+                redact(&String::from_utf8_lossy(&error_body))
+            );
+        }
         return Err(format!("Yandex TTS returned HTTP {}", status.as_u16()).into());
     }
     if response
@@ -64,11 +88,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 /// Reads a response body without allowing it to exceed the fixture size budget.
-async fn read_bounded(mut response: reqwest::Response) -> Result<Vec<u8>, Box<dyn Error>> {
+async fn read_bounded(response: reqwest::Response) -> Result<Vec<u8>, Box<dyn Error>> {
+    read_bounded_with_limit(response, MAX_AUDIO_BYTES).await
+}
+
+/// Reads a response body without allowing it to exceed the supplied byte limit.
+async fn read_bounded_with_limit(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>, Box<dyn Error>> {
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await? {
-        if bytes.len().saturating_add(chunk.len()) > MAX_AUDIO_BYTES {
-            return Err("Yandex TTS response exceeds the 1 MiB fixture limit".into());
+        if bytes.len().saturating_add(chunk.len()) > max_bytes {
+            return Err("Yandex TTS response exceeds the configured byte limit".into());
         }
         bytes.extend_from_slice(&chunk);
     }
@@ -78,10 +110,44 @@ async fn read_bounded(mut response: reqwest::Response) -> Result<Vec<u8>, Box<dy
     Ok(bytes)
 }
 
+/// Removes authorization-style values from diagnostic provider text before it is printed.
+fn redact(value: &str) -> String {
+    let mut sanitized = value.to_owned();
+    for marker in ["Api-Key ", "Bearer "] {
+        let mut search_start = 0;
+        while let Some(offset) = sanitized[search_start..].find(marker) {
+            let start = search_start + offset;
+            let value_start = start + marker.len();
+            let value_end = sanitized[value_start..]
+                .find(|character: char| character.is_whitespace() || character == '"')
+                .map_or(sanitized.len(), |offset| value_start + offset);
+            sanitized.replace_range(value_start..value_end, "[REDACTED]");
+            search_start = value_start + "[REDACTED]".len();
+        }
+    }
+    sanitized
+}
+
 /// Reads a required non-empty environment variable without exposing its value.
 fn required_env(name: &str) -> Result<String, Box<dyn Error>> {
     match env::var(name) {
         Ok(value) if !value.trim().is_empty() => Ok(value),
         _ => Err(format!("{name} must be configured").into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact;
+
+    #[test]
+    fn diagnostic_redaction_removes_each_authorization_value() {
+        let value = "Api-Key first-token; Bearer second-token";
+
+        let redacted = redact(value);
+
+        assert!(!redacted.contains("first-token"));
+        assert!(!redacted.contains("second-token"));
+        assert_eq!(redacted, "Api-Key [REDACTED] Bearer [REDACTED]");
     }
 }
