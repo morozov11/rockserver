@@ -4,6 +4,8 @@ info:
   version: 0.2.0
   description: >-
     Contract for RockServer operational health checks and deterministic station search.
+    PostgreSQL may use provenance-compatible semantic ranking; metadata fallback preserves
+    the same schemas when embeddings are absent or unavailable.
 servers:
   - url: http://127.0.0.1:3000
 paths:
@@ -47,6 +49,9 @@ paths:
       summary: Find and rank internet radio stations
       description: >-
         Accepts a natural-language request and returns ranked station streams.
+        Language, country, and exclusions are hard filters. Ranking is deterministic,
+        with station ID ascending as the final tie-break, and optional semantic-provider
+        failures degrade to metadata search.
         A syntactically malformed JSON body produces 400. A well-formed JSON body
         that violates this operation's schema or semantic validation rules produces 422.
       requestBody:

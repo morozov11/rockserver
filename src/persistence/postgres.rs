@@ -4,14 +4,16 @@ use async_trait::async_trait;
 use sqlx::{FromRow, PgPool, postgres::PgPoolOptions};
 
 use crate::search::{
-    RankedStation, RepositoryError, SearchConstraints, SearchQuery, Station, StationHealth,
-    StationRepository,
+    Embedding, METADATA_WEIGHT, RankedStation, RepositoryError, SEMANTIC_WEIGHT, SearchConstraints,
+    SearchQuery, Station, StationHealth, StationRepository,
 };
+
+use super::embedding_postgres::vector_literal;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
-// The SQL mirrors the domain's exact-token matching, hard filters, score formula, stable tie-break,
-// and post-ranking limit. Query normalization and the meaning of these rules remain domain-owned.
+// Hard filters and exclusions are applied in `candidates`, before scoring and the final limit.
+// Metadata fallback remains exact; compatible embeddings add an exact cosine-derived score.
 const SEARCH_SQL: &str = r#"
 WITH candidates AS (
     SELECT
@@ -25,6 +27,7 @@ WITH candidates AS (
         primary_stream.codec,
         primary_stream.bitrate_kbps,
         primary_stream.health,
+        station_embedding.embedding,
         (
             SELECT COUNT(DISTINCT query_term.term)
             FROM UNNEST($1::text[]) AS query_term(term)
@@ -54,9 +57,26 @@ WITH candidates AS (
         ORDER BY is_primary DESC, id ASC
         LIMIT 1
     ) AS primary_stream ON true
+    LEFT JOIN station_embeddings AS station_embedding
+      ON station_embedding.station_id = s.id
+     AND station_embedding.model = $8
+     AND station_embedding.version = $9
+     AND station_embedding.dimension = $10
+     AND $7::text IS NOT NULL
     WHERE ($3::text IS NULL OR s.language = $3)
       AND ($4::text IS NULL OR s.country_code = $4)
       AND NOT (s.id = ANY($5::text[]))
+), scored AS (
+    SELECT
+        *,
+        matched_count::float8
+            / GREATEST(cardinality($1::text[]) + cardinality($2::text[]), 1)
+            AS metadata_score,
+        CASE
+            WHEN embedding IS NULL OR $7::text IS NULL THEN NULL
+            ELSE LEAST(1.0, GREATEST(0.0, 1.0 - (embedding <=> ($7::text)::vector) / 2.0))
+        END AS semantic_score
+    FROM candidates
 )
 SELECT
     id,
@@ -69,9 +89,14 @@ SELECT
     codec,
     bitrate_kbps,
     health,
-    matched_count::float8 / GREATEST(cardinality($1::text[]) + cardinality($2::text[]), 1) AS score
-FROM candidates
-WHERE matched_count > 0
+    metadata_score,
+    semantic_score,
+    CASE
+        WHEN semantic_score IS NULL THEN metadata_score
+        ELSE $11::float8 * metadata_score + $12::float8 * semantic_score
+    END AS score
+FROM scored
+WHERE metadata_score > 0 OR semantic_score > 0
 ORDER BY score DESC, id ASC
 LIMIT $6
 "#;
@@ -111,8 +136,9 @@ impl StationRepository for PostgresStationRepository {
         &self,
         query: &SearchQuery,
         constraints: &SearchConstraints,
+        embedding: Option<&Embedding>,
     ) -> Result<Vec<RankedStation>, RepositoryError> {
-        let parameters = PostgresSearchParameters::from_domain(query, constraints)
+        let parameters = PostgresSearchParameters::from_domain(query, constraints, embedding)
             .map_err(|error| RepositoryError::new("parameter conversion", error))?;
         let rows = sqlx::query_as::<_, StationRow>(SEARCH_SQL)
             .bind(&parameters.terms)
@@ -121,6 +147,12 @@ impl StationRepository for PostgresStationRepository {
             .bind(&parameters.country_code)
             .bind(&parameters.excluded_station_ids)
             .bind(parameters.limit)
+            .bind(&parameters.embedding)
+            .bind(&parameters.embedding_model)
+            .bind(&parameters.embedding_version)
+            .bind(parameters.embedding_dimension)
+            .bind(parameters.metadata_weight)
+            .bind(parameters.semantic_weight)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| RepositoryError::new("search", error))?;
@@ -152,6 +184,8 @@ struct StationRow {
     codec: Option<String>,
     bitrate_kbps: Option<i32>,
     health: String,
+    metadata_score: f64,
+    semantic_score: Option<f64>,
     score: f64,
 }
 
@@ -171,8 +205,23 @@ impl TryFrom<StationRow> for RankedStation {
             _ => return Err(RowConversionError::InvalidHealth(row.health)),
         };
 
+        let reason = row.semantic_score.map_or_else(
+            || {
+                format!(
+                    "Matched catalog metadata with score {:.3}.",
+                    row.metadata_score
+                )
+            },
+            |semantic_score| {
+                format!(
+                    "Hybrid match: metadata {:.3}, semantic {:.3}.",
+                    row.metadata_score, semantic_score
+                )
+            },
+        );
+
         Ok(Self {
-            reason: format!("Matched catalog metadata with score {:.3}.", row.score),
+            reason,
             score: row.score,
             station: Station {
                 id: row.id,
@@ -209,7 +258,7 @@ impl std::fmt::Display for RowConversionError {
 
 impl std::error::Error for RowConversionError {}
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, PartialEq)]
 struct PostgresSearchParameters {
     terms: Vec<String>,
     tags: Vec<String>,
@@ -217,6 +266,12 @@ struct PostgresSearchParameters {
     country_code: Option<String>,
     excluded_station_ids: Vec<String>,
     limit: i64,
+    embedding: Option<String>,
+    embedding_model: Option<String>,
+    embedding_version: Option<String>,
+    embedding_dimension: Option<i32>,
+    metadata_weight: f64,
+    semantic_weight: f64,
 }
 
 impl PostgresSearchParameters {
@@ -224,7 +279,12 @@ impl PostgresSearchParameters {
     fn from_domain(
         query: &SearchQuery,
         constraints: &SearchConstraints,
+        embedding: Option<&Embedding>,
     ) -> Result<Self, ParameterConversionError> {
+        let embedding_dimension = embedding
+            .map(|value| i32::try_from(value.provenance().dimension))
+            .transpose()
+            .map_err(|_| ParameterConversionError::EmbeddingDimensionTooLarge)?;
         Ok(Self {
             terms: query.terms.clone(),
             tags: query.tags.clone(),
@@ -233,6 +293,12 @@ impl PostgresSearchParameters {
             excluded_station_ids: constraints.excluded_station_ids.iter().cloned().collect(),
             limit: i64::try_from(constraints.limit)
                 .map_err(|_| ParameterConversionError::LimitTooLarge)?,
+            embedding: embedding.map(vector_literal),
+            embedding_model: embedding.map(|value| value.provenance().model.clone()),
+            embedding_version: embedding.map(|value| value.provenance().version.clone()),
+            embedding_dimension,
+            metadata_weight: METADATA_WEIGHT,
+            semantic_weight: SEMANTIC_WEIGHT,
         })
     }
 }
@@ -240,11 +306,19 @@ impl PostgresSearchParameters {
 #[derive(Debug)]
 enum ParameterConversionError {
     LimitTooLarge,
+    EmbeddingDimensionTooLarge,
 }
 
 impl std::fmt::Display for ParameterConversionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("search limit cannot fit in PostgreSQL bigint")
+        match self {
+            Self::LimitTooLarge => {
+                formatter.write_str("search limit cannot fit in PostgreSQL bigint")
+            }
+            Self::EmbeddingDimensionTooLarge => {
+                formatter.write_str("embedding dimension cannot fit in PostgreSQL integer")
+            }
+        }
     }
 }
 
@@ -253,7 +327,10 @@ impl std::error::Error for ParameterConversionError {}
 #[cfg(test)]
 mod tests {
     use super::{PostgresSearchParameters, StationRow};
-    use crate::search::{RankedStation, SearchConstraints, StationHealth, normalize_query};
+    use crate::search::{
+        METADATA_WEIGHT, RankedStation, SEMANTIC_WEIGHT, SearchConstraints, StationHealth,
+        normalize_query,
+    };
     use std::collections::BTreeSet;
 
     #[test]
@@ -269,6 +346,8 @@ mod tests {
             codec: Some("MP3".to_owned()),
             bitrate_kbps: Some(192),
             health: "degraded".to_owned(),
+            metadata_score: 0.5,
+            semantic_score: None,
             score: 0.5,
         })
         .unwrap();
@@ -289,11 +368,13 @@ mod tests {
             ]),
         };
 
-        let parameters = PostgresSearchParameters::from_domain(&query, &constraints).unwrap();
+        let parameters = PostgresSearchParameters::from_domain(&query, &constraints, None).unwrap();
 
         assert_eq!(parameters.country_code.as_deref(), Some("GB"));
         assert_eq!(parameters.language.as_deref(), Some("en"));
         assert_eq!(parameters.limit, 7);
+        assert_eq!(parameters.metadata_weight, METADATA_WEIGHT);
+        assert_eq!(parameters.semantic_weight, SEMANTIC_WEIGHT);
         assert_eq!(
             parameters.excluded_station_ids,
             ["station-rock-001", "station-rock-002"]

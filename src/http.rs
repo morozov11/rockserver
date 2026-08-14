@@ -19,8 +19,8 @@ use serde_json::{Map, Value, json};
 use tower_http::trace::TraceLayer;
 
 use crate::search::{
-    InMemoryStationRepository, RankedStation, SearchConstraints, SearchService, StationHealth,
-    StationRepository, normalize_query,
+    InMemoryStationRepository, QueryParserInput, RankedStation, SearchConstraints, SearchService,
+    StationHealth, StationRepository,
 };
 
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -49,9 +49,12 @@ pub fn router() -> Router {
 
 /// Creates the application router with a supplied station repository backend.
 pub fn router_with_repository(repository: Arc<dyn StationRepository + Send + Sync>) -> Router {
-    let state = AppState {
-        search_service: SearchService::new(repository),
-    };
+    router_with_search_service(SearchService::new(repository))
+}
+
+/// Creates the application router with fully configured search orchestration.
+pub fn router_with_search_service(search_service: SearchService) -> Router {
+    let state = AppState { search_service };
 
     Router::new()
         .route("/health/live", get(live))
@@ -130,13 +133,22 @@ async fn search(State(state): State<AppState>, headers: HeaderMap, body: Bytes) 
         }
     };
 
-    let query = normalize_query(validated.query, validated.locale);
     let constraints = SearchConstraints {
         limit: validated.limit,
         excluded_station_ids: validated.exclude_station_ids,
     };
-    let stations = match state.search_service.search(&query, &constraints).await {
-        Ok(stations) => stations.iter().map(StationResultDto::from).collect(),
+    let outcome = match state
+        .search_service
+        .interpret_and_search(
+            QueryParserInput {
+                query: validated.query,
+                locale: validated.locale,
+            },
+            &constraints,
+        )
+        .await
+    {
+        Ok(outcome) => outcome,
         Err(error) => {
             tracing::error!(%error, %request_id, "station search failed");
             return error_response(
@@ -151,8 +163,12 @@ async fn search(State(state): State<AppState>, headers: HeaderMap, body: Bytes) 
 
     Json(SearchResponseDto {
         request_id,
-        normalized_query: NormalizedQueryDto::from(query),
-        stations,
+        normalized_query: NormalizedQueryDto::from(outcome.query),
+        stations: outcome
+            .stations
+            .iter()
+            .map(StationResultDto::from)
+            .collect(),
     })
     .into_response()
 }

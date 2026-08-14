@@ -24,6 +24,10 @@
    - Acceptance met: the importer requires `DATABASE_URL`, sends an explicit User-Agent, bounds timeout/page size/page count/response bytes, preserves the six built-in stations, never deletes missing upstream records, logs run/page/count progress without credentials or stream URLs, and is covered by deterministic unit, local mock HTTP, and opt-in real PostgreSQL tests.
    - pgvector, embeddings, LLM parsing, authentication, rate limiting, stream probing, and RockCast changes remain excluded.
 
-7. Semantic ranking — next
-   - Add query-parser and embedding provider traits with deterministic fakes, pgvector persistence, and a metadata-safe ranking path that never sends the full catalog to an LLM.
-   - Preserve the current HTTP contract and deterministic fallback while semantic behavior is introduced incrementally.
+7. Semantic ranking — complete
+   - Added provider-neutral query-parser and embedding traits, deterministic fakes and an explicit development embedder, dimension-neutral pgvector persistence with provenance, controlled backfill/update, and deterministic exact hybrid ranking.
+   - Acceptance met: providers never receive the full catalog; failures and missing/incompatible embeddings preserve metadata fallback; hard filters/exclusions precede final limit; station ID is the last tie-break; in-memory mode and public HTTP schemas remain compatible; real pgvector integration is covered.
+
+8. RockCast remote text-search integration — next
+   - Add the smallest client change that calls `POST /v1/search`, maps results into the existing playback path, and retains RockCast's local station catalog when RockServer is unavailable.
+   - Keep voice input, authentication, rate limiting, stream probing, scheduler work, and broader operations out of this stage.

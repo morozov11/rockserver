@@ -4,7 +4,7 @@ RockServer is a planned Rust service for AI-assisted internet radio discovery. A
 
 ## Current status
 
-The repository contains a Rust edition 2024 Axum service. `POST /v1/search` implements deterministic metadata search through a replaceable repository boundary. PostgreSQL is selected when `DATABASE_URL` is set; otherwise the same six-station catalog runs in memory. Versioned migrations create station, stream, provider-identity, and import-run storage while preserving the development catalog. A separate one-shot CLI can import a bounded Radio Browser slice into PostgreSQL; it is never called by search or HTTP startup. `GET /health/live` depends only on the process, while `GET /health/ready` checks PostgreSQL in database mode. There is no pgvector, LLM integration, authentication, rate limiting, stream probing, or RockCast integration yet.
+The repository contains a Rust edition 2024 Axum service. `POST /v1/search` uses provider-neutral query interpretation, optional embeddings, and a replaceable repository boundary. PostgreSQL provides exact pgvector-backed hybrid ranking when compatible query and station embeddings exist; otherwise the established deterministic metadata ranking remains authoritative. Without `DATABASE_URL`, the same six-station catalog runs in memory with metadata fallback. Versioned migrations create catalog, import-run, and provenance-aware embedding storage. Separate one-shot CLIs import Radio Browser data and backfill embeddings outside HTTP startup and the request path. `GET /health/live` depends only on the process, while `GET /health/ready` checks only PostgreSQL in database mode. There is no production LLM/embedding provider, authentication, rate limiting, stream probing, or RockCast integration yet.
 
 ## Intended architecture
 
@@ -12,10 +12,10 @@ The service will be built in small, independently testable layers:
 
 - a versioned Axum HTTP API whose contract is defined in `api/openapi.yaml`;
 - transport DTOs separated from search domain models;
-- deterministic catalog filtering and ranking over PostgreSQL or the built-in fallback;
+- deterministic hard filtering and metadata/hybrid ranking over PostgreSQL or the built-in fallback;
 - PostgreSQL migrations for stations and playable streams;
-- pgvector as a future semantic-ranking store, not part of the current persistence stage;
-- provider traits for query parsing and embeddings, with deterministic fakes in tests;
+- pgvector storage with model/version/dimension provenance and exact cosine search;
+- provider traits for query parsing and embeddings, with deterministic fakes in tests and metadata-safe failure fallback;
 - controlled Radio Browser import outside the request path, with stream probing still future work.
 
 An LLM will convert natural-language requests into structured filters; it will not inspect the full station catalog. RockCast will retain its local catalog as a fallback if the service is unavailable.
@@ -30,11 +30,11 @@ See [docs/architecture.md](docs/architecture.md) for boundaries and the planned 
 4. Deterministic in-memory search with domain/DTO separation — complete.
 5. PostgreSQL persistence, migrations, development seed, and dependency-aware readiness — complete.
 6. Controlled Radio Browser import outside the request path — complete.
-7. Semantic ranking behind query-parser and embedding provider traits — next.
-8. Small RockCast integration changes for remote search with local fallback.
+7. Semantic ranking behind query-parser and embedding provider traits — complete.
+8. Small RockCast integration changes for remote search with local fallback — next.
 9. Voice input only after text search is stable, followed by stream health checks, metrics, rate limiting, and deployment.
 
-RS-006 is complete. The next work is semantic ranking behind query-parser and embedding provider traits plus pgvector; detailed acceptance criteria remain in [TODO.md](TODO.md).
+RS-007 is complete. The next work is a small RockCast integration for remote text search with the existing local catalog retained as fallback; detailed acceptance criteria remain in [TODO.md](TODO.md).
 
 ## Build and test
 
@@ -59,14 +59,14 @@ ROCKSERVER_BIND_ADDR=127.0.0.1:8080 cargo run
 
 Use `RUST_LOG` to adjust the tracing filter. If it is unset or invalid, the service uses `info`.
 
-With no `DATABASE_URL`, startup logs `backend=in_memory` and uses the built-in fallback. To run the local PostgreSQL backend with documented development-only defaults:
+With no `DATABASE_URL`, startup logs `backend=in_memory` and uses the built-in metadata fallback. To run the local pgvector-capable PostgreSQL backend with documented development-only defaults:
 
 ```text
 docker compose up -d --wait
 DATABASE_URL=postgres://rockserver:rockserver_dev@127.0.0.1:5432/rockserver cargo run
 ```
 
-On PowerShell, set the variable with `$env:DATABASE_URL='postgres://rockserver:rockserver_dev@127.0.0.1:5432/rockserver'` before `cargo run`. Startup applies pending files from `migrations/` and logs `backend=postgresql` without logging the URL. Stop the local database with `docker compose down`; add `-v` only when the development catalog data should also be discarded.
+On PowerShell, set the variable with `$env:DATABASE_URL='postgres://rockserver:rockserver_dev@127.0.0.1:5432/rockserver'` before `cargo run`. Startup applies pending files from `migrations/`, including `CREATE EXTENSION vector`, and logs `backend=postgresql` without logging the URL. The PostgreSQL server must have pgvector installed and the migration role must be allowed to enable it. Stop the local database with `docker compose down`; add `-v` only when the development catalog and embeddings should also be discarded.
 
 Check readiness and seeded search after startup:
 
@@ -80,6 +80,31 @@ The real database integration test is opt-in so ordinary tests need no Docker or
 ```text
 TEST_DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:PORT/DISPOSABLE_DATABASE cargo test --test postgres_integration --all-features -- --ignored --exact postgres_migrations_seed_search_and_readiness
 ```
+
+## Semantic search and embedding backfill
+
+The public HTTP schemas are unchanged. `QueryParser` receives only the validated query and locale and returns structured terms, tags, language, and country filters; it never receives the catalog. The deterministic parser is both the default and the fallback if a future optional parser fails. `EmbeddingProvider` receives one query string at request time. Station embeddings are generated only by the controlled backfill workflow, one station document at a time.
+
+RS-007 ships no production model. The only concrete embedder is an explicitly named deterministic development implementation. Enable it with matching settings for backfill and server startup:
+
+```text
+docker compose up -d --wait
+DATABASE_URL=postgres://rockserver:rockserver_dev@127.0.0.1:5432/rockserver \
+ROCKSERVER_SEMANTIC_PROVIDER=deterministic-dev \
+ROCKSERVER_EMBEDDING_DIMENSION=32 \
+cargo run --bin backfill_embeddings
+
+DATABASE_URL=postgres://rockserver:rockserver_dev@127.0.0.1:5432/rockserver \
+ROCKSERVER_SEMANTIC_PROVIDER=deterministic-dev \
+ROCKSERVER_EMBEDDING_DIMENSION=32 \
+cargo run
+```
+
+PowerShell uses the same three environment variables through `$env:NAME='value'`. `ROCKSERVER_SEMANTIC_PROVIDER` is optional for the HTTP service; when absent, search is metadata-only. `ROCKSERVER_EMBEDDING_DIMENSION` defaults to 32 and supports 1 through 16,000 for pgvector's unbounded `vector` storage. Model and preprocessing identity are persisted as `rockserver-deterministic-dev`, version `1`, and the configured dimension. Changing dimension with the same model/version replaces those station rows on the next backfill. This implementation is a repeatable development fixture, not a semantic production model.
+
+Migration `0004_add_station_embeddings.sql` uses an unbounded `vector` column plus model/version/dimension fields and CHECK constraints, so the schema is not locked to the deterministic fixture's dimension. Searches compare only exact matching provenance and currently use exact cosine distance; there is deliberately no dimension-specific HNSW/IVFFlat index at this foundation stage. Cosine similarity is normalized to `[0,1]`, then a compatible pair uses `0.70 * metadata_score + 0.30 * semantic_score`. A station without a compatible embedding retains its full metadata score. With no valid query embedding, the original metadata filter/ranker is used unchanged. Hard language/country filters and exclusions are applied before scoring and final limit; `station_id ASC` remains the last tie-break.
+
+Parser or embedding provider failures are logged and fall back to metadata instead of causing a 5xx when the repository can answer. Readiness continues to reflect only the selected repository/database; optional semantic providers do not affect it. Liveness remains process-only.
 
 ## Import Radio Browser
 

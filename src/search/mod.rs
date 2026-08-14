@@ -1,13 +1,26 @@
-//! Deterministic search domain and its catalog boundary.
+//! Search domain, provider boundaries, fallback semantics, and catalog boundary.
 
-use std::{
-    collections::{BTreeSet, HashSet},
-    error::Error,
-    fmt,
-    sync::Arc,
-};
+mod embedding;
+mod query;
+mod ranking;
+
+use std::{collections::BTreeSet, error::Error, fmt, sync::Arc};
 
 use async_trait::async_trait;
+
+pub use embedding::{
+    Embedding, EmbeddingBackfill, EmbeddingBackfillResult, EmbeddingProvenance, EmbeddingProvider,
+    EmbeddingProviderError, EmbeddingStore, EmbeddingStoreError, EmbeddingValidationError,
+    MAX_EMBEDDING_DIMENSION, StationEmbeddingDocument,
+};
+pub use query::{
+    DeterministicQueryParser, QueryIntent, QueryParser, QueryParserError, QueryParserInput,
+    normalize_query,
+};
+pub use ranking::{METADATA_WEIGHT, SEMANTIC_WEIGHT, hybrid_score};
+
+use query::validate_intent;
+use ranking::rank_stations;
 
 /// A normalized station-search query understood by the deterministic search service.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -24,6 +37,19 @@ pub struct SearchQuery {
     pub language: Option<String>,
     /// Country constraint inferred from request terms, when available.
     pub country_code: Option<String>,
+}
+
+impl SearchQuery {
+    fn from_intent(original: String, locale: String, intent: QueryIntent) -> Self {
+        Self {
+            original,
+            locale,
+            terms: intent.terms,
+            tags: intent.tags,
+            language: intent.language,
+            country_code: intent.country_code,
+        }
+    }
 }
 
 /// Constraints that affect which and how many stations are returned.
@@ -90,6 +116,7 @@ pub trait StationRepository {
         &self,
         query: &SearchQuery,
         constraints: &SearchConstraints,
+        embedding: Option<&Embedding>,
     ) -> Result<Vec<RankedStation>, RepositoryError>;
 
     /// Verifies that the repository dependency can currently serve requests.
@@ -225,6 +252,7 @@ impl StationRepository for InMemoryStationRepository {
         &self,
         query: &SearchQuery,
         constraints: &SearchConstraints,
+        _embedding: Option<&Embedding>,
     ) -> Result<Vec<RankedStation>, RepositoryError> {
         Ok(rank_stations(&self.stations, query, constraints))
     }
@@ -234,16 +262,46 @@ impl StationRepository for InMemoryStationRepository {
     }
 }
 
-/// Deterministic metadata-only station search service.
+/// Interpreted search result returned to the HTTP transport layer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SearchOutcome {
+    /// Normalized structured interpretation returned to the caller.
+    pub query: SearchQuery,
+    /// Ranked stations returned by the repository.
+    pub stations: Vec<RankedStation>,
+}
+
+/// Search orchestration with deterministic parser and metadata fallbacks.
 #[derive(Clone)]
 pub struct SearchService {
     repository: Arc<dyn StationRepository + Send + Sync>,
+    query_parser: Arc<dyn QueryParser>,
+    embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
 }
 
 impl SearchService {
-    /// Creates a service using the supplied station repository.
+    /// Creates metadata-only search using the deterministic query parser.
     pub fn new(repository: Arc<dyn StationRepository + Send + Sync>) -> Self {
-        Self { repository }
+        Self {
+            repository,
+            query_parser: Arc::new(DeterministicQueryParser),
+            embedding_provider: None,
+        }
+    }
+
+    /// Creates search with replaceable parser and optional embedding provider boundaries.
+    ///
+    /// Any parser or embedding failure degrades to deterministic metadata behavior.
+    pub fn with_providers(
+        repository: Arc<dyn StationRepository + Send + Sync>,
+        query_parser: Arc<dyn QueryParser>,
+        embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
+    ) -> Self {
+        Self {
+            repository,
+            query_parser,
+            embedding_provider,
+        }
     }
 
     /// Returns matching stations ordered by score descending and station ID ascending.
@@ -254,29 +312,52 @@ impl SearchService {
         query: &SearchQuery,
         constraints: &SearchConstraints,
     ) -> Result<Vec<RankedStation>, RepositoryError> {
-        self.repository.search(query, constraints).await
+        let embedding = self.query_embedding(&query.original).await;
+        self.repository
+            .search(query, constraints, embedding.as_ref())
+            .await
+    }
+
+    /// Interprets request-only input and searches without exposing catalog data to providers.
+    pub async fn interpret_and_search(
+        &self,
+        input: QueryParserInput,
+        constraints: &SearchConstraints,
+    ) -> Result<SearchOutcome, RepositoryError> {
+        let intent = match self
+            .query_parser
+            .parse(&input)
+            .await
+            .and_then(validate_intent)
+        {
+            Ok(intent) => intent,
+            Err(error) => {
+                tracing::warn!(%error, "query parser failed; using deterministic metadata fallback");
+                DeterministicQueryParser
+                    .parse(&input)
+                    .await
+                    .expect("deterministic query parser cannot fail")
+            }
+        };
+        let query = SearchQuery::from_intent(input.query, input.locale, intent);
+        let stations = self.search(&query, constraints).await?;
+        Ok(SearchOutcome { query, stations })
     }
 
     /// Checks whether the configured catalog backend is currently available.
     pub async fn check_readiness(&self) -> Result<(), RepositoryError> {
         self.repository.check_readiness().await
     }
-}
 
-/// Builds a normalized query from validated HTTP request values.
-pub fn normalize_query(original: String, locale: String) -> SearchQuery {
-    let terms = tokenize(&original);
-    let tags = recognized_tags(&terms);
-    let country_code = infer_country_code(&terms);
-    let language = locale.split('-').next().map(str::to_lowercase);
-
-    SearchQuery {
-        original,
-        locale,
-        terms,
-        tags,
-        language,
-        country_code,
+    async fn query_embedding(&self, text: &str) -> Option<Embedding> {
+        let provider = self.embedding_provider.as_ref()?;
+        match provider.embed(text).await {
+            Ok(embedding) => Some(embedding),
+            Err(error) => {
+                tracing::warn!(%error, "embedding provider failed; using metadata fallback");
+                None
+            }
+        }
     }
 }
 
@@ -304,125 +385,21 @@ fn station(id: &str, name: &str, stream_url: &str, metadata: StationMetadata<'_>
     }
 }
 
-fn language_matches(station: &Station, query: &SearchQuery) -> bool {
-    query
-        .language
-        .as_deref()
-        .is_none_or(|language| station.language.as_deref() == Some(language))
-}
-
-fn country_matches(station: &Station, query: &SearchQuery) -> bool {
-    query
-        .country_code
-        .as_deref()
-        .is_none_or(|country_code| station.country_code.as_deref() == Some(country_code))
-}
-
-/// Applies the domain-owned search semantics to an already-loaded catalog.
-fn rank_stations(
-    stations: &[Station],
-    query: &SearchQuery,
-    constraints: &SearchConstraints,
-) -> Vec<RankedStation> {
-    let mut results = stations
-        .iter()
-        .filter(|station| !constraints.excluded_station_ids.contains(&station.id))
-        .filter(|station| language_matches(station, query))
-        .filter(|station| country_matches(station, query))
-        .filter_map(|station| rank_station(station, query))
-        .collect::<Vec<_>>();
-
-    results.sort_by(|left, right| {
-        right
-            .score
-            .total_cmp(&left.score)
-            .then_with(|| left.station.id.cmp(&right.station.id))
-    });
-    results.truncate(constraints.limit);
-    results
-}
-
-fn rank_station(station: &Station, query: &SearchQuery) -> Option<RankedStation> {
-    let searchable_terms = station_searchable_terms(station);
-    let matched_terms = query
-        .terms
-        .iter()
-        .filter(|term| searchable_terms.contains(term.as_str()))
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let matched_tags = query
-        .tags
-        .iter()
-        .filter(|tag| station.tags.iter().any(|station_tag| station_tag == *tag))
-        .cloned()
-        .collect::<BTreeSet<_>>();
-
-    if matched_terms.is_empty() && matched_tags.is_empty() {
-        return None;
-    }
-
-    let matched_count = matched_terms.len() + matched_tags.len();
-    let query_count = query.terms.len() + query.tags.len();
-    let score = matched_count as f64 / query_count.max(1) as f64;
-    let reason_terms = matched_tags
-        .into_iter()
-        .chain(matched_terms)
-        .collect::<Vec<_>>();
-
-    Some(RankedStation {
-        station: station.clone(),
-        score,
-        reason: format!("Matched catalog metadata: {}.", reason_terms.join(", ")),
-    })
-}
-
-fn station_searchable_terms(station: &Station) -> HashSet<String> {
-    tokenize(&station.name)
-        .into_iter()
-        .chain(station.tags.iter().flat_map(|tag| tokenize(tag)))
-        .collect()
-}
-
-fn tokenize(value: &str) -> Vec<String> {
-    value
-        .split(|character: char| !character.is_alphanumeric())
-        .filter(|term| !term.is_empty())
-        .map(str::to_lowercase)
-        .collect()
-}
-
-fn recognized_tags(terms: &[String]) -> Vec<String> {
-    const TAGS: &[&str] = &["ambient", "calm", "instrumental", "jazz", "rock", "upbeat"];
-    let term_set = terms.iter().map(String::as_str).collect::<HashSet<_>>();
-    let mut tags = TAGS
-        .iter()
-        .filter(|tag| term_set.contains(**tag))
-        .map(|tag| (*tag).to_owned())
-        .collect::<Vec<_>>();
-    if term_set.contains("classic") && term_set.contains("rock") {
-        tags.push("classic rock".to_owned());
-    }
-    tags
-}
-
-fn infer_country_code(terms: &[String]) -> Option<String> {
-    let term_set = terms.iter().map(String::as_str).collect::<HashSet<_>>();
-    if term_set.contains("russia") || term_set.contains("россия") {
-        Some("RU".to_owned())
-    } else if term_set.contains("british") || term_set.contains("uk") {
-        Some("GB".to_owned())
-    } else if term_set.contains("american") || term_set.contains("usa") {
-        Some("US".to_owned())
-    } else {
-        None
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeSet, sync::Arc};
+    use std::{
+        collections::BTreeSet,
+        sync::{Arc, Mutex},
+    };
 
-    use super::{InMemoryStationRepository, SearchConstraints, SearchService, normalize_query};
+    use async_trait::async_trait;
+
+    use super::{
+        DeterministicQueryParser, Embedding, EmbeddingProvider, EmbeddingProviderError,
+        InMemoryStationRepository, QueryIntent, QueryParser, QueryParserError, QueryParserInput,
+        RankedStation, RepositoryError, SearchConstraints, SearchQuery, SearchService,
+        StationRepository, normalize_query,
+    };
 
     #[tokio::test]
     async fn equal_scores_are_ordered_by_station_id() {
@@ -464,5 +441,166 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(ids, ["station-jazz-002"]);
+    }
+
+    struct RecordingParser {
+        input: Arc<Mutex<Option<QueryParserInput>>>,
+        fail: bool,
+    }
+
+    #[async_trait]
+    impl QueryParser for RecordingParser {
+        async fn parse(&self, input: &QueryParserInput) -> Result<QueryIntent, QueryParserError> {
+            *self.input.lock().unwrap() = Some(input.clone());
+            if self.fail {
+                return Err(QueryParserError::safe("scripted parser failure"));
+            }
+            Ok(QueryIntent {
+                terms: vec!["rock".to_owned()],
+                tags: vec!["rock".to_owned()],
+                language: Some("en".to_owned()),
+                country_code: None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn query_parser_receives_only_request_input_and_returns_structured_intent() {
+        let input_seen = Arc::new(Mutex::new(None));
+        let service = SearchService::with_providers(
+            Arc::new(InMemoryStationRepository::with_builtin_catalog()),
+            Arc::new(RecordingParser {
+                input: input_seen.clone(),
+                fail: false,
+            }),
+            None,
+        );
+        let input = QueryParserInput {
+            query: "music for driving".to_owned(),
+            locale: "en-US".to_owned(),
+        };
+
+        let outcome = service
+            .interpret_and_search(
+                input.clone(),
+                &SearchConstraints {
+                    limit: 10,
+                    excluded_station_ids: BTreeSet::new(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(*input_seen.lock().unwrap(), Some(input));
+        assert_eq!(outcome.query.terms, ["rock"]);
+        assert_eq!(outcome.stations.len(), 2);
+    }
+
+    struct FailingEmbeddingProvider;
+
+    #[async_trait]
+    impl EmbeddingProvider for FailingEmbeddingProvider {
+        async fn embed(&self, _text: &str) -> Result<Embedding, EmbeddingProviderError> {
+            Err(EmbeddingProviderError::safe("scripted embedding failure"))
+        }
+    }
+
+    #[tokio::test]
+    async fn parser_and_embedding_failures_preserve_metadata_fallback() {
+        let service = SearchService::with_providers(
+            Arc::new(InMemoryStationRepository::with_builtin_catalog()),
+            Arc::new(RecordingParser {
+                input: Arc::new(Mutex::new(None)),
+                fail: true,
+            }),
+            Some(Arc::new(FailingEmbeddingProvider)),
+        );
+
+        let outcome = service
+            .interpret_and_search(
+                QueryParserInput {
+                    query: "rock".to_owned(),
+                    locale: "en-US".to_owned(),
+                },
+                &SearchConstraints {
+                    limit: 10,
+                    excluded_station_ids: BTreeSet::new(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            outcome
+                .stations
+                .iter()
+                .map(|station| station.station.id.as_str())
+                .collect::<Vec<_>>(),
+            ["station-rock-001", "station-rock-002"]
+        );
+    }
+
+    struct FixedEmbeddingProvider;
+
+    #[async_trait]
+    impl EmbeddingProvider for FixedEmbeddingProvider {
+        async fn embed(&self, _text: &str) -> Result<Embedding, EmbeddingProviderError> {
+            Ok(Embedding::new("fake", "1", 2, vec![1.0, 0.0]).unwrap())
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingRepository {
+        embedding: Mutex<Option<Embedding>>,
+    }
+
+    #[async_trait]
+    impl StationRepository for RecordingRepository {
+        async fn search(
+            &self,
+            _query: &SearchQuery,
+            _constraints: &SearchConstraints,
+            embedding: Option<&Embedding>,
+        ) -> Result<Vec<RankedStation>, RepositoryError> {
+            *self.embedding.lock().unwrap() = embedding.cloned();
+            Ok(Vec::new())
+        }
+
+        async fn check_readiness(&self) -> Result<(), RepositoryError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn deterministic_fake_embedding_crosses_only_the_repository_boundary() {
+        let repository = Arc::new(RecordingRepository::default());
+        let service = SearchService::with_providers(
+            repository.clone(),
+            Arc::new(DeterministicQueryParser),
+            Some(Arc::new(FixedEmbeddingProvider)),
+        );
+
+        service
+            .search(
+                &normalize_query("anything".to_owned(), "en-US".to_owned()),
+                &SearchConstraints {
+                    limit: 1,
+                    excluded_station_ids: BTreeSet::new(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repository
+                .embedding
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .provenance()
+                .model,
+            "fake"
+        );
     }
 }

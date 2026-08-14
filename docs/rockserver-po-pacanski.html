@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RockServer — что это, по-пацански</title>
+  <style>
+    :root {
+      --bg: #101820;
+      --panel: #1a2430;
+      --ink: #e8eef5;
+      --muted: #9aabbc;
+      --line: #2e3d4f;
+      --ok: #3d9a6a;
+      --ok-bg: #163528;
+      --wait: #c9a227;
+      --wait-bg: #3a3010;
+      --later: #7a6fd0;
+      --later-bg: #241f45;
+      --accent: #5aa2ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 17px/1.55 "Segoe UI", system-ui, sans-serif;
+      color: var(--ink);
+      background: radial-gradient(1200px 600px at 10% -10%, #1c2a3a, var(--bg));
+    }
+    header, main, footer { width: min(920px, 92vw); margin: auto; }
+    header { padding: 2.4rem 0 1rem; }
+    h1 { margin: 0 0 .6rem; font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1.15; }
+    h2 { margin: 2.4rem 0 .8rem; font-size: 1.35rem; border-bottom: 1px solid var(--line); padding-bottom: .35rem; }
+    p { color: var(--muted); }
+    .lead { font-size: 1.15rem; color: var(--ink); max-width: 42rem; }
+    .punch {
+      margin: 1.2rem 0;
+      padding: 1rem 1.2rem;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
+      border-radius: 10px;
+      color: var(--ink);
+      font-size: 1.05rem;
+    }
+    .badges { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
+    .badge {
+      display: inline-block;
+      padding: .2rem .55rem;
+      border-radius: 999px;
+      font-size: .75rem;
+      font-weight: 700;
+      letter-spacing: .03em;
+      border: 1px solid var(--line);
+    }
+    .now { background: var(--ok-bg); color: #8fe0b3; border-color: #2f6b4b; }
+    .next { background: var(--wait-bg); color: #ffd666; border-color: #7a6520; }
+    .later { background: var(--later-bg); color: #c4b8ff; border-color: #4d4588; }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: .7rem;
+      margin: 1rem 0;
+    }
+    .node {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: .9rem;
+      position: relative;
+    }
+    .node strong { display: block; margin: .25rem 0 .35rem; color: var(--ink); }
+    .node span { color: var(--muted); font-size: .9rem; }
+    .arrow-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: stretch;
+      gap: .55rem;
+      margin: 1rem 0;
+    }
+    .step {
+      flex: 1 1 140px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: .85rem;
+    }
+    .step::after {
+      content: "→";
+      position: absolute;
+    }
+    .step { position: relative; }
+    .step:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      right: -.45rem;
+      top: 42%;
+      color: var(--muted);
+      font-weight: 800;
+    }
+    .step small { display: block; color: var(--muted); margin-top: .35rem; font-size: .88rem; }
+    .diagram {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1rem;
+      background: #0d141c;
+      margin: 1rem 0;
+    }
+    svg { display: block; width: 100%; min-width: 680px; height: auto; }
+    svg text { font-family: "Segoe UI", system-ui, sans-serif; fill: var(--ink); font-size: 14px; }
+    svg .muted { font-size: 12px; fill: var(--muted); }
+    svg .box { stroke: #4a5d72; stroke-width: 1.5; rx: 10; }
+    svg .arr { stroke: #7f93a8; stroke-width: 2; fill: none; marker-end: url(#arr); }
+    ul.plain { color: var(--muted); padding-left: 1.2rem; }
+    ul.plain li { margin: .35rem 0; }
+    code {
+      background: #243142;
+      color: #d7e6ff;
+      padding: .1rem .35rem;
+      border-radius: 4px;
+      font-size: .92em;
+    }
+    .two {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: .8rem;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1rem;
+    }
+    .card h3 { margin: .2rem 0 .5rem; font-size: 1.05rem; }
+    footer { padding: 2rem 0 3rem; color: var(--muted); font-size: .92rem; }
+    @media (max-width: 700px) {
+      .step:not(:last-child)::after { content: "↓"; right: 48%; top: auto; bottom: -.85rem; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>RockServer — что это, по-пацански</h1>
+    <p class="lead">Коротко и без воды: зачем сервис, что уже умеет, чего ещё нет.</p>
+    <div class="punch">
+      Человек говорит: «спокойный инструментальный джаз».<br>
+      RockServer отвечает: вот станции, вот ссылки на потоки, вот кто выше в списке.
+    </div>
+    <div class="badges" aria-label="Легенда">
+      <span class="badge now">СЕЙЧАС — уже работает</span>
+      <span class="badge next">СКОРО — следующий этап</span>
+      <span class="badge later">ПОТОМ — дальше по плану</span>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>1. Суть в одном абзаце</h2>
+      <p>
+        RockServer — это <strong style="color:var(--ink)">бэкенд поиска интернет-радио</strong> для Windows-клиента RockCast.
+        Клиент крутит звук. Сервер только ищет станции и отдаёт нормальный ранжированный список.
+        Если сервер ляжет — у RockCast остаётся свой локальный каталог. Тут сервер и клиент не мешают друг другу.
+      </p>
+    </section>
+
+    <section>
+      <h2>2. Кто что делает</h2>
+      <div class="diagram">
+        <svg viewBox="0 0 900 220" role="img" aria-label="Экосистема">
+          <defs>
+            <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#7f93a8"/>
+            </marker>
+          </defs>
+          <rect class="box" x="30" y="60" width="180" height="90" fill="#241f45"/>
+          <text x="50" y="95">RockCast</text>
+          <text class="muted" x="50" y="118">UI + воспроизведение</text>
+          <text class="muted" x="50" y="136">локальный fallback</text>
+
+          <rect class="box" x="310" y="50" width="250" height="110" fill="#163528"/>
+          <text x="330" y="85">RockServer</text>
+          <text class="muted" x="330" y="108">поиск станций</text>
+          <text class="muted" x="330" y="126">каталог + ranking</text>
+          <text class="muted" x="330" y="144">HTTP API</text>
+
+          <rect class="box" x="670" y="60" width="200" height="90" fill="#163528"/>
+          <text x="690" y="95">Каталог</text>
+          <text class="muted" x="690" y="118">Postgres или</text>
+          <text class="muted" x="690" y="136">6 станций в памяти</text>
+
+          <path class="arr" d="M210 105 L300 105"/>
+          <path class="arr" d="M560 105 L660 105"/>
+          <text class="muted" x="225" y="90">запрос / ответ</text>
+          <text class="muted" x="575" y="90">читает</text>
+        </svg>
+      </div>
+      <div class="two">
+        <article class="card">
+          <span class="badge later">ПОТОМ</span>
+          <h3>RockCast</h3>
+          <p>Клиент. Пока с этим сервером ещё не склеен. Воспроизведение живёт там, не здесь.</p>
+        </article>
+        <article class="card">
+          <span class="badge now">СЕЙЧАС</span>
+          <h3>RockServer</h3>
+          <p>Rust/Axum. Принимает текст, валидирует, ищет по метаданным, отдаёт список с score.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>3. Как идёт поиск сейчас</h2>
+      <p>Нейросеть пока не участвует. Сейчас это честный детерминированный матч по названию, тегам, языку, стране.</p>
+      <div class="arrow-row">
+        <div class="step"><span class="badge now">СЕЙЧАС</span><strong>POST /v1/search</strong><small>«calm jazz» + locale + limit</small></div>
+        <div class="step"><span class="badge now">СЕЙЧАС</span><strong>Проверка входа</strong><small>битый JSON → 400, кривая схема → 422</small></div>
+        <div class="step"><span class="badge now">СЕЙЧАС</span><strong>Нормализация</strong><small>термы, теги, язык/страна</small></div>
+        <div class="step"><span class="badge now">СЕЙЧАС</span><strong>Фильтр + score</strong><small>выше score выше; ничья → по id</small></div>
+        <div class="step"><span class="badge now">СЕЙЧАС</span><strong>Ответ</strong><small>станции, URL потока, reason</small></div>
+      </div>
+      <div class="punch">
+        Важно: запрос поиска <strong>не ходит</strong> в Radio Browser и <strong>не долбит</strong> потоки.
+        Каталог либо уже в Postgres, либо это встроенные 6 станций.
+      </div>
+    </section>
+
+    <section>
+      <h2>4. Откуда берётся каталог</h2>
+      <div class="diagram">
+        <svg viewBox="0 0 900 280" role="img" aria-label="Импорт каталога">
+          <defs>
+            <marker id="arr2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#7f93a8"/>
+            </marker>
+          </defs>
+          <rect class="box" x="30" y="40" width="220" height="90" fill="#163528"/>
+          <text x="50" y="75">CLI import</text>
+          <text class="muted" x="50" y="98">import_radio_browser</text>
+          <text class="muted" x="50" y="116">отдельный процесс</text>
+
+          <rect class="box" x="340" y="40" width="220" height="90" fill="#163528"/>
+          <text x="360" y="75">Radio Browser</text>
+          <text class="muted" x="360" y="98">страницы станций</text>
+          <text class="muted" x="360" y="116">с лимитами и UA</text>
+
+          <rect class="box" x="650" y="40" width="220" height="90" fill="#163528"/>
+          <text x="670" y="75">PostgreSQL</text>
+          <text class="muted" x="670" y="98">upsert + import_runs</text>
+          <text class="muted" x="670" y="116">builtin не трогаем</text>
+
+          <rect class="box" x="340" y="180" width="220" height="70" fill="#241f45"/>
+          <text x="360" y="210">HTTP search</text>
+          <text class="muted" x="360" y="232">сюда импорт не лезет</text>
+
+          <path class="arr" d="M250 85 L330 85" style="marker-end:url(#arr2)"/>
+          <path class="arr" d="M560 85 L640 85" style="marker-end:url(#arr2)"/>
+          <path d="M450 130 L450 180" stroke="#7f93a8" stroke-width="2" stroke-dasharray="6 5" fill="none"/>
+          <text class="muted" x="460" y="160">нет связи по запросу</text>
+        </svg>
+      </div>
+      <ul class="plain">
+        <li>Есть Postgres → сервис ищет в нём.</li>
+        <li>Нет <code>DATABASE_URL</code> → крутит шесть встроенных станций в памяти.</li>
+        <li>Импорт Radio Browser — отдельная команда, только в Postgres, с потолком страниц.</li>
+        <li>Повторный импорт обновляет «свои» станции, чужие builtin не затирает, пропавшие upstream сам не удаляет.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>5. Что внутри коробки</h2>
+      <div class="flow">
+        <article class="node"><span class="badge now">СЕЙЧАС</span><strong>HTTP</strong><span>live / ready / search</span></article>
+        <article class="node"><span class="badge now">СЕЙЧАС</span><strong>Search domain</strong><span>фильтры и ranking</span></article>
+        <article class="node"><span class="badge now">СЕЙЧАС</span><strong>Repository</strong><span>Postgres или memory</span></article>
+        <article class="node"><span class="badge now">СЕЙЧАС</span><strong>Importer</strong><span>CLI + Radio Browser</span></article>
+        <article class="node"><span class="badge next">СКОРО</span><strong>Semantic</strong><span>embeddings / pgvector</span></article>
+        <article class="node"><span class="badge later">ПОТОМ</span><strong>LLM parser</strong><span>текст → фильтры, не весь каталог</span></article>
+      </div>
+    </section>
+
+    <section>
+      <h2>6. Что уже есть / чего нет</h2>
+      <div class="two">
+        <article class="card">
+          <h3>Уже в деле</h3>
+          <ul class="plain">
+            <li><code>GET /health/live</code> — процесс жив</li>
+            <li><code>GET /health/ready</code> — для Postgres ещё и БД отвечает</li>
+            <li><code>POST /v1/search</code> — поиск по метаданным</li>
+            <li>OpenAPI контракт</li>
+            <li>Миграции + seed + импорт Radio Browser</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>Пока не трогаем</h3>
+          <ul class="plain">
+            <li>Умный semantic ranking</li>
+            <li>LLM в продакшене</li>
+            <li>Авторизация / rate limit</li>
+            <li>Проверка живых потоков</li>
+            <li>Интеграция с RockCast и голос</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>7. Итог</h2>
+      <div class="punch">
+        RockServer — это поисковик радиостанций для RockCast.<br>
+        Сейчас он честно ищет по каталогу и отдаёт ранжированный список.<br>
+        Потом научится понимать запрос умнее. Крутить музыку он не будет — это работа клиента.
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Локальный файл, без сети и внешних скриптов. Состояние на RS-006 (импорт Radio Browser есть, semantic ещё нет).
+    Технические схемы лежат отдельно в <code>docs/service-diagrams.html</code> — этот файл их не заменяет.
+  </footer>
+</body>
+</html>

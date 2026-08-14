@@ -10,10 +10,13 @@ use rockserver::{
         CatalogImportError, CatalogImportProvider, CatalogImporter, ImportLimits, ImportPage,
         ImportedStation,
     },
-    http::{HealthResponse, HealthStatus, router_with_repository},
-    persistence::{PostgresImportStore, PostgresStationRepository},
+    http::{HealthResponse, HealthStatus, router_with_repository, router_with_search_service},
+    persistence::{PostgresEmbeddingStore, PostgresImportStore, PostgresStationRepository},
     providers::radio_browser::SOURCE,
-    search::{SearchConstraints, SearchService, normalize_query},
+    search::{
+        DeterministicQueryParser, Embedding, EmbeddingProvider, EmbeddingProviderError,
+        EmbeddingStore, SearchConstraints, SearchQuery, SearchService, normalize_query,
+    },
 };
 use serde_json::Value;
 use sqlx::PgPool;
@@ -30,6 +33,15 @@ async fn postgres_migrations_seed_search_and_readiness() {
         .await
         .expect("migrations and seed must succeed");
     let service = SearchService::new(Arc::new(repository.clone()));
+    let extension_pool = repository_pool(&database_url).await;
+    let extension_version = sqlx::query_scalar::<_, String>(
+        "SELECT extversion FROM pg_extension WHERE extname = 'vector'",
+    )
+    .fetch_one(&extension_pool)
+    .await
+    .expect("pgvector migration must enable the extension");
+    assert!(!extension_version.is_empty());
+    extension_pool.close().await;
 
     let rock_query = normalize_query("rock".to_owned(), "en-US".to_owned());
     let tie_results = service
@@ -71,6 +83,149 @@ async fn postgres_migrations_seed_search_and_readiness() {
         .await
         .expect("excluded search must succeed");
     assert_eq!(station_ids(&exclusion_results), ["station-jazz-002"]);
+
+    let embedding_store = PostgresEmbeddingStore::connect(&database_url)
+        .await
+        .expect("embedding store migrations must succeed");
+    embedding_store
+        .upsert_embedding(
+            "station-jazz-001",
+            &Embedding::new("integration-model", "1", 3, vec![0.0, 1.0, 0.0]).unwrap(),
+        )
+        .await
+        .expect("first embedding insert must succeed");
+    embedding_store
+        .upsert_embedding(
+            "station-jazz-001",
+            &Embedding::new("integration-model", "1", 3, vec![1.0, 0.0, 0.0]).unwrap(),
+        )
+        .await
+        .expect("repeat embedding update must succeed");
+    for (station_id, values) in [
+        ("station-jazz-002", vec![0.0, 1.0, 0.0]),
+        ("station-rock-001", vec![0.0, 0.0, 1.0]),
+        ("station-rock-002", vec![0.0, 0.0, 1.0]),
+    ] {
+        embedding_store
+            .upsert_embedding(
+                station_id,
+                &Embedding::new("integration-model", "1", 3, values).unwrap(),
+            )
+            .await
+            .expect("station embedding insert must succeed");
+    }
+
+    let semantic_service = SearchService::with_providers(
+        Arc::new(repository.clone()),
+        Arc::new(DeterministicQueryParser),
+        Some(Arc::new(FixedEmbeddingProvider)),
+    );
+    let semantic_query = SearchQuery {
+        original: "semantic-only".to_owned(),
+        locale: "en-US".to_owned(),
+        terms: vec!["semantic-only".to_owned()],
+        tags: Vec::new(),
+        language: Some("en".to_owned()),
+        country_code: None,
+    };
+    let semantic_results = semantic_service
+        .search(
+            &semantic_query,
+            &SearchConstraints {
+                limit: 10,
+                excluded_station_ids: BTreeSet::new(),
+            },
+        )
+        .await
+        .expect("semantic search must succeed");
+    assert_eq!(semantic_results[0].station.id, "station-jazz-001");
+    assert!((semantic_results[0].score - 0.30).abs() < 0.000_001);
+    assert!(semantic_results[0].reason.starts_with("Hybrid match:"));
+
+    let british_semantic_results = semantic_service
+        .search(
+            &SearchQuery {
+                country_code: Some("GB".to_owned()),
+                ..semantic_query.clone()
+            },
+            &SearchConstraints {
+                limit: 1,
+                excluded_station_ids: BTreeSet::from(["station-jazz-002".to_owned()]),
+            },
+        )
+        .await
+        .expect("hard-filtered semantic search must succeed");
+    assert_eq!(station_ids(&british_semantic_results), ["station-rock-001"]);
+
+    let tie_results = semantic_service
+        .search(
+            &semantic_query,
+            &SearchConstraints {
+                limit: 10,
+                excluded_station_ids: BTreeSet::from([
+                    "station-jazz-001".to_owned(),
+                    "station-jazz-002".to_owned(),
+                ]),
+            },
+        )
+        .await
+        .expect("semantic tie search must succeed");
+    assert_eq!(
+        station_ids(&tie_results),
+        ["station-rock-001", "station-rock-002"]
+    );
+
+    let fallback_service = SearchService::with_providers(
+        Arc::new(repository.clone()),
+        Arc::new(DeterministicQueryParser),
+        Some(Arc::new(FailingEmbeddingProvider)),
+    );
+    let fallback_results = fallback_service
+        .search(
+            &rock_query,
+            &SearchConstraints {
+                limit: 10,
+                excluded_station_ids: BTreeSet::new(),
+            },
+        )
+        .await
+        .expect("provider failure must retain metadata search");
+    assert_eq!(
+        station_ids(&fallback_results),
+        ["station-rock-001", "station-rock-002"]
+    );
+
+    let embedding_pool = repository_pool(&database_url).await;
+    let persisted_count = sqlx::query_scalar::<_, i64>(
+        r#"
+SELECT COUNT(*)
+FROM station_embeddings
+WHERE station_id = 'station-jazz-001'
+  AND model = 'integration-model'
+  AND version = '1'
+"#,
+    )
+    .fetch_one(&embedding_pool)
+    .await
+    .expect("embedding count must be inspectable");
+    let persisted = sqlx::query_as::<_, (i32, f64, bool)>(
+        r#"
+SELECT dimension, embedding <=> '[1,0,0]'::vector, updated_at >= created_at
+FROM station_embeddings
+WHERE station_id = 'station-jazz-001'
+  AND model = 'integration-model'
+  AND version = '1'
+"#,
+    )
+    .fetch_one(&embedding_pool)
+    .await
+    .expect("embedding persistence must be inspectable");
+    assert_eq!(persisted_count, 1);
+    assert_eq!(persisted.0, 3);
+    assert!(persisted.1.abs() < 0.000_001);
+    assert!(persisted.2);
+    embedding_pool.close().await;
+    embedding_store.close().await;
 
     let import_store = PostgresImportStore::connect(&database_url)
         .await
@@ -225,6 +380,15 @@ WHERE s.source = $1 AND s.source_station_id = $2
         .unwrap();
     assert_eq!(ready.status(), axum::http::StatusCode::OK);
 
+    let provider_independent_ready = router_with_search_service(fallback_service)
+        .oneshot(Request::get("/health/ready").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        provider_independent_ready.status(),
+        axum::http::StatusCode::OK
+    );
+
     repository.close().await;
 
     let unavailable = app
@@ -263,6 +427,32 @@ fn station_ids(results: &[rockserver::search::RankedStation]) -> Vec<&str> {
         .iter()
         .map(|ranked| ranked.station.id.as_str())
         .collect()
+}
+
+async fn repository_pool(database_url: &str) -> PgPool {
+    PgPool::connect(database_url)
+        .await
+        .expect("inspection connection must succeed")
+}
+
+struct FixedEmbeddingProvider;
+
+#[async_trait]
+impl EmbeddingProvider for FixedEmbeddingProvider {
+    async fn embed(&self, _text: &str) -> Result<Embedding, EmbeddingProviderError> {
+        Ok(Embedding::new("integration-model", "1", 3, vec![1.0, 0.0, 0.0]).unwrap())
+    }
+}
+
+struct FailingEmbeddingProvider;
+
+#[async_trait]
+impl EmbeddingProvider for FailingEmbeddingProvider {
+    async fn embed(&self, _text: &str) -> Result<Embedding, EmbeddingProviderError> {
+        Err(EmbeddingProviderError::safe(
+            "scripted integration provider failure",
+        ))
+    }
 }
 
 struct OnePageProvider {
