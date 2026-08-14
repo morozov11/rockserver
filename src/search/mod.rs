@@ -1,6 +1,7 @@
 //! Search domain, provider boundaries, fallback semantics, and catalog boundary.
 
 mod embedding;
+mod llm;
 mod query;
 mod ranking;
 
@@ -12,6 +13,9 @@ pub use embedding::{
     Embedding, EmbeddingBackfill, EmbeddingBackfillResult, EmbeddingProvenance, EmbeddingProvider,
     EmbeddingProviderError, EmbeddingStore, EmbeddingStoreError, EmbeddingValidationError,
     MAX_EMBEDDING_DIMENSION, StationEmbeddingDocument,
+};
+pub use llm::{
+    LlmProvider, LlmProviderError, LlmQueryParser, LlmRequest, MAX_LLM_INTENT_JSON_BYTES,
 };
 pub use query::{
     DeterministicQueryParser, QueryIntent, QueryParser, QueryParserError, QueryParserInput,
@@ -538,6 +542,45 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["station-rock-001", "station-rock-002"]
         );
+    }
+
+    struct InvalidIntentParser;
+
+    #[async_trait]
+    impl QueryParser for InvalidIntentParser {
+        async fn parse(&self, _input: &QueryParserInput) -> Result<QueryIntent, QueryParserError> {
+            Ok(QueryIntent {
+                terms: vec!["jazz".to_owned()],
+                tags: Vec::new(),
+                language: Some("english".to_owned()),
+                country_code: None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_hard_filter_from_parser_uses_deterministic_fallback() {
+        let service = SearchService::with_providers(
+            Arc::new(InMemoryStationRepository::with_builtin_catalog()),
+            Arc::new(InvalidIntentParser),
+            None,
+        );
+        let outcome = service
+            .interpret_and_search(
+                QueryParserInput {
+                    query: "rock".to_owned(),
+                    locale: "en-US".to_owned(),
+                },
+                &SearchConstraints {
+                    limit: 10,
+                    excluded_station_ids: BTreeSet::new(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.query.language.as_deref(), Some("en"));
+        assert_eq!(outcome.query.terms, ["rock"]);
     }
 
     struct FixedEmbeddingProvider;

@@ -92,7 +92,7 @@
         <article class="node current"><h3>ranking</h3><span class="badge current">CURRENT: 0.70 metadata + 0.30 semantic</span></article>
         <article class="node future"><h3>Результаты → выбор → playback</h3><span class="badge future">FUTURE</span></article>
       </div>
-      <p><strong>Сейчас:</strong> Axum обрабатывает health routes и <code>POST /v1/search</code>. QueryParser получает только данные запроса, optional EmbeddingProvider — только query text. PostgreSQL применяет hard filters и exclusions до exact pgvector hybrid ranking; in-memory и provider failures используют metadata fallback. Равные scores упорядочиваются по station ID. Radio Browser import и embedding backfill запускаются отдельными CLI-командами и никогда не вызываются из request path. Production LLM/embedding provider отсутствует.</p>
+      <p><strong>Сейчас:</strong> Axum обрабатывает health routes и <code>POST /v1/search</code>. QueryParser получает только данные запроса; optional <code>LlmQueryParser</code> использует Yandex AI Studio только при явной env-конфигурации и всегда имеет deterministic fallback. В provider передаются только command и locale, не каталог. EmbeddingProvider получает только query text. PostgreSQL применяет hard filters и exclusions до exact pgvector hybrid ranking; in-memory и provider failures используют metadata fallback.</p>
     </section>
 
     <section id="inside">
@@ -102,7 +102,7 @@
         <article class="card current"><span class="badge current">CURRENT</span><h3>tracing / config</h3><p>JSON tracing, HTTP и import config, run/page/count logs, graceful shutdown.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>DTO / validation</h3><p>Transport DTO, request_id и contract-compliant ошибки.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>SearchService</h3><p>Нормализованный запрос и стабильное repository-neutral ранжирование.</p></article>
-        <article class="card current"><span class="badge current">CURRENT</span><h3>QueryParser trait</h3><p>Детерминированный parser и fallback; каталог не передаётся provider.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>QueryParser / LlmProvider</h3><p>Yandex JSON intent при явной env-конфигурации; deterministic fallback; каталог не передаётся provider.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>EmbeddingProvider trait</h3><p>Optional query vector; deterministic-dev fixture, без production model.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>StationRepository</h3><p>PostgreSQL + migrations/seed или встроенный in-memory fallback.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>CatalogImporter</h3><p>Ограниченный Radio Browser client + import store; отдельный CLI, не request path и не HTTP startup.</p></article>
@@ -165,6 +165,6 @@
       </ol>
     </section>
   </main>
-  <footer>Документ отражает состояние RS-007 Semantic ranking foundation на 2026-08-14. HTML автономен; import и embedding backfill требуют <code>DATABASE_URL</code>, запускаются отдельно и не меняют схемы HTTP API.</footer>
+  <footer>Документ отражает состояние RS-010 Yandex AI Studio intent parsing на 2026-08-14. HTML автономен; import и embedding backfill требуют <code>DATABASE_URL</code>, запускаются отдельно и не меняют схемы HTTP API.</footer>
 </body>
 </html>

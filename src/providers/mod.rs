@@ -4,3 +4,5 @@
 pub mod deterministic_embedding;
 /// Radio Browser HTTP client and deterministic DTO normalization.
 pub mod radio_browser;
+/// Yandex AI Studio adapter for structured radio-intent generation.
+pub mod yandex_llm;

@@ -8,7 +8,7 @@ The active product direction is Windows-first: RockCast text search, Windows mic
 
 RS-007 was re-verified on 2026-08-14 against the disposable local `rockserver` database on PostgreSQL 18.1 with pgvector 0.8.6. A clean `public` schema accepted migrations 1–4, the ignored real integration test passed, and two deterministic development backfills produced seven unique 32-dimensional station embeddings with no duplicate provenance keys. A live HTTP smoke check reported both health endpoints ready and returned hybrid-ranked `jazz` results. Credentials remain environment-only.
 
-Stages 0–9 are complete in the current working tree: repository bootstrap, Axum HTTP skeleton, OpenAPI search contract, deterministic in-memory search, PostgreSQL persistence, controlled Radio Browser import, RS-007 semantic ranking foundation, RS-008 voice-command JSON contract, and the provider-neutral streaming voice API.
+Stages 0–10 are complete in the current working tree: repository bootstrap, Axum HTTP skeleton, OpenAPI search contract, deterministic in-memory search, PostgreSQL persistence, controlled Radio Browser import, RS-007 semantic ranking foundation, RS-008 voice-command JSON contract, the provider-neutral streaming voice API, and Yandex AI Studio intent parsing.
 
 `POST /v1/search` keeps the existing request and response schemas. `SearchService` now owns request-only query interpretation and optional query embedding before calling `StationRepository`. The in-memory repository remains metadata-only. PostgreSQL uses exact pgvector cosine similarity when the query and station embedding provenance match, and otherwise preserves metadata fallback.
 
@@ -18,7 +18,7 @@ The JSON voice route retains its existing limits and error behavior. Canonical W
 
 The new `StreamingSpeechRecognizer`/`SpeechStreamSession` traits make Yandex and OpenAI replaceable without exposing credentials or upstream protocol details to clients. Startup currently installs an unavailable recognizer, so the wire protocol is implemented and deterministically tested but real audio decoding requires the next provider-adapter task.
 
-The query parser and embedding provider are traits. The deterministic metadata parser is the default and the parser failure fallback. The only concrete embedding provider is `deterministic-dev`, an explicitly non-production, hash-based local fixture. No LLM, OpenAI, or external model provider is present, and ordinary tests make no provider or external network call.
+The query parser, LLM provider, and embedding provider are traits. `LlmQueryParser` turns a bounded provider JSON response into the existing `QueryIntent`; it receives no catalog. The deterministic metadata parser is the default and the parser failure fallback. `YandexLlmProvider` is enabled only when both `YANDEX_AI_API_KEY` and `YANDEX_FOLDER_ID` are present; absent configuration preserves deterministic startup, while partial configuration fails safely without revealing values. It uses the documented synchronous AI Studio completion API, `Api-Key` authorization, `gpt://<folder>/yandexgpt/latest` by default, JSON Schema output, a 3-second timeout, and response/token bounds. Malformed/oversized/non-2xx/timeout responses and invalid hard filters all degrade through the existing deterministic path. Optional local `.env` loading is provided by `dotenvy`; `.env` and `.env.*` stay ignored. This is intent parsing for text and already-recognized voice transcripts, not SpeechKit STT. Ordinary tests use loopback mocks and never contact Yandex or another external provider.
 
 Station embedding generation is a separate `backfill_embeddings` command. It is never called by HTTP startup or `POST /v1/search`. Radio Browser import ownership and update semantics remain unchanged.
 
@@ -28,6 +28,8 @@ Station embedding generation is a separate `backfill_embeddings` command. It is 
 - Logging filter: `RUST_LOG`, default `info` when unset or invalid.
 - HTTP catalog backend: `DATABASE_URL` selects PostgreSQL; absence selects the six-station in-memory metadata fallback.
 - Optional query embeddings: `ROCKSERVER_SEMANTIC_PROVIDER=deterministic-dev`; absence means metadata-only search.
+- Optional LLM parser: `YANDEX_AI_API_KEY` and `YANDEX_FOLDER_ID` together enable Yandex AI Studio; absence of both selects deterministic parsing, and a partial configuration is a safe startup error.
+- Yandex parser tuning: `YANDEX_LLM_MODEL=yandexgpt` by default and `YANDEX_LLM_TIMEOUT_MS=3000`, bounded to 100–10,000 ms.
 - Development embedding dimension: `ROCKSERVER_EMBEDDING_DIMENSION`, default 32, valid range 1–16,000.
 - Development embedding provenance: model `rockserver-deterministic-dev`, version `1`, plus configured dimension.
 - Embedding command: `cargo run --bin backfill_embeddings`; it requires both `DATABASE_URL` and explicit deterministic provider selection.
@@ -57,7 +59,7 @@ The unbounded vector column deliberately avoids locking schema to a random test/
 ## Known limitations
 
 - `deterministic-dev` is a repeatable hash fixture, not a meaningful production semantic model.
-- There is no LLM query parser, production embedding provider, provider authentication, retry policy, or circuit breaker.
+- Yandex AI Studio is the only production LLM query parser; it has bounded per-request fallback but no retry policy or circuit breaker. Production embeddings remain absent.
 - Exact vector search has no ANN index and is intended as a correctness foundation, not a scale claim.
 - The backfill currently visits all stations and upserts every embedding; it does not yet skip unchanged station/model inputs or resume a failed run from durable workflow state.
 - A model/version is expected to imply one dimension, but RS-007 records/enforces compatibility per row rather than introducing a separate model registry.
@@ -68,11 +70,11 @@ The unbounded vector column deliberately avoids locking schema to a random test/
 
 ## Verification
 
-The regular all-target/all-feature suite passes with 41 deterministic unit, HTTP, contract, and WebSocket tests; the real PostgreSQL integration remains opt-in and ignored by default. Coverage includes a real loopback WebSocket upgrade with fake recognition, binary audio delivery, partial/final transcripts, request-ID propagation, and final station selection, alongside the existing query, provider-fallback, embedding, ranking, and persistence boundaries.
+The regular all-target/all-feature suite passes with 47 deterministic unit, HTTP, contract, and WebSocket tests; the real PostgreSQL integration remains opt-in and ignored by default. Coverage includes loopback Yandex LLM mocks for header/model/schema, non-2xx, timeout, malformed/oversized response, and secret-safe errors; a real loopback WebSocket upgrade with fake recognition; and existing query, provider-fallback, embedding, ranking, and persistence boundaries.
 
 Docker Engine 29.7.2 and Compose 5.3.1 ran isolated project `rockserver-rs007-test` on host port 55438 with `pgvector/pgvector:pg17`. The real integration test passed for extension/migrations, embedding insert and repeat update, provenance/dimension storage, exact cosine similarity, hard filters, exclusions, final limit, semantic tie-break, metadata fallback, HTTP search, and repository-only readiness. The real deterministic backfill command also completed twice; inspection showed seven unique development rows for `rockserver-deterministic-dev:1:8`. Only that project's container, network, and volume were removed afterward.
 
-Final formatting, strict Clippy, all-target/all-feature tests, diff whitespace, Compose, HTML, and Graphify results are recorded in `docs/tasks.md` after completion.
+Final `cargo fmt --check`, strict all-target/all-feature Clippy, `cargo test`, and `git diff --check` passed for RS-010. `graphify update .` was invoked as required but did not rebuild the ignored local graph because the installed Graphify environment failed with `No module named 'networkx.readwrite'`; no global tool installation was attempted. No live Yandex smoke was run because this working tree does not require or read a real secret.
 
 ## Next step
 

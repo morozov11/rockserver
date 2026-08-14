@@ -33,7 +33,8 @@ See [docs/architecture.md](docs/architecture.md) for boundaries and the planned 
 7. Semantic ranking behind query-parser and embedding provider traits — complete.
 8. Stable server-side voice-command JSON contract with request IDs, validation, body/time boundaries, and deterministic search reuse — complete.
 9. Provider-neutral WebSocket audio/STT contract and deterministic integration coverage — complete.
-10. Configure a production Yandex or OpenAI recognizer and connect RockCast microphone capture — next.
+10. Yandex AI Studio structured intent parsing with deterministic fallback — complete.
+11. Configure a production speech recognizer and connect RockCast microphone capture — next.
 
 RS-008 stabilizes the voice-command JSON contract. The next work is a small RockCast integration using its recognized transcript output, retaining the local catalog as fallback; detailed acceptance criteria remain in [TODO.md](TODO.md).
 
@@ -89,7 +90,7 @@ The real database integration test is opt-in so ordinary tests need no Docker or
 TEST_DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:PORT/DISPOSABLE_DATABASE cargo test --test postgres_integration --all-features -- --ignored --exact postgres_migrations_seed_search_and_readiness
 ```
 
-## Semantic search and embedding backfill
+## LLM intent parsing, semantic search, and embedding backfill
 
 The public HTTP schemas are unchanged. `QueryParser` receives only the validated query and locale and returns structured terms, tags, language, and country filters; it never receives the catalog. The deterministic parser is both the default and the fallback if a future optional parser fails. `EmbeddingProvider` receives one query string at request time. Station embeddings are generated only by the controlled backfill workflow, one station document at a time.
 
@@ -113,6 +114,19 @@ PowerShell uses the same three environment variables through `$env:NAME='value'`
 Migration `0004_add_station_embeddings.sql` uses an unbounded `vector` column plus model/version/dimension fields and CHECK constraints, so the schema is not locked to the deterministic fixture's dimension. Searches compare only exact matching provenance and currently use exact cosine distance; there is deliberately no dimension-specific HNSW/IVFFlat index at this foundation stage. Cosine similarity is normalized to `[0,1]`, then a compatible pair uses `0.70 * metadata_score + 0.30 * semantic_score`. A station without a compatible embedding retains its full metadata score. With no valid query embedding, the original metadata filter/ranker is used unchanged. Hard language/country filters and exclusions are applied before scoring and final limit; `station_id ASC` remains the last tie-break.
 
 Parser or embedding provider failures are logged and fall back to metadata instead of causing a 5xx when the repository can answer. Readiness continues to reflect only the selected repository/database; optional semantic providers do not affect it. Liveness remains process-only.
+
+`YandexLlmProvider` is the first production parser adapter. It is selected only if both `YANDEX_AI_API_KEY` and `YANDEX_FOLDER_ID` are non-empty; if neither is present, startup keeps `DeterministicQueryParser`. A partial configuration stops startup with a message naming only the configuration variables, never their values. The optional ignored `.env` is loaded with `dotenvy` for local development; deployed configuration still comes exclusively from process environment.
+
+The provider calls Yandex AI Studio's synchronous text-generation endpoint with `Authorization: Api-Key …`, `gpt://<folder>/yandexgpt/latest` by default, a three-second whole-request timeout, a 16 KiB upstream-response cap, and a 256-token completion cap. It sends only a fixed system instruction and a JSON-encoded `{command, locale}` user payload, never stations or catalog data. Yandex `jsonSchema` output and local `serde` validation require `terms`, `tags`, optional `language`, and optional `country_code`; malformed, oversized, invalid, timeout, and non-2xx outcomes all use the existing deterministic fallback.
+
+| Variable | Default | Rule |
+| --- | --- | --- |
+| `YANDEX_AI_API_KEY` | none | Required together with `YANDEX_FOLDER_ID`; secret, never logged. |
+| `YANDEX_FOLDER_ID` | none | Required together with `YANDEX_AI_API_KEY`; valid identifier. |
+| `YANDEX_LLM_MODEL` | `yandexgpt` | Non-secret model identifier; startup constructs `gpt://<folder>/<model>/latest`. |
+| `YANDEX_LLM_TIMEOUT_MS` | `3000` | Integer from 100 through 10,000 ms. |
+
+Copy `.env.example` to ignored `.env` only for local development and fill the two required values outside version control. This adapter parses text and already-recognized voice transcripts through the same `SearchService`; it is unrelated to SpeechKit audio recognition.
 
 ## Import Radio Browser
 
