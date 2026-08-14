@@ -17,6 +17,7 @@ const MAX_RESPONSE_BYTES: usize = 16 * 1_024;
 const TEST_AUDIO_PATH_ENV: &str = "TEST_YANDEX_STT_AUDIO_PATH";
 const TEST_EXPECTED_TRANSCRIPT_ENV: &str = "TEST_YANDEX_STT_EXPECTED_TRANSCRIPT";
 const TEST_LOCALE_ENV: &str = "TEST_YANDEX_STT_LOCALE";
+const TEST_DEBUG_ENV: &str = "TEST_YANDEX_STT_DEBUG";
 
 static LOGGING: Once = Once::new();
 static TEST_ID: OnceLock<String> = OnceLock::new();
@@ -40,6 +41,7 @@ async fn recognizes_real_ogg_opus_voice_command_with_safe_logs() {
             .expect("the committed expected transcript fixture must be readable")
     });
     let locale = env::var(TEST_LOCALE_ENV).unwrap_or_else(|_| "ru-RU".to_owned());
+    let debug = env::var(TEST_DEBUG_ENV).is_ok_and(|value| value == "1");
     let audio = fs::read(&audio_path)
         .unwrap_or_else(|_| panic!("{TEST_AUDIO_PATH_ENV} must name a readable file"));
 
@@ -57,6 +59,21 @@ async fn recognizes_real_ogg_opus_voice_command_with_safe_logs() {
     );
 
     let audio_bytes = audio.len();
+    if debug {
+        tracing::info!(
+            test_id = test_id(),
+            method = "POST",
+            url = SPEECHKIT_RECOGNIZE_URL,
+            authorization = "Api-Key [REDACTED]",
+            audio_path = %audio_path,
+            audio_bytes,
+            locale = %locale,
+            topic = "general",
+            format = "oggopus",
+            expected_transcript = %expected_transcript.trim(),
+            "SpeechKit live recognition request diagnostic"
+        );
+    }
     let started = Instant::now();
     let response = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -103,6 +120,15 @@ async fn recognizes_real_ogg_opus_voice_command_with_safe_logs() {
         .filter(|value| !value.trim().is_empty())
         .expect("SpeechKit success response must contain a non-empty result");
     let matches_expected = normalize(&transcript).contains(&normalize(&expected_transcript));
+    if debug {
+        tracing::info!(
+            test_id = test_id(),
+            response = %String::from_utf8_lossy(&response_bytes),
+            recognized_transcript = %transcript,
+            expected_transcript = %expected_transcript.trim(),
+            "SpeechKit live recognition content diagnostic"
+        );
+    }
     tracing::info!(
         test_id = test_id(),
         response_bytes = response_bytes.len(),

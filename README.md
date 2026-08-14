@@ -94,6 +94,8 @@ cargo test --test yandex_speechkit_live -- --ignored --exact recognizes_real_ogg
 
 The committed recording is one channel, Ogg/Opus, at most 1 MiB and 30 seconds. `TEST_YANDEX_STT_AUDIO_PATH` and `TEST_YANDEX_STT_EXPECTED_TRANSCRIPT` can optionally override the committed fixture. The API key needs SpeechKit TTS and STT scopes in addition to any AI Studio permissions. This test is intentionally separate from the provider-neutral streaming API: it verifies Yandex's synchronous pre-recorded-audio endpoint and does not add a production SpeechKit adapter.
 
+To print the actual request metadata and recognition result while diagnosing a mismatch, run the live test with `TEST_YANDEX_STT_DEBUG=1`. It prints the URL, non-secret parameters, Ogg path/size, expected phrase, raw bounded JSON response, and recognized phrase; the authorization value remains `Api-Key [REDACTED]`.
+
 To diagnose fixture generation without exposing the API key, set `YANDEX_SPEECHKIT_DEBUG=1` for the command. It prints the endpoint, non-secret form fields, a redacted authorization header, response status and headers, and a redacted response body capped at 16 KiB for non-200 responses. It also redacts key-like values that Yandex may echo in an error message.
 
 The real database integration test is opt-in so ordinary tests need no Docker or network:

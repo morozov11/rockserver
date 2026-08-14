@@ -151,3 +151,9 @@
 - Goal: make the failed live TTS request inspectable without exposing the configured API key.
 - Result: `YANDEX_SPEECHKIT_DEBUG=1 cargo run --bin generate_speechkit_fixture` prints the fixed non-secret request fields, redacted authorization, response status/headers, and a 16 KiB bounded redacted non-success response body. It also removes provider-echoed key-like fragments. It intentionally does not print the credential or raw unbounded provider content.
 - Status: complete.
+
+## RS-014 вЂ” 2026-08-14 вЂ” Opt-in STT mismatch diagnostics
+
+- Goal: make a live SpeechKit recognition mismatch directly inspectable by the developer.
+- Result: `TEST_YANDEX_STT_DEBUG=1` logs the endpoint, non-secret query fields, audio path and size, expected transcript, raw successful JSON response, and recognized transcript. The `Authorization` header is represented only as `Api-Key [REDACTED]`.
+- Status: complete.
