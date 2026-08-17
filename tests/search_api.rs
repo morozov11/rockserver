@@ -47,7 +47,14 @@ async fn equal_score_results_use_station_id_as_a_stable_tie_break() {
     let first_ids = station_ids(&first);
     let second_ids = station_ids(&second);
 
-    assert_eq!(first_ids, vec!["station-rock-001", "station-rock-002"]);
+    assert_eq!(
+        first_ids,
+        vec![
+            "station-rock-001",
+            "station-rock-002",
+            "station-rock-ru-001"
+        ]
+    );
     assert_eq!(first_ids, second_ids);
 }
 

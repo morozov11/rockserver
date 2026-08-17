@@ -423,7 +423,14 @@ mod tests {
             .map(|station| station.station.id)
             .collect::<Vec<_>>();
 
-        assert_eq!(ids, ["station-rock-001", "station-rock-002"]);
+        assert_eq!(
+            ids,
+            [
+                "station-rock-001",
+                "station-rock-002",
+                "station-rock-ru-001"
+            ]
+        );
     }
 
     #[tokio::test]
@@ -540,7 +547,11 @@ mod tests {
                 .iter()
                 .map(|station| station.station.id.as_str())
                 .collect::<Vec<_>>(),
-            ["station-rock-001", "station-rock-002"]
+            [
+                "station-rock-001",
+                "station-rock-002",
+                "station-rock-ru-001"
+            ]
         );
     }
 
@@ -579,7 +590,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(outcome.query.language.as_deref(), Some("en"));
+        assert_eq!(outcome.query.language, None);
         assert_eq!(outcome.query.terms, ["rock"]);
     }
 

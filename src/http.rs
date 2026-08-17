@@ -21,7 +21,8 @@ use axum::{
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value, json};
-use tower_http::trace::TraceLayer;
+use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tracing::Level;
 
 use crate::{
     search::{
@@ -119,7 +120,12 @@ pub fn router_with_services(
         .route("/api/v1/voice/stream", get(voice_stream))
         .route("/v1/voice/stream", get(voice_stream))
         .with_state(state)
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
+                .on_request(DefaultOnRequest::new().level(Level::INFO))
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
 }
 
 /// Upgrades a request to the provider-neutral streaming voice protocol.
@@ -129,6 +135,7 @@ async fn voice_stream(
     upgrade: WebSocketUpgrade,
 ) -> Response {
     let request_id = request_id(&headers);
+    tracing::info!(%request_id, "voice websocket upgrade requested");
     let socket_request_id = request_id.clone();
     let response = upgrade
         .max_message_size(MAX_STREAM_AUDIO_CHUNK_BYTES + 1024)
@@ -162,6 +169,14 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
             return;
         }
     };
+    tracing::info!(
+        %request_id,
+        locale = %start.locale,
+        sample_rate_hz = start.sample_rate_hz,
+        limit = start.limit,
+        excluded_stations = start.exclude_station_ids.len(),
+        "voice websocket session started"
+    );
 
     let mut session = match tokio::time::timeout(
         DEFAULT_STREAM_OPERATION_TIMEOUT,
@@ -258,6 +273,7 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
                 }
             }
             Ok(Message::Text(text)) if is_commit_event(&text) => {
+                tracing::info!(%request_id, audio_bytes, "voice audio committed");
                 let updates = match speech_operation(session.finish()).await {
                     Ok(updates) => updates,
                     Err(error) => {
@@ -355,6 +371,14 @@ async fn search(State(state): State<AppState>, headers: HeaderMap, body: Body) -
             );
         }
     };
+    tracing::info!(
+        %request_id,
+        query = %validated.query,
+        locale = %validated.locale,
+        limit = validated.limit,
+        excluded_stations = validated.exclude_station_ids.len(),
+        "station search request"
+    );
 
     let constraints = SearchConstraints {
         limit: validated.limit,
@@ -383,6 +407,25 @@ async fn search(State(state): State<AppState>, headers: HeaderMap, body: Body) -
             );
         }
     };
+    tracing::info!(
+        %request_id,
+        terms = ?outcome.query.terms,
+        tags = ?outcome.query.tags,
+        language = ?outcome.query.language,
+        country_code = ?outcome.query.country_code,
+        stations = outcome.stations.len(),
+        "station search completed"
+    );
+    for (rank, station) in outcome.stations.iter().enumerate() {
+        tracing::info!(
+            %request_id,
+            rank,
+            station_id = %station.station.id,
+            station = %station.station.name,
+            score = station.score,
+            "station search candidate"
+        );
+    }
 
     with_request_id(
         Json(SearchResponseDto {
@@ -422,6 +465,13 @@ async fn voice_command(State(state): State<AppState>, headers: HeaderMap, body: 
             );
         }
     };
+    tracing::info!(
+        %request_id,
+        transcript = %validated.transcript,
+        locale = %validated.locale,
+        limit = validated.limit,
+        "voice command request"
+    );
     let constraints = SearchConstraints {
         limit: validated.limit,
         excluded_station_ids: validated.exclude_station_ids,
@@ -467,6 +517,17 @@ async fn voice_command(State(state): State<AppState>, headers: HeaderMap, body: 
         .map(StationResultDto::from)
         .collect::<Vec<_>>();
     let selected_station = stations.first().cloned();
+    tracing::info!(
+        %request_id,
+        transcript = %validated.transcript,
+        terms = ?outcome.query.terms,
+        tags = ?outcome.query.tags,
+        language = ?outcome.query.language,
+        country_code = ?outcome.query.country_code,
+        stations = stations.len(),
+        selected_station = ?selected_station.as_ref().map(|station| station.name.as_str()),
+        "voice command completed"
+    );
     with_request_id(
         Json(VoiceCommandResponseDto {
             request_id: request_id.clone(),
@@ -560,6 +621,14 @@ async fn finish_stream_search(
     start: &ValidatedVoiceStreamStart,
     transcript: String,
 ) {
+    tracing::info!(
+        %request_id,
+        transcript = %transcript,
+        locale = %start.locale,
+        limit = start.limit,
+        audio_search = true,
+        "voice transcript search started"
+    );
     let constraints = SearchConstraints {
         limit: start.limit,
         excluded_station_ids: start.exclude_station_ids.clone(),
@@ -607,6 +676,28 @@ async fn finish_stream_search(
         .map(StationResultDto::from)
         .collect::<Vec<_>>();
     let selected_station = stations.first().cloned();
+    tracing::info!(
+        %request_id,
+        transcript = %transcript,
+        terms = ?outcome.query.terms,
+        tags = ?outcome.query.tags,
+        language = ?outcome.query.language,
+        country_code = ?outcome.query.country_code,
+        stations = stations.len(),
+        selected_station = ?selected_station.as_ref().map(|station| station.name.as_str()),
+        "voice transcript search completed"
+    );
+    for (rank, station) in stations.iter().enumerate() {
+        tracing::info!(
+            %request_id,
+            rank,
+            station_id = %station.id,
+            station = %station.name,
+            country_code = ?station.country_code,
+            stream_url = %station.stream_url,
+            "voice station candidate"
+        );
+    }
     let _ = send_stream_event(
         socket,
         &VoiceStreamServerEvent::Result {

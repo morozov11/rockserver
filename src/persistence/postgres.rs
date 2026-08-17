@@ -371,7 +371,7 @@ mod tests {
         let parameters = PostgresSearchParameters::from_domain(&query, &constraints, None).unwrap();
 
         assert_eq!(parameters.country_code.as_deref(), Some("GB"));
-        assert_eq!(parameters.language.as_deref(), Some("en"));
+        assert_eq!(parameters.language, None);
         assert_eq!(parameters.limit, 7);
         assert_eq!(parameters.metadata_weight, METADATA_WEIGHT);
         assert_eq!(parameters.semantic_weight, SEMANTIC_WEIGHT);

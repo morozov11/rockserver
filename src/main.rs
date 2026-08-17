@@ -2,14 +2,11 @@ use std::{error::Error, sync::Arc};
 
 use rockserver::{
     config::Config,
-    http::router_with_search_service,
     persistence::repository_from_env,
-    providers::deterministic_embedding::DeterministicEmbeddingProvider,
+    providers::embedding_provider_from_env,
     providers::yandex_llm::YandexLlmProvider,
-    search::{
-        DeterministicQueryParser, EmbeddingProvider, LlmProvider, LlmQueryParser, QueryParser,
-        SearchService,
-    },
+    providers::yandex_speechkit::YandexSpeechKitRecognizer,
+    search::{DeterministicQueryParser, LlmProvider, LlmQueryParser, QueryParser, SearchService},
     serve, shutdown_signal, telemetry,
 };
 use tokio::net::TcpListener;
@@ -22,8 +19,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let config = Config::from_env()?;
     let repository = repository_from_env().await?;
-    let embedding_provider = DeterministicEmbeddingProvider::optional_from_env()?
-        .map(|provider| Arc::new(provider) as Arc<dyn EmbeddingProvider>);
+    let embedding_provider = embedding_provider_from_env()?;
     let query_parser: Arc<dyn QueryParser> = match YandexLlmProvider::optional_from_env()? {
         Some(provider) => Arc::new(LlmQueryParser::new(
             Arc::new(provider) as Arc<dyn LlmProvider>
@@ -35,9 +31,18 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let listener = TcpListener::bind(config.bind_addr).await?;
     tracing::info!(address = %config.bind_addr, "RockServer listening");
 
+    let speech_recognizer = YandexSpeechKitRecognizer::optional_from_env()?
+        .map(|provider| {
+            Arc::new(provider) as Arc<dyn rockserver::speech::StreamingSpeechRecognizer>
+        })
+        .unwrap_or_else(|| Arc::new(rockserver::speech::UnavailableSpeechRecognizer));
     serve(
         listener,
-        router_with_search_service(search_service),
+        rockserver::http::router_with_services(
+            search_service,
+            speech_recognizer,
+            rockserver::http::DEFAULT_VOICE_COMMAND_TIMEOUT,
+        ),
         shutdown_signal(),
     )
     .await?;

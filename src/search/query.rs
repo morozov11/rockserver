@@ -112,11 +112,11 @@ pub(super) fn validate_intent(intent: QueryIntent) -> Result<QueryIntent, QueryP
     })
 }
 
-fn deterministic_intent(original: &str, locale: &str) -> QueryIntent {
+pub(super) fn deterministic_intent(original: &str, _locale: &str) -> QueryIntent {
     let terms = tokenize(original);
     let tags = recognized_tags(&terms);
     let country_code = infer_country_code(&terms);
-    let language = locale.split('-').next().map(str::to_lowercase);
+    let language = infer_language(&terms);
 
     QueryIntent {
         terms,
@@ -155,12 +155,56 @@ fn recognized_tags(terms: &[String]) -> Vec<String> {
     if term_set.contains("classic") && term_set.contains("rock") {
         tags.push("classic rock".to_owned());
     }
+    if term_set.contains("джаз") {
+        tags.push("jazz".to_owned());
+    }
+    if term_set.contains("рок") {
+        tags.push("rock".to_owned());
+    }
+    if [
+        "медленный",
+        "медленная",
+        "спокойный",
+        "спокойная",
+        "тихий",
+        "тихая",
+    ]
+    .iter()
+    .any(|term| term_set.contains(term))
+    {
+        tags.push("calm".to_owned());
+    }
+    tags.sort();
+    tags.dedup();
     tags
 }
 
-fn infer_country_code(terms: &[String]) -> Option<String> {
+fn infer_language(terms: &[String]) -> Option<String> {
     let term_set = terms.iter().map(String::as_str).collect::<BTreeSet<_>>();
-    if term_set.contains("russia") || term_set.contains("россия") {
+    if term_set.contains("русскоязычный") || term_set.contains("русскоязычная")
+    {
+        Some("ru".to_owned())
+    } else if term_set.contains("англоязычный") || term_set.contains("англоязычная")
+    {
+        Some("en".to_owned())
+    } else {
+        None
+    }
+}
+
+pub(super) fn infer_country_code(terms: &[String]) -> Option<String> {
+    let term_set = terms.iter().map(String::as_str).collect::<BTreeSet<_>>();
+    if [
+        "russia",
+        "russian",
+        "россия",
+        "россии",
+        "российский",
+        "российская",
+    ]
+    .iter()
+    .any(|term| term_set.contains(term))
+    {
         Some("RU".to_owned())
     } else if term_set.contains("british") || term_set.contains("uk") {
         Some("GB".to_owned())
@@ -173,7 +217,7 @@ fn infer_country_code(terms: &[String]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{QueryIntent, validate_intent};
+    use super::{QueryIntent, deterministic_intent, validate_intent};
 
     #[test]
     fn provider_intent_is_normalized_and_deduplicated() {
@@ -205,5 +249,14 @@ mod tests {
             error.to_string(),
             "query parser returned an invalid language filter"
         );
+    }
+
+    #[test]
+    fn locale_does_not_create_language_or_country_filters() {
+        let intent = deterministic_intent("включи медленный джаз", "ru-RU");
+        assert_eq!(intent.language, None);
+        assert_eq!(intent.country_code, None);
+        assert!(intent.tags.iter().any(|tag| tag == "jazz"));
+        assert!(intent.tags.iter().any(|tag| tag == "calm"));
     }
 }

@@ -106,6 +106,8 @@ TEST_DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:PORT/DISPOSABLE_DATABASE ca
 
 ## LLM intent parsing, semantic search, and embedding backfill
 
+For production local CPU embeddings, build with `cargo build --features onnx-local` and set `ROCKSERVER_SEMANTIC_PROVIDER=onnx-e5-local`. The selected model is `intfloat/multilingual-e5-small`: a 384-dimensional multilingual E5 encoder suitable for Russian and English. Place its exported `model.onnx` and matching `tokenizer.json` outside the repository, set `ROCKSERVER_ONNX_MODEL_PATH`, `ROCKSERVER_ONNX_TOKENIZER_PATH`, and local `ORT_DYLIB_PATH`, then run `cargo run --features onnx-local --bin backfill_embeddings`. Query requests use E5's `query:` prefix; catalog rows use `passage:` before mean pooling and L2 normalization. Migration 0005 persists each station's normalized `searchable_text` and supplies a partial 384-dimensional cosine HNSW index for this exact model provenance. No model download, model path, DSN, stream URL, or credential is logged.
+
 The public HTTP schemas are unchanged. `QueryParser` receives only the validated query and locale and returns structured terms, tags, language, and country filters; it never receives the catalog. The deterministic parser is both the default and the fallback if a future optional parser fails. `EmbeddingProvider` receives one query string at request time. Station embeddings are generated only by the controlled backfill workflow, one station document at a time.
 
 RS-007 ships no production model. The only concrete embedder is an explicitly named deterministic development implementation. Enable it with matching settings for backfill and server startup:

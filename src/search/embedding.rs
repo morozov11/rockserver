@@ -148,6 +148,11 @@ impl Error for EmbeddingProviderError {}
 pub trait EmbeddingProvider: Send + Sync {
     /// Produces a validated embedding for the supplied text.
     async fn embed(&self, text: &str) -> Result<Embedding, EmbeddingProviderError>;
+
+    /// Produces a station-document embedding; symmetric models use the query implementation.
+    async fn embed_document(&self, text: &str) -> Result<Embedding, EmbeddingProviderError> {
+        self.embed(text).await
+    }
 }
 
 /// One station document read by the controlled embedding workflow.
@@ -245,7 +250,7 @@ where
             }
             let page_len = documents.len();
             for document in documents {
-                let embedding = self.provider.embed(&document.text).await?;
+                let embedding = self.provider.embed_document(&document.text).await?;
                 self.store
                     .upsert_embedding(&document.station_id, &embedding)
                     .await?;

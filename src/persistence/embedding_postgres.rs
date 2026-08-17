@@ -49,7 +49,7 @@ impl EmbeddingStore for PostgresEmbeddingStore {
             r#"
 SELECT
     id AS station_id,
-    concat_ws(' ', name, array_to_string(tags, ' ')) AS text
+    searchable_text AS text
 FROM stations
 WHERE ($1::text IS NULL OR id > $1)
 ORDER BY id ASC

@@ -1,13 +1,15 @@
 //! Controlled development-only station embedding backfill/update command.
 
-use std::{env, error::Error};
+use std::{env, error::Error, sync::Arc};
 
+use async_trait::async_trait;
 use rockserver::{
     persistence::{DATABASE_URL_ENV, PostgresEmbeddingStore},
-    providers::deterministic_embedding::{
-        DETERMINISTIC_DEV_PROVIDER, DeterministicEmbeddingProvider, SEMANTIC_PROVIDER_ENV,
+    providers::embedding_provider_from_env,
+    search::{
+        Embedding, EmbeddingBackfill, EmbeddingProvider, EmbeddingProviderError,
+        EmbeddingStoreError,
     },
-    search::{EmbeddingBackfill, EmbeddingStoreError},
     telemetry,
 };
 
@@ -18,13 +20,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     telemetry::init()?;
 
     let database_url = required_database_url()?;
-    let provider = DeterministicEmbeddingProvider::optional_from_env()?.ok_or_else(|| {
-        EmbeddingStoreError::safe(format!(
-            "{SEMANTIC_PROVIDER_ENV}={DETERMINISTIC_DEV_PROVIDER} is required for this development workflow"
-        ))
+    let provider = embedding_provider_from_env()?.ok_or_else(|| {
+        EmbeddingStoreError::safe("ROCKSERVER_SEMANTIC_PROVIDER is required for embedding backfill")
     })?;
     let store = PostgresEmbeddingStore::connect(&database_url).await?;
-    let workflow = EmbeddingBackfill::new(provider, store.clone(), PAGE_SIZE);
+    let workflow =
+        EmbeddingBackfill::new(SharedEmbeddingProvider(provider), store.clone(), PAGE_SIZE);
 
     let result = workflow.run().await;
     store.close().await;
@@ -35,6 +36,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         "station embedding backfill completed"
     );
     Ok(())
+}
+
+/// Bridges a selected shared runtime provider to the generic backfill workflow.
+struct SharedEmbeddingProvider(Arc<dyn EmbeddingProvider>);
+
+#[async_trait]
+impl EmbeddingProvider for SharedEmbeddingProvider {
+    async fn embed(&self, text: &str) -> Result<Embedding, EmbeddingProviderError> {
+        self.0.embed(text).await
+    }
+
+    async fn embed_document(&self, text: &str) -> Result<Embedding, EmbeddingProviderError> {
+        self.0.embed_document(text).await
+    }
 }
 
 fn required_database_url() -> Result<String, EmbeddingStoreError> {

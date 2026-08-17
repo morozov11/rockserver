@@ -3,6 +3,12 @@ name = "rockserver"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+# Keeps the heavy local model runtime explicit.  Production deployments enable
+# this feature and point ORT_DYLIB_PATH at a locally installed ONNX Runtime.
+onnx-local = ["dep:ndarray", "dep:ort", "dep:tokenizers"]
+
 [dependencies]
 async-trait = "0.1"
 axum = { version = "0.8", features = ["ws"] }
@@ -17,6 +23,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tower-http = { version = "0.6", features = ["trace"] }
 url = "2"
 uuid = { version = "1", features = ["v4"] }
+ndarray = { version = "0.17", optional = true }
+ort = { version = "2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray"], optional = true }
+tokenizers = { version = "0.22", optional = true }
 
 [dev-dependencies]
 http-body-util = "0.1"

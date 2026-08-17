@@ -84,15 +84,16 @@ impl CatalogImportStore for PostgresImportStore {
                 r#"
 INSERT INTO stations (
     id, source, source_station_id, name, homepage_url, tags, language, country_code,
-    last_import_run_id
+    searchable_text, last_import_run_id
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (source, source_station_id) DO UPDATE SET
     name = EXCLUDED.name,
     homepage_url = EXCLUDED.homepage_url,
     tags = EXCLUDED.tags,
     language = EXCLUDED.language,
     country_code = EXCLUDED.country_code,
+    searchable_text = EXCLUDED.searchable_text,
     last_import_run_id = EXCLUDED.last_import_run_id,
     updated_at = now()
 "#,
@@ -105,6 +106,7 @@ ON CONFLICT (source, source_station_id) DO UPDATE SET
             .bind(&station.tags)
             .bind(&station.language)
             .bind(&station.country_code)
+            .bind(searchable_text(station))
             .bind(run_id)
             .execute(&mut *transaction)
             .await
@@ -164,6 +166,21 @@ ON CONFLICT (source, source_stream_id) DO UPDATE SET
         let summary = error_summary.chars().take(500).collect::<String>();
         finish_run(&self.pool, run_id, "failed", counts, Some(&summary)).await
     }
+}
+
+/// Builds the bounded, normalized document used by local embedding backfills.
+fn searchable_text(station: &ImportedStation) -> String {
+    let tags = station.tags.join(" ");
+    [
+        station.name.as_str(),
+        tags.as_str(),
+        station.language.as_deref().unwrap_or_default(),
+        station.country_code.as_deref().unwrap_or_default(),
+    ]
+    .into_iter()
+    .filter(|part| !part.is_empty())
+    .collect::<Vec<_>>()
+    .join(" ")
 }
 
 // Finalization only transitions an existing started run, preventing accidental rewrites.

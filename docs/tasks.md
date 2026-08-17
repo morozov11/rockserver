@@ -1,5 +1,12 @@
 # Task log
 
+## RS-016 — 2026-08-17 — Local ONNX multilingual semantic search
+
+- Goal: add an opt-in CPU/local ONNX embedding provider suitable for Russian and English station discovery.
+- Result: selected `intfloat/multilingual-e5-small` (384 dimensions), added local ONNX Runtime/tokenizer inference, E5 query/document prefixes, normalized station text, importer maintenance, backfill support, and a provenance-specific pgvector HNSW cosine index.
+- Verification: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test --all-features` pass with 50 regular tests. The local PostgreSQL database was migrated, 999 real Radio Browser stations were imported, all 1,005 catalog rows received E5 embeddings, and three Russian live queries ran through the HTTP search path. Jazz and 80s-rock ranked relevant stations first; the classical/instrumental query exposed a catalog/locale-filter quality limitation.
+- Status: complete; local model assets remain intentionally outside Git.
+
 ## RS-000 — 2026-08-13 — Repository bootstrap
 
 - Goal: establish the Rust crate, repository hygiene, contributor guidance, project scope, architecture outline, and near-term roadmap.

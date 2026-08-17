@@ -1,6 +1,10 @@
 # Project status
 
-Last updated: 2026-08-14
+Last updated: 2026-08-17
+
+## Local ONNX semantic search
+
+`onnx-local` provides CPU-only `intfloat/multilingual-e5-small` inference (384 dimensions) using local ONNX Runtime and tokenizer assets. Migration 0005 persists normalized station text and adds an E5-provenance cosine HNSW index. On 2026-08-17 the local PostgreSQL database contained 1,005 stations (999 imported from Radio Browser), all 1,005 searchable documents were backfilled with matching E5 embeddings, and live Russian queries completed through `POST /v1/search`.
 
 ## Current state
 
@@ -31,12 +35,12 @@ Station embedding generation is a separate `backfill_embeddings` command. It is 
 - HTTP listener: `ROCKSERVER_BIND_ADDR`, default `127.0.0.1:3000`.
 - Logging filter: `RUST_LOG`, default `info` when unset or invalid.
 - HTTP catalog backend: `DATABASE_URL` selects PostgreSQL; absence selects the six-station in-memory metadata fallback.
-- Optional query embeddings: `ROCKSERVER_SEMANTIC_PROVIDER=deterministic-dev`; absence means metadata-only search.
+- Optional query embeddings: `ROCKSERVER_SEMANTIC_PROVIDER=deterministic-dev` for tests/development or `onnx-e5-local` with the `onnx-local` Cargo feature and local model/tokenizer/runtime paths; absence means metadata-only search.
 - Optional LLM parser: `YANDEX_AI_API_KEY` and `YANDEX_FOLDER_ID` together enable Yandex AI Studio; absence of both selects deterministic parsing, and a partial configuration is a safe startup error.
 - Yandex parser tuning: `YANDEX_LLM_MODEL=yandexgpt` by default and `YANDEX_LLM_TIMEOUT_MS=3000`, bounded to 100–10,000 ms.
 - Development embedding dimension: `ROCKSERVER_EMBEDDING_DIMENSION`, default 32, valid range 1–16,000.
 - Development embedding provenance: model `rockserver-deterministic-dev`, version `1`, plus configured dimension.
-- Embedding command: `cargo run --bin backfill_embeddings`; it requires both `DATABASE_URL` and explicit deterministic provider selection.
+- Embedding command: `cargo run --features onnx-local --bin backfill_embeddings`; it requires `DATABASE_URL`, explicit provider selection, and local assets for the E5 provider.
 - Radio Browser import command and configuration remain as documented in `README.md`; no import provider is called by search.
 - Local database: `compose.yaml` uses `pgvector/pgvector:pg17` with development-only credentials and a PostgreSQL healthcheck.
 - Migrations: embedded versioned files run for PostgreSQL search, import, and embedding store connections.
@@ -56,15 +60,15 @@ Liveness remains process-only. Readiness calls only the selected repository, so 
 
 Migration `0004_add_station_embeddings.sql` enables pgvector and adds `station_embeddings` with station ownership, model, version, dimension, unbounded `vector`, and created/updated timestamps. CHECK constraints enforce declared dimension and non-zero norm. The table key is `(station_id, model, version)`; changing dimension for the same development model/version replaces that station embedding.
 
-The unbounded vector column deliberately avoids locking schema to a random test/dev dimension. Exact search filters compatible provenance before the cosine operator. RS-007 does not add HNSW or IVFFlat: those indexes require a fixed-dimensional expression/operator class and should be introduced only for a selected production model and measured catalog scale.
+The unbounded vector column remains dimension-neutral for tests and future providers. Exact search filters compatible provenance before the cosine operator; migration 0005 adds a partial 384-dimensional HNSW cosine index only for `intfloat/multilingual-e5-small:onnx-v1`.
 
 `backfill_embeddings` reads station documents in stable station-ID pages and upserts one embedding at a time. Repeating the workflow is idempotent for the same provenance and updates existing rows. It does not change Radio Browser ownership, delete catalog rows, probe streams, or make network requests.
 
 ## Known limitations
 
-- `deterministic-dev` is a repeatable hash fixture, not a meaningful production semantic model.
-- Yandex AI Studio is the only production LLM query parser; it has bounded per-request fallback but no retry policy or circuit breaker. Production embeddings remain absent.
-- Exact vector search has no ANN index and is intended as a correctness foundation, not a scale claim.
+- `deterministic-dev` remains a repeatable hash fixture; production-like semantic behavior requires explicitly provisioned local E5/ONNX assets.
+- Yandex AI Studio is the only production LLM query parser; it has bounded per-request fallback but no retry policy or circuit breaker.
+- The deterministic parser currently derives a station-language hard filter from the request locale. Live checks therefore used `en-US` to inspect cross-language E5 ranking over the broader English catalog; `ru-RU` intentionally restricts candidates to Russian-language stations.
 - The backfill currently visits all stations and upserts every embedding; it does not yet skip unchanged station/model inputs or resume a failed run from durable workflow state.
 - A model/version is expected to imply one dimension, but RS-007 records/enforces compatibility per row rather than introducing a separate model registry.
 - Existing Radio Browser pagination, stale-run, language-code, and upstream-health limitations from RS-006 remain.
@@ -79,6 +83,8 @@ The regular suite passes with 50 deterministic unit, HTTP, contract, and WebSock
 Docker Engine 29.7.2 and Compose 5.3.1 ran isolated project `rockserver-rs007-test` on host port 55438 with `pgvector/pgvector:pg17`. The real integration test passed for extension/migrations, embedding insert and repeat update, provenance/dimension storage, exact cosine similarity, hard filters, exclusions, final limit, semantic tie-break, metadata fallback, HTTP search, and repository-only readiness. The real deterministic backfill command also completed twice; inspection showed seven unique development rows for `rockserver-deterministic-dev:1:8`. Only that project's container, network, and volume were removed afterward.
 
 For RS-015, `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test` passed. The exact ignored live command test also passed against Yandex with a typed calm-jazz result. `graphify update .` then rebuilt the local graph to 774 nodes, 1,692 edges, and 37 communities; it reported the pre-existing zero-node `hooks.json` warning and stale community labels.
+
+For RS-016, `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test --all-features` passed with 50 regular tests; six credential/asset/database-dependent tests remained ignored. The real local import produced 999 Radio Browser stations alongside six built-ins, and E5 backfill produced 1,005 `intfloat/multilingual-e5-small:onnx-v1:384` rows. Live search ranked `Midnight Jazz Lounge` first for `спокойный джаз` and `# RdMix Classic Rock 70s 80s 90s` first for `рок 80-х`. `классическая музыка без слов` returned weaker ambient/jazz results, documenting a current catalog/locale-filter quality limitation. `graphify update .` rebuilt 809 nodes, 1,774 edges, and 42 communities with the known zero-node `hooks.json` and stale-label warnings.
 
 ## Next step
 
