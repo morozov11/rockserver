@@ -15,7 +15,8 @@ use rockserver::{
     providers::radio_browser::SOURCE,
     search::{
         DeterministicQueryParser, Embedding, EmbeddingProvider, EmbeddingProviderError,
-        EmbeddingStore, SearchConstraints, SearchQuery, SearchService, normalize_query,
+        EmbeddingStore, SearchAction, SearchConstraints, SearchQuery, SearchService,
+        normalize_query,
     },
 };
 use serde_json::Value;
@@ -121,6 +122,7 @@ async fn postgres_migrations_seed_search_and_readiness() {
         Some(Arc::new(FixedEmbeddingProvider)),
     );
     let semantic_query = SearchQuery {
+        action: SearchAction::Play,
         original: "semantic-only".to_owned(),
         locale: "en-US".to_owned(),
         terms: vec!["semantic-only".to_owned()],
@@ -411,6 +413,10 @@ WHERE s.source = $1 AND s.source_station_id = $2
     .oneshot(
         Request::post("/v1/search")
             .header("content-type", "application/json")
+            .header(
+                "authorization",
+                format!("Bearer {}", rockserver::http::TEST_API_BEARER_TOKEN),
+            )
             .body(Body::from(r#"{"query":"calm instrumental jazz"}"#))
             .unwrap(),
     )

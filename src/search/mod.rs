@@ -4,6 +4,7 @@ mod embedding;
 mod llm;
 mod query;
 mod ranking;
+mod taxonomy;
 
 use std::{collections::BTreeSet, error::Error, fmt, sync::Arc};
 
@@ -19,16 +20,22 @@ pub use llm::{
 };
 pub use query::{
     DeterministicQueryParser, QueryIntent, QueryParser, QueryParserError, QueryParserInput,
-    normalize_query,
+    SearchAction, normalize_query,
 };
 pub use ranking::{METADATA_WEIGHT, SEMANTIC_WEIGHT, hybrid_score};
 
+/// Results below this score can be produced by semantic similarity alone and
+/// are not reliable enough to claim that a station matches the requested genre.
+pub const MIN_RELEVANCE_SCORE: f64 = 0.35;
+
 use query::validate_intent;
 use ranking::rank_stations;
+use taxonomy::station_matches_requested_genre;
 
 /// A normalized station-search query understood by the deterministic search service.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SearchQuery {
+    pub action: SearchAction,
     /// Original request text after trimming leading and trailing whitespace.
     pub original: String,
     /// Locale used while interpreting the request.
@@ -46,6 +53,7 @@ pub struct SearchQuery {
 impl SearchQuery {
     fn from_intent(original: String, locale: String, intent: QueryIntent) -> Self {
         Self {
+            action: intent.action,
             original,
             locale,
             terms: intent.terms,
@@ -317,9 +325,15 @@ impl SearchService {
         constraints: &SearchConstraints,
     ) -> Result<Vec<RankedStation>, RepositoryError> {
         let embedding = self.query_embedding(&query.original).await;
-        self.repository
+        let mut stations = self
+            .repository
             .search(query, constraints, embedding.as_ref())
-            .await
+            .await?;
+        stations.retain(|station| {
+            station.score >= MIN_RELEVANCE_SCORE
+                && station_matches_requested_genre(&query.tags, &station.station.tags)
+        });
+        Ok(stations)
     }
 
     /// Interprets request-only input and searches without exposing catalog data to providers.
@@ -401,8 +415,8 @@ mod tests {
     use super::{
         DeterministicQueryParser, Embedding, EmbeddingProvider, EmbeddingProviderError,
         InMemoryStationRepository, QueryIntent, QueryParser, QueryParserError, QueryParserInput,
-        RankedStation, RepositoryError, SearchConstraints, SearchQuery, SearchService,
-        StationRepository, normalize_query,
+        RankedStation, RepositoryError, SearchAction, SearchConstraints, SearchQuery,
+        SearchService, StationRepository, normalize_query,
     };
 
     #[tokio::test]
@@ -467,6 +481,7 @@ mod tests {
                 return Err(QueryParserError::safe("scripted parser failure"));
             }
             Ok(QueryIntent {
+                action: SearchAction::Play,
                 terms: vec!["rock".to_owned()],
                 tags: vec!["rock".to_owned()],
                 language: Some("en".to_owned()),
@@ -561,6 +576,7 @@ mod tests {
     impl QueryParser for InvalidIntentParser {
         async fn parse(&self, _input: &QueryParserInput) -> Result<QueryIntent, QueryParserError> {
             Ok(QueryIntent {
+                action: SearchAction::Play,
                 terms: vec!["jazz".to_owned()],
                 tags: Vec::new(),
                 language: Some("english".to_owned()),

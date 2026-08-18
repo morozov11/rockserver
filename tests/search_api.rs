@@ -8,6 +8,8 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
+const API_TOKEN: &str = rockserver::http::TEST_API_BEARER_TOKEN;
+
 #[tokio::test]
 async fn successful_search_returns_normalized_query_and_station_results() {
     let (status, body) = search(json!({"query": "calm instrumental jazz"})).await;
@@ -76,6 +78,7 @@ async fn malformed_json_returns_a_contract_compliant_400_error() {
         .oneshot(
             Request::post("/v1/search")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {API_TOKEN}"))
                 .body(Body::from(r#"{"query":"jazz""#))
                 .unwrap(),
         )
@@ -107,6 +110,7 @@ async fn search(payload: Value) -> (StatusCode, Value) {
         .oneshot(
             Request::post("/v1/search")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {API_TOKEN}"))
                 .body(Body::from(payload.to_string()))
                 .unwrap(),
         )
@@ -114,6 +118,34 @@ async fn search(payload: Value) -> (StatusCode, Value) {
         .unwrap();
     let status = response.status();
     (status, response_body(response).await)
+}
+
+#[tokio::test]
+async fn application_endpoints_require_a_bearer_token_but_health_remains_public() {
+    let app = rockserver::http::router();
+    let unauthorized = app
+        .clone()
+        .oneshot(
+            Request::post("/v1/search")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"query":"jazz"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(unauthorized.headers()[header::WWW_AUTHENTICATE], "Bearer");
+    assert_contract_error(
+        &response_body(unauthorized).await,
+        "authentication_required",
+        "A valid Bearer token is required.",
+    );
+
+    let health = app
+        .oneshot(Request::get("/health/live").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(health.status(), StatusCode::OK);
 }
 
 async fn response_body(response: axum::response::Response) -> Value {

@@ -67,12 +67,12 @@
     <section id="ecosystem">
       <h2>1. Общая экосистема</h2>
       <div class="flow">
-        <article class="node future"><span class="badge future">FUTURE</span><h3>Пользователь / голос</h3><p>Голосовой ввод, STT и ESP32-клиент.</p></article>
-        <article class="node future"><span class="badge future">FUTURE</span><h3>RockCast Windows</h3><p>Удалённый текстовый поиск через RockServer; локальный каталог остаётся fallback.</p></article>
-        <article class="node current"><span class="badge current">CURRENT</span><h3>RockServer</h3><p>HTTP API, health routes и детерминированный <code>POST /v1/search</code>.</p></article>
+        <article class="node future"><span class="badge future">FUTURE</span><h3>Пользователь / голос</h3><p>Голосовой ввод, production STT и ESP32-клиент.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>RockCast Windows</h3><p>Отправляет Bearer-токен для RockServer voice WebSocket; локальный каталог остаётся fallback.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>RockServer</h3><p>Health routes и защищённые Bearer application API: поиск и voice.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>Каталог / поиск</h3><p>PostgreSQL при <code>DATABASE_URL</code>; иначе встроенный in-memory fallback.</p></article>
-        <article class="node future"><span class="badge future">FUTURE</span><h3>StationResult</h3><p>Результат будет передан RockCast после интеграции.</p></article>
-        <article class="node future"><span class="badge future">FUTURE</span><h3>PlaybackController</h3><p>Уже существует в RockCast, но не интегрирован с RockServer.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>StationResult</h3><p>Voice result передаётся RockCast; remote text-search UI остаётся NEXT.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>PlaybackController</h3><p>RockCast воспроизводит принятый voice result и сохраняет fallback кандидатов.</p></article>
       </div>
       <div class="grid" style="margin-top:.75rem">
         <article class="node future"><h3>LocalPlayer</h3><p>Существующий путь воспроизведения RockCast.</p></article>
@@ -84,21 +84,22 @@
     <section id="text-search">
       <h2>2. Поток текстового AI-поиска</h2>
       <div class="flow">
-        <article class="node future"><h3>Ввод текста</h3><span class="badge future">FUTURE integration</span></article>
-        <article class="node current"><h3><code>POST /v1/search</code></h3><span class="badge current">CURRENT</span></article>
+        <article class="node future"><h3>Ввод текста</h3><span class="badge future">NEXT: RockCast remote-search UI</span></article>
+        <article class="node current"><h3><code>POST /v1/search</code></h3><span class="badge current">CURRENT: Bearer required</span></article>
         <article class="node current"><h3>Валидация</h3><span class="badge current">CURRENT: 400 / 422 + request_id</span></article>
         <article class="node current"><h3>QueryParser</h3><span class="badge current">CURRENT: deterministic fallback</span></article>
         <article class="node current"><h3>filters / hybrid query</h3><span class="badge current">CURRENT</span></article>
         <article class="node current"><h3>ranking</h3><span class="badge current">CURRENT: 0.70 metadata + 0.30 semantic</span></article>
         <article class="node future"><h3>Результаты → выбор → playback</h3><span class="badge future">FUTURE</span></article>
       </div>
-      <p><strong>Сейчас:</strong> Axum обрабатывает health routes и <code>POST /v1/search</code>. QueryParser получает только данные запроса; optional <code>LlmQueryParser</code> использует Yandex AI Studio только при явной env-конфигурации и всегда имеет deterministic fallback. В provider передаются только command и locale, не каталог. EmbeddingProvider получает только query text. PostgreSQL применяет hard filters и exclusions до exact pgvector hybrid ranking; in-memory и provider failures используют metadata fallback.</p>
+      <p><strong>Сейчас:</strong> Axum обрабатывает публичные health routes и защищённый <code>POST /v1/search</code>; application routes требуют <code>Authorization: Bearer</code>. QueryParser получает только данные запроса; optional <code>LlmQueryParser</code> использует Yandex AI Studio только при явной env-конфигурации и всегда имеет deterministic fallback. В provider передаются только command и locale, не каталог. EmbeddingProvider получает только query text. PostgreSQL применяет hard filters и exclusions до exact pgvector hybrid ranking; in-memory и provider failures используют metadata fallback.</p>
     </section>
 
     <section id="inside">
       <h2>3. Внутренняя схема RockServer</h2>
       <div class="grid">
-        <article class="card current"><span class="badge current">CURRENT</span><h3>Axum API</h3><p><code>GET /health/live</code>, DB-aware <code>GET /health/ready</code>, <code>POST /v1/search</code>, canonical JSON <code>POST /api/v1/voice/command</code>, and WebSocket <code>GET /api/v1/voice/stream</code>.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>Axum API</h3><p>Public <code>GET /health/live</code> and DB-aware <code>GET /health/ready</code>; Bearer-protected <code>POST /v1/search</code>, canonical JSON <code>POST /api/v1/voice/command</code>, and WebSocket <code>GET /api/v1/voice/stream</code>.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>API access gate</h3><p><code>ROCKSERVER_API_BEARER_TOKEN</code> is required at startup. Invalid application credentials receive structured <code>401 authentication_required</code>; no credential is logged.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>tracing / config</h3><p>JSON tracing, HTTP и import config, run/page/count logs, graceful shutdown.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>DTO / validation</h3><p>Transport DTO, request_id и contract-compliant ошибки.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>SearchService</h3><p>Нормализованный запрос и стабильное repository-neutral ранжирование.</p></article>
@@ -106,13 +107,14 @@
         <article class="card current"><span class="badge current">CURRENT</span><h3>EmbeddingProvider trait</h3><p>Optional query vector; deterministic-dev fixture, без production model.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>StationRepository</h3><p>PostgreSQL + migrations/seed или встроенный in-memory fallback.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>CatalogImporter</h3><p>Ограниченный Radio Browser client + import store; отдельный CLI, не request path и не HTTP startup.</p></article>
+        <article class="card next"><span class="badge next">NEXT</span><h3>Admin / client identity</h3><p>Persisted revocable RockCast clients, Bearer admin sessions, login throttling, audit records and HTMX console.</p></article>
         <article class="card future"><span class="badge future">FUTURE</span><h3>StreamHealthChecker</h3><p>Фоновая проверка потоков, не в request path.</p></article>
       </div>
     </section>
 
     <section id="catalog">
       <h2>4. Данные каталога</h2>
-      <p><strong>CURRENT:</strong> versioned migrations создают <code>stations</code>, <code>station_streams</code>, source identity, <code>import_runs</code> и provenance-aware <code>station_embeddings</code>. Pgvector column не закреплён за dev dimension; exact search сравнивает только одинаковые model/version/dimension. Radio Browser ownership не изменён. <strong>NEXT:</strong> RockCast remote search с local fallback.</p>
+      <p><strong>CURRENT:</strong> versioned migrations создают <code>stations</code>, <code>station_streams</code>, source identity, <code>import_runs</code> и provenance-aware <code>station_embeddings</code>. Pgvector column не закреплён за dev dimension; exact search сравнивает только одинаковые model/version/dimension. Radio Browser ownership не изменён. <strong>NEXT:</strong> persisted principals, revocable client credentials and request/audit records; RockCast remote text search keeps its local fallback.</p>
       <div class="diagram">
         <svg viewBox="0 0 940 350" role="img" aria-labelledby="catalog-title catalog-desc">
           <title id="catalog-title">Текущие и будущие связи данных каталога</title>
@@ -129,7 +131,7 @@
     </section>
 
     <section id="contract">
-      <p><strong>CURRENT:</strong> JSON voice commands remain stable. WebSocket <code>GET /api/v1/voice/stream</code> adds bounded PCM16 mono chunks, partial/final transcript events, provider-neutral STT sessions, and final <code>SearchService</code> resolution. The default production process reports <code>speech_provider_unavailable</code> until a Yandex/OpenAI adapter is configured.</p>
+      <p><strong>CURRENT:</strong> JSON voice commands remain stable and both voice transports require a Bearer credential before work or WebSocket upgrade. The WebSocket <code>GET /api/v1/voice/stream</code> adds bounded PCM16 mono chunks, partial/final transcript events, provider-neutral STT sessions, and final <code>SearchService</code> resolution. RockCast supplies its configured token during the handshake. The default production process reports <code>speech_provider_unavailable</code> until a Yandex/OpenAI adapter is configured.</p>
       <h2>5. Контракт и ошибки</h2>
       <div class="flow">
         <article class="node current"><h3>SearchRequest</h3><p><code>query</code>, <code>locale</code>, <code>limit</code>, <code>exclude_station_ids</code>.</p></article>
@@ -140,13 +142,14 @@
         <thead><tr><th>Код</th><th>Значение контракта</th><th>Тело</th></tr></thead>
         <tbody>
           <tr><td>200</td><td>Успешный ранжированный ответ.</td><td><code>SearchResponse</code></td></tr>
+          <tr><td>401</td><td>Bearer credential отсутствует, повреждён или неверен.</td><td><code>ErrorResponse</code> + <code>WWW-Authenticate: Bearer</code></td></tr>
           <tr><td>400</td><td>Тело отсутствует, не JSON или JSON синтаксически повреждён.</td><td><code>ErrorResponse</code></td></tr>
           <tr><td>422</td><td>JSON синтаксически корректен, но нарушает схему или семантическую валидацию.</td><td><code>ErrorResponse</code></td></tr>
           <tr><td>429</td><td>Превышен лимит запросов.</td><td><code>ErrorResponse</code></td></tr>
           <tr><td>500</td><td>Неожиданная серверная ошибка.</td><td><code>ErrorResponse</code></td></tr>
         </tbody>
       </table>
-      <p><code>ErrorResponse</code> всегда содержит <code>code</code>, <code>message</code>, <code>request_id</code> и <code>details</code>. Search реализует 200, 400, 422 и 500; 429 остаётся FUTURE. Readiness отдельно возвращает 503 + <code>{"status":"not_ready"}</code> при потере PostgreSQL.</p>
+      <p><code>ErrorResponse</code> всегда содержит <code>code</code>, <code>message</code>, <code>request_id</code> и <code>details</code>. Search реализует 200, 400, 401, 422 и 500; 429 остаётся FUTURE. Readiness отдельно возвращает 503 + <code>{"status":"not_ready"}</code> при потере PostgreSQL.</p>
     </section>
 
     <section id="delivery">
@@ -159,12 +162,14 @@
         <li class="card current"><span class="badge current">CURRENT ✓</span><h3>PostgreSQL persistence</h3></li>
         <li class="card current"><span class="badge current">CURRENT ✓</span><h3>Radio Browser import</h3></li>
         <li class="card current"><span class="badge current">CURRENT ✓</span><h3>Semantic foundation</h3></li>
-        <li class="card next"><span class="badge next">NEXT</span><h3>RockCast integration</h3></li>
+        <li class="card current"><span class="badge current">CURRENT ✓</span><h3>Application API Bearer gate</h3></li>
         <li class="card current"><span class="badge current">CURRENT ✓</span><h3>Voice-command contract</h3></li>
+        <li class="card current"><span class="badge current">CURRENT ✓</span><h3>RockCast Bearer voice handshake</h3></li>
+        <li class="card next"><span class="badge next">NEXT</span><h3>Persisted clients + admin HTMX console</h3></li>
         <li class="card next"><span class="badge next">NEXT</span><h3>Yandex/OpenAI adapter + RockCast capture</h3></li>
       </ol>
     </section>
   </main>
-  <footer>Документ отражает состояние RS-010 Yandex AI Studio intent parsing на 2026-08-14. HTML автономен; import и embedding backfill требуют <code>DATABASE_URL</code>, запускаются отдельно и не меняют схемы HTTP API.</footer>
+  <footer>Документ отражает состояние RS-017 Application API Bearer gate на 2026-08-18. HTML автономен; import и embedding backfill требуют <code>DATABASE_URL</code>, запускаются отдельно и не меняют схемы HTTP API.</footer>
 </body>
 </html>

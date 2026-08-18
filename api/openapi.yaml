@@ -13,6 +13,21 @@ info:
 servers:
   - url: http://127.0.0.1:3000
 paths:
+  /admin:
+    get:
+      operationId: getAdminConsolePreview
+      summary: Serve the local administration-console preview
+      description: >-
+        Serves a browser page that asks for the configured application Bearer token and retains it
+        only in the tab's memory. The preview exposes service readiness and read-only station search;
+        it does not yet provide administrator accounts, sessions, or state-changing operations.
+      responses:
+        "200":
+          description: The administration-console preview page.
+          content:
+            text/html:
+              schema:
+                type: string
   /health/live:
     get:
       operationId: getLiveness
@@ -51,6 +66,8 @@ paths:
     post:
       operationId: searchStations
       summary: Find and rank internet radio stations
+      security:
+        - RockCastBearer: []
       description: >-
         Accepts a natural-language request and returns ranked station streams.
         Language, country, and exclusions are hard filters. Ranking is deterministic,
@@ -79,6 +96,8 @@ paths:
                   locale: en-US
                   limit: 10
       responses:
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
         "200":
           description: Ranked stations and the normalized interpretation of the query.
           content:
@@ -186,6 +205,8 @@ paths:
     post:
       operationId: resolveVoiceCommand
       summary: Resolve an already-recognized voice command to a playable station
+      security:
+        - RockCastBearer: []
       description: >-
         Canonical Windows voice-command endpoint. The client supplies a bounded text transcript,
         not audio. RockServer validates it and delegates exactly once to the existing query
@@ -215,6 +236,8 @@ paths:
               limit: 3
               exclude_station_ids: [station-jazz-legacy]
       responses:
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
         "200":
           description: The transcript was interpreted and ranked stations were returned.
           headers:
@@ -314,6 +337,8 @@ paths:
     get:
       operationId: streamVoiceCommand
       summary: Stream microphone audio and resolve the final transcript
+      security:
+        - RockCastBearer: []
       description: >-
         Canonical WebSocket endpoint. After the HTTP upgrade the client sends one JSON
         `VoiceStreamStart` text frame, then binary PCM signed 16-bit little-endian mono chunks,
@@ -331,6 +356,8 @@ paths:
             maxLength: 128
             pattern: "^[A-Za-z0-9_-]+$"
       responses:
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
         "101":
           description: >-
             Switching Protocols. WebSocket text frames conform to the schemas referenced by
@@ -356,7 +383,11 @@ paths:
       operationId: streamVoiceCommandCompatibility
       deprecated: true
       summary: Compatibility alias for the canonical voice streaming endpoint
+      security:
+        - RockCastBearer: []
       responses:
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
         "101":
           description: Same WebSocket protocol as `/api/v1/voice/stream`.
         "400":
@@ -366,6 +397,8 @@ paths:
       operationId: resolveVoiceCommandCompatibility
       deprecated: true
       summary: Compatibility alias for the canonical voice-command endpoint
+      security:
+        - RockCastBearer: []
       description: >-
         Compatibility alias for `POST /api/v1/voice/command`. It has exactly the same request,
         response, validation, timeout, and error semantics. New Windows clients must use the
@@ -387,6 +420,8 @@ paths:
             schema:
               $ref: "#/components/schemas/VoiceCommandRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
         "200":
           description: Same response as the canonical endpoint.
           headers:
@@ -429,6 +464,32 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 components:
+  securitySchemes:
+    RockCastBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: >-
+        Required for all application routes. This first security slice reads one deployment
+        credential from `ROCKSERVER_API_BEARER_TOKEN`; persisted, revocable per-client
+        credentials follow in a later delivery.
+  responses:
+    AuthenticationRequired:
+      description: A required Bearer credential was absent, malformed, or invalid.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            example: Bearer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: authentication_required
+            message: A valid Bearer token is required.
+            request_id: req_01AUTH401
+            details: {}
   schemas:
     HealthResponse:
       type: object

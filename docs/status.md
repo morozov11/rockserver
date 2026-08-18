@@ -1,12 +1,31 @@
 # Project status
 
-Last updated: 2026-08-17
+Last updated: 2026-08-18
 
 ## Local ONNX semantic search
 
 `onnx-local` provides CPU-only `intfloat/multilingual-e5-small` inference (384 dimensions) using local ONNX Runtime and tokenizer assets. Migration 0005 persists normalized station text and adds an E5-provenance cosine HNSW index. On 2026-08-17 the local PostgreSQL database contained 1,005 stations (999 imported from Radio Browser), all 1,005 searchable documents were backfilled with matching E5 embeddings, and live Russian queries completed through `POST /v1/search`.
 
 ## Current state
+
+The first API-access security slice is implemented. Production startup now requires a unique
+`ROCKSERVER_API_BEARER_TOKEN` of at least 32 characters; `POST /v1/search`, both voice-command
+routes, and both WebSocket voice-stream handshakes reject absent, malformed, or invalid
+`Authorization: Bearer` credentials with structured `401 authentication_required` responses.
+`/health/live` and `/health/ready` remain unauthenticated for process supervision. The initial
+token is deployment configuration only, compared without prefix-based early exit, and is not
+logged. Durable, per-RockCast client credentials, administrator sessions, and the HTMX console
+remain the next deliveries described in `docs/admin-security-plan.md`.
+`GET /admin` now provides a local, read-only administration-console preview: a browser operator
+enters the existing application Bearer token, which stays only in the current tab's memory, then
+can inspect readiness and search catalog stations. It is not an administrator-account, session,
+audit, or catalog-management implementation.
+`run-rockserver-local.ps1` accepts an explicit local token or reads it from `.env`; if neither is
+set, it generates a cryptographically random token for that process and prints it alongside the
+admin-preview URL. The generated value is not persisted.
+`docs/service-diagrams.html` now distinguishes this deployed single deployment credential from
+the planned persisted RockCast clients and Bearer-based administrator sessions, and records the
+current RockCast Bearer voice-handshake integration.
 
 The active product direction is Windows-first: RockCast text search, Windows microphone capture, the RockServer voice/STT path, and production hardening will be completed and validated before any ESP32 work. The ordered plan is recorded in `docs/windows-production-roadmap.md`. ESP32 is future backlog, not a current delivery stage.
 
@@ -33,6 +52,9 @@ Station embedding generation is a separate `backfill_embeddings` command. It is 
 ## Configuration and behavior
 
 - HTTP listener: `ROCKSERVER_BIND_ADDR`, default `127.0.0.1:3000`.
+- Required application access gate: `ROCKSERVER_API_BEARER_TOKEN`, a unique secret of at least
+  32 characters. Clients send it as `Authorization: Bearer <token>`; do not put it in logs or
+  commit it to `.env` files.
 - Logging filter: `RUST_LOG`, default `info` when unset or invalid.
 - HTTP catalog backend: `DATABASE_URL` selects PostgreSQL; absence selects the six-station in-memory metadata fallback.
 - Optional query embeddings: `ROCKSERVER_SEMANTIC_PROVIDER=deterministic-dev` for tests/development or `onnx-e5-local` with the `onnx-local` Cargo feature and local model/tokenizer/runtime paths; absence means metadata-only search.
@@ -74,11 +96,13 @@ The unbounded vector column remains dimension-neutral for tests and future provi
 - Existing Radio Browser pagination, stale-run, language-code, and upstream-health limitations from RS-006 remain.
 - RockCast does not yet call the canonical voice-command route or distinguish its timeout/error outcomes in the UI.
 - The streaming wire protocol and validation are implemented, but no production Yandex/OpenAI adapter, provider retries/circuit breaking, credentials, or RockCast microphone client is configured yet.
-- Authentication, rate limiting, metrics, scheduler, stream probing, and deployment hardening remain out of scope.
+- Per-client credential persistence/revocation, administrator authentication, login throttling,
+  request audit storage, admin console state-changing operations, rate limiting, metrics, scheduler,
+  stream probing, and deployment hardening remain future work.
 
 ## Verification
 
-The regular suite passes with 50 deterministic unit, HTTP, contract, and WebSocket tests; the real PostgreSQL, SpeechKit, and four Yandex LLM integration cases remain opt-in and ignored by default. Coverage includes typed command serde/schema/semantic validation, loopback Yandex LLM mocks for header/model/schema, non-2xx, timeout, malformed/oversized response, and secret-safe errors; a real loopback WebSocket upgrade with fake recognition; and existing query, provider-fallback, embedding, ranking, and persistence boundaries.
+The regular suite passes with 57 deterministic unit, HTTP, contract, and WebSocket tests; the real PostgreSQL, SpeechKit, and four Yandex LLM integration cases remain opt-in and ignored by default. Coverage includes typed command serde/schema/semantic validation, loopback Yandex LLM mocks for header/model/schema, non-2xx, timeout, malformed/oversized response, and secret-safe errors; a real loopback WebSocket upgrade with fake recognition; application Bearer rejection while health stays public; the unauthenticated admin-preview shell; and existing query, provider-fallback, embedding, ranking, and persistence boundaries.
 
 Docker Engine 29.7.2 and Compose 5.3.1 ran isolated project `rockserver-rs007-test` on host port 55438 with `pgvector/pgvector:pg17`. The real integration test passed for extension/migrations, embedding insert and repeat update, provenance/dimension storage, exact cosine similarity, hard filters, exclusions, final limit, semantic tie-break, metadata fallback, HTTP search, and repository-only readiness. The real deterministic backfill command also completed twice; inspection showed seven unique development rows for `rockserver-deterministic-dev:1:8`. Only that project's container, network, and volume were removed afterward.
 

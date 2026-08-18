@@ -28,7 +28,8 @@ async fn websocket_stream_emits_transcript_and_station_result() {
 
     let mut stream = TcpStream::connect(address).await.unwrap();
     let request = format!(
-        "GET /api/v1/voice/stream HTTP/1.1\r\nHost: {address}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nX-Request-Id: stream-test\r\n\r\n"
+        "GET /api/v1/voice/stream HTTP/1.1\r\nHost: {address}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nAuthorization: Bearer {}\r\nX-Request-Id: stream-test\r\n\r\n",
+        rockserver::http::TEST_API_BEARER_TOKEN,
     );
     stream.write_all(request.as_bytes()).await.unwrap();
     let headers = read_http_headers(&mut stream).await;

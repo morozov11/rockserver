@@ -55,6 +55,27 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
             "voice command must document {status}"
         );
     }
+    for path in [
+        "/v1/search",
+        "/api/v1/voice/command",
+        "/v1/voice/command",
+        "/api/v1/voice/stream",
+        "/v1/voice/stream",
+    ] {
+        assert!(
+            value_at(&document, "paths")
+                .and_then(|paths| paths.get(path))
+                .and_then(Value::as_mapping)
+                .and_then(|operations| operations.values().next())
+                .and_then(|operation| operation.get("security"))
+                .is_some(),
+            "{path} must require Bearer authentication"
+        );
+    }
+    assert!(
+        value_at(&document, "components/securitySchemes/RockCastBearer").is_some(),
+        "the RockCast Bearer scheme must be declared"
+    );
     assert_eq!(
         value_at(&document, "paths")
             .and_then(|paths| paths.get("/v1/voice/command"))
@@ -126,6 +147,10 @@ async fn search_endpoint_is_registered() {
         .oneshot(
             Request::post("/v1/search")
                 .header("content-type", "application/json")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", rockserver::http::TEST_API_BEARER_TOKEN),
+                )
                 .body(Body::from(r#"{"query":"jazz"}"#))
                 .unwrap(),
         )

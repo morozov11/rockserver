@@ -172,3 +172,39 @@
 - Result: `LlmCommandInterpreter` sends only transcript and locale through the existing `LlmProvider`, deserializes the provider JSON directly, and rejects invalid intent/field combinations without an heuristic parser. Yandex diagnostics log method, endpoint, redacted authorization/folder, request body, status, and bounded response body; configured API keys and folder IDs are removed. Yandex requires every schema field to be listed as required, with nullable values used for intent-specific omissions; both voice-command and existing search-intent schemas now follow that constraint.
 - Checks: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test` passed with 50 regular tests, four Yandex LLM live tests ignored, the existing SpeechKit live test ignored, and the PostgreSQL integration ignored. `cargo test --test yandex_llm_live -- --ignored --exact interprets_real_voice_command_with_safe_logs --nocapture` passed live with HTTP 200 and a typed calm-jazz command; logs exposed no credential or folder identifier. `graphify update .` rebuilt the local graph to 774 nodes, 1,692 edges, and 37 communities, with only the known zero-node `hooks.json` warning and stale community labels.
 - Status: complete.
+
+## RS-017 — 2026-08-18 — Application API Bearer gate
+
+- Goal: establish the first fail-closed API access boundary before adding persisted RockCast
+  clients and Bearer-based administrator sessions.
+- Scope: production token configuration, HTTP and WebSocket authorization gate, OpenAPI security
+  declaration, deterministic tests, and current-state documentation. No cookies, CSRF flow,
+  database credential tables, or admin UI are included in this slice.
+- Result: production startup requires `ROCKSERVER_API_BEARER_TOKEN` with at least 32 characters.
+  All search and voice application routes require `Authorization: Bearer <token>`, including
+  validation before a WebSocket upgrade. Missing, malformed, and invalid credentials receive the
+  standard structured `401 authentication_required` response with `WWW-Authenticate: Bearer`.
+  Liveness and readiness remain unauthenticated for supervision. The OpenAPI document declares
+  the opaque Bearer scheme and each protected operation's 401 response.
+- Documentation follow-up: updated `docs/service-diagrams.html` to show public health versus
+  Bearer-protected application routes, current RockCast voice authorization, `401` semantics,
+  and the separate NEXT state for persisted client/admin identity and the HTMX console.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
+  `cargo test`, and `git diff --check` passed. The ordinary suite ran 56 tests successfully;
+  PostgreSQL and provider-credential-dependent live tests remained explicitly ignored.
+- Status: complete.
+
+## RS-018 — 2026-08-18 — Read-only administration-console preview
+
+- Goal: make the initial administration interface visible and usable during local development.
+- Scope: a server-rendered `/admin` HTML page that authenticates API calls with the already configured
+  application Bearer token, shows readiness, and searches catalog stations. It deliberately excludes
+  persistent administrator identities, sessions, storage, and state-changing operations.
+- Result: the page keeps the entered token only in JavaScript memory for the current browser tab, calls
+  `/health/ready` and the existing protected `POST /v1/search` endpoint, and removes the in-memory
+  token on disconnect. The OpenAPI contract records the HTML endpoint. The local launcher accepts a
+  configured token or generates a random process-only token and prints it for the preview login.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
+  `cargo test`, and `git diff --check` passed. The regular suite ran 57 tests successfully;
+  PostgreSQL and provider-credential-dependent live tests remained explicitly ignored.
+- Status: complete.

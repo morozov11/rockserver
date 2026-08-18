@@ -21,6 +21,7 @@ use tower::ServiceExt;
 
 const CANONICAL_PATH: &str = "/api/v1/voice/command";
 const COMPATIBILITY_PATH: &str = "/v1/voice/command";
+const API_TOKEN: &str = rockserver::http::TEST_API_BEARER_TOKEN;
 
 #[tokio::test]
 async fn canonical_voice_command_echoes_request_id_and_selects_first_station() {
@@ -28,6 +29,7 @@ async fn canonical_voice_command_echoes_request_id_and_selects_first_station() {
         .oneshot(
             Request::post(CANONICAL_PATH)
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {API_TOKEN}"))
                 .header("x-request-id", "windows-voice-42")
                 .body(Body::from(r#"{"transcript":" calm instrumental jazz "}"#))
                 .unwrap(),
@@ -52,6 +54,7 @@ async fn compatibility_voice_command_alias_has_the_same_contract() {
         .oneshot(
             Request::post(COMPATIBILITY_PATH)
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {API_TOKEN}"))
                 .body(Body::from(r#"{"transcript":"baroque opera"}"#))
                 .unwrap(),
         )
@@ -72,6 +75,7 @@ async fn voice_command_validation_uses_transcript_field_and_standard_error_shape
         .oneshot(
             Request::post(CANONICAL_PATH)
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {API_TOKEN}"))
                 .body(Body::from(r#"{"transcript":"   "}"#))
                 .unwrap(),
         )
@@ -92,6 +96,7 @@ async fn voice_command_rejects_oversized_json_with_a_structured_413_error() {
         .oneshot(
             Request::post(CANONICAL_PATH)
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {API_TOKEN}"))
                 .body(Body::from(payload))
                 .unwrap(),
         )
@@ -138,6 +143,7 @@ async fn voice_command_search_timeout_is_a_structured_504_error() {
         .oneshot(
             Request::post(CANONICAL_PATH)
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {API_TOKEN}"))
                 .body(Body::from(r#"{"transcript":"jazz"}"#))
                 .unwrap(),
         )

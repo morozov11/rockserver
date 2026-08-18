@@ -4,7 +4,7 @@ use std::{collections::BTreeSet, error::Error, fmt};
 
 use async_trait::async_trait;
 
-use super::SearchQuery;
+use super::{SearchQuery, taxonomy::canonical_tags};
 
 /// Request-only input supplied to a query parser.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -18,6 +18,8 @@ pub struct QueryParserInput {
 /// Structured intent returned by a query parser before repository search.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueryIntent {
+    /// Whether the caller should immediately play or only display matches.
+    pub action: SearchAction,
     /// Lowercase terms that participate in metadata matching.
     pub terms: Vec<String>,
     /// Normalized catalog tags inferred from the request.
@@ -26,6 +28,14 @@ pub struct QueryIntent {
     pub language: Option<String>,
     /// Optional ISO 3166-1 alpha-2 country hard filter.
     pub country_code: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchAction {
+    #[default]
+    Play,
+    Show,
 }
 
 /// Safe query-parser failure that can fall back to deterministic interpretation.
@@ -79,7 +89,7 @@ pub fn normalize_query(original: String, locale: String) -> SearchQuery {
 
 pub(super) fn validate_intent(intent: QueryIntent) -> Result<QueryIntent, QueryParserError> {
     let terms = normalize_values(intent.terms);
-    let tags = normalize_values(intent.tags);
+    let tags = canonical_tags(intent.tags);
     let language = intent
         .language
         .map(|value| value.trim().to_ascii_lowercase())
@@ -105,6 +115,7 @@ pub(super) fn validate_intent(intent: QueryIntent) -> Result<QueryIntent, QueryP
     }
 
     Ok(QueryIntent {
+        action: intent.action,
         terms,
         tags,
         language,
@@ -114,11 +125,12 @@ pub(super) fn validate_intent(intent: QueryIntent) -> Result<QueryIntent, QueryP
 
 pub(super) fn deterministic_intent(original: &str, _locale: &str) -> QueryIntent {
     let terms = tokenize(original);
-    let tags = recognized_tags(&terms);
+    let tags = canonical_tags(terms.clone());
     let country_code = infer_country_code(&terms);
     let language = infer_language(&terms);
 
     QueryIntent {
+        action: SearchAction::Play,
         terms,
         tags,
         language,
@@ -142,41 +154,6 @@ pub(super) fn tokenize(value: &str) -> Vec<String> {
         .filter(|term| !term.is_empty())
         .map(str::to_lowercase)
         .collect()
-}
-
-fn recognized_tags(terms: &[String]) -> Vec<String> {
-    const TAGS: &[&str] = &["ambient", "calm", "instrumental", "jazz", "rock", "upbeat"];
-    let term_set = terms.iter().map(String::as_str).collect::<BTreeSet<_>>();
-    let mut tags = TAGS
-        .iter()
-        .filter(|tag| term_set.contains(**tag))
-        .map(|tag| (*tag).to_owned())
-        .collect::<Vec<_>>();
-    if term_set.contains("classic") && term_set.contains("rock") {
-        tags.push("classic rock".to_owned());
-    }
-    if term_set.contains("джаз") {
-        tags.push("jazz".to_owned());
-    }
-    if term_set.contains("рок") {
-        tags.push("rock".to_owned());
-    }
-    if [
-        "медленный",
-        "медленная",
-        "спокойный",
-        "спокойная",
-        "тихий",
-        "тихая",
-    ]
-    .iter()
-    .any(|term| term_set.contains(term))
-    {
-        tags.push("calm".to_owned());
-    }
-    tags.sort();
-    tags.dedup();
-    tags
 }
 
 fn infer_language(terms: &[String]) -> Option<String> {
@@ -217,11 +194,12 @@ pub(super) fn infer_country_code(terms: &[String]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{QueryIntent, deterministic_intent, validate_intent};
+    use super::{QueryIntent, SearchAction, deterministic_intent, validate_intent};
 
     #[test]
     fn provider_intent_is_normalized_and_deduplicated() {
         let intent = validate_intent(QueryIntent {
+            action: SearchAction::Play,
             terms: vec![" Jazz ".to_owned(), "jazz".to_owned()],
             tags: vec![" Calm ".to_owned()],
             language: Some("EN".to_owned()),
@@ -238,6 +216,7 @@ mod tests {
     #[test]
     fn invalid_provider_hard_filter_is_rejected() {
         let error = validate_intent(QueryIntent {
+            action: SearchAction::Play,
             terms: vec!["jazz".to_owned()],
             tags: Vec::new(),
             language: Some("english".to_owned()),
@@ -256,7 +235,14 @@ mod tests {
         let intent = deterministic_intent("включи медленный джаз", "ru-RU");
         assert_eq!(intent.language, None);
         assert_eq!(intent.country_code, None);
-        assert!(intent.tags.iter().any(|tag| tag == "jazz"));
-        assert!(intent.tags.iter().any(|tag| tag == "calm"));
+        assert!(intent.tags.is_empty());
+    }
+
+    #[test]
+    fn natural_language_fallback_does_not_guess_catalog_tags() {
+        let intent = deterministic_intent("русская народная музыка", "ru-RU");
+        assert_eq!(intent.language, None);
+        assert_eq!(intent.country_code, None);
+        assert!(intent.tags.is_empty());
     }
 }

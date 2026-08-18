@@ -38,10 +38,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .unwrap_or_else(|| Arc::new(rockserver::speech::UnavailableSpeechRecognizer));
     serve(
         listener,
-        rockserver::http::router_with_services(
+        rockserver::http::router_with_services_and_bearer_token(
             search_service,
             speech_recognizer,
             rockserver::http::DEFAULT_VOICE_COMMAND_TIMEOUT,
+            config.api_bearer_token,
         ),
         shutdown_signal(),
     )
