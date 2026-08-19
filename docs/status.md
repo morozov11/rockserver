@@ -162,6 +162,18 @@ RS-025 reduces slow broad queries by making the `prefiltered` CTE `MATERIALIZED`
 
 RS-026 replaces the exact-term part of `matched_count` with `searchable_tsv @@ plainto_tsquery('simple', qt.term)` so PostgreSQL reuses the precomputed normalized document instead of re-running `regexp_split_to_table(...)` over station names and tags for every candidate row. The cheap prefilter ordering also now avoids early full-table trigram scoring and keeps trigram similarity only in the limited candidate phase.
 
+## Fast empty result when prefilter has no candidates (RS-027)
+
+RS-027 removes semantic-only fallback when metadata prefilter returns zero rows. For unknown or unsupported requests this makes search return empty quickly instead of spending extra time on embedding-neighbor fallback and returning low-value semantic matches.
+
+## Generic bidirectional transliteration (RS-028)
+
+RS-028 adds generic bidirectional transliteration for query terms (Russian Cyrillic ↔ Latin) as a standard step in `expand_transliterations`, instead of relying on point-by-point station-brand mappings. This improves cross-script station-name recall (for example, spoken Russian name forms matching Latin station names and vice versa) while keeping existing dictionary-based genre/radio-word normalization.
+
+## Name-priority mode for "включи радио ..." (RS-029)
+
+RS-029 introduces a station-name priority path for commands that explicitly start with `включи радио` / `поставь радио` (and English equivalents). The parser derives an ordered station-name hint phrase from the tail of the command, the query carries that hint through to PostgreSQL, and SQL ranking gives a strong bonus when the normalized station name contains the same words in the same order. This helps short exact station names outrank longer related variants.
+
 ## Next step
 
 Implement and select the first production `StreamingSpeechRecognizer` adapter (Yandex SpeechKit v3 is the preferred Russian MVP), connect RockCast microphone capture with timeout/cancellation and local-catalog fallback, and add OpenAI behind the same trait after the shared conformance tests pass.

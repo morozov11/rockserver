@@ -260,6 +260,30 @@
 - Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --lib`.
 - Status: complete.
 
+## RS-027 — 2026-08-19 — Fast empty result when metadata prefilter finds nothing
+
+- Goal: avoid long over-limit requests when no suitable station exists.
+- Scope: remove semantic-only fallback branch from SQL search path; if metadata prefilter has no candidates, the query now returns empty immediately instead of scanning embedding neighbors and ranking irrelevant semantic matches.
+- Result: no-match path becomes fail-fast and avoids timeout-prone broad semantic fallback.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --lib`.
+- Status: complete.
+
+## RS-028 — 2026-08-19 — Generic bidirectional transliteration for station-name recall
+
+- Goal: avoid brittle point-by-point brand mappings and make station-name search work across Russian and Latin spellings by default.
+- Scope: `expand_transliterations` now performs generic bidirectional transliteration for every query token (ru→lat and lat→ru), in addition to existing high-signal dictionary mappings. This improves recall for names like `radio BOB` / `радио боб` and `God Radio` / `год радио` without adding per-station hardcoded pairs.
+- Result: transliteration-based recall works through a general mechanism; tests were updated to cover generic token conversion.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --lib`.
+- Status: complete.
+
+## RS-029 — 2026-08-19 — Name-priority mode for "включи радио ..."
+
+- Goal: improve top-1 selection when the user explicitly asks to play a station by name, especially for short names like `Rock FM`.
+- Scope: derive ordered station-name hint phrases when the command starts with `включи радио` / `поставь радио` (and English equivalents), pass them into `SearchQuery`, and add a strong SQL ranking bonus for ordered phrase matches inside normalized station names. Also keep a bonus for full core-term coverage in the station name, preferring shorter exact names over longer variants.
+- Result: commands in station-name mode now prioritize exact ordered name matches over broader tag/semantic matches.
+- Checks: `cargo fmt`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --lib`.
+- Status: complete.
+
 ## RS-018 — 2026-08-18 — Read-only administration-console preview
 
 - Goal: make the initial administration interface visible and usable during local development.

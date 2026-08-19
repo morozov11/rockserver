@@ -28,7 +28,7 @@ pub use ranking::{METADATA_WEIGHT, SEMANTIC_WEIGHT, hybrid_score};
 /// are not reliable enough to claim that a station matches the requested genre.
 pub const MIN_RELEVANCE_SCORE: f64 = 0.35;
 
-use query::validate_intent;
+use query::{station_name_hint_queries, validate_intent};
 use ranking::rank_stations;
 use taxonomy::{genre_ancestors, station_matches_requested_genre};
 
@@ -54,16 +54,23 @@ pub struct SearchQuery {
     pub core_term_count: usize,
     /// Cleaned query string (stop-words removed) for full-text search.
     pub raw_query: String,
+    /// When true, station-name matching should outrank generic tag similarity.
+    pub prefer_station_name: bool,
+    /// Ordered station-name phrases derived from the original command.
+    pub station_name_hint_queries: Vec<String>,
 }
 
 impl SearchQuery {
     fn from_intent(original: String, locale: String, intent: QueryIntent) -> Self {
+        let station_name_hint_queries = station_name_hint_queries(&original);
         Self {
             action: intent.action,
             original,
             locale,
             core_term_count: intent.core_term_count,
             raw_query: intent.raw_query,
+            prefer_station_name: !station_name_hint_queries.is_empty(),
+            station_name_hint_queries,
             terms: intent.terms,
             tags: intent.tags,
             language: intent.language,
@@ -781,6 +788,8 @@ mod tests {
             country_code: None,
             core_term_count: 2,
             raw_query: "heavy metal".to_owned(),
+            prefer_station_name: false,
+            station_name_hint_queries: Vec::new(),
         };
         let constraints = SearchConstraints {
             limit: 10,
@@ -814,6 +823,8 @@ mod tests {
             country_code: None,
             core_term_count: 2,
             raw_query: "english heavy".to_owned(),
+            prefer_station_name: false,
+            station_name_hint_queries: Vec::new(),
         };
         let constraints = SearchConstraints {
             limit: 10,
@@ -845,6 +856,8 @@ mod tests {
             country_code: None,
             core_term_count: 1,
             raw_query: "reggae".to_owned(),
+            prefer_station_name: false,
+            station_name_hint_queries: Vec::new(),
         };
         let constraints = SearchConstraints {
             limit: 10,

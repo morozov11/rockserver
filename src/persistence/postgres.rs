@@ -16,8 +16,9 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 // Metadata fallback remains exact; compatible embeddings add an exact cosine-derived score.
 /// Two-phase search: a fast pre-filter narrows candidates using tag/name
 /// overlap, then full scoring (token match, substring, cosine) runs only on
-/// the pre-filtered set.  If the pre-filter yields nothing but a query
-/// embedding is available, a semantic-only fallback uses the pgvector index.
+/// the pre-filtered set. If pre-filter returns no candidates, the query
+/// returns quickly with an empty result instead of running semantic-only
+/// fallback across the whole embedding corpus.
 const SEARCH_SQL: &str = r#"
 WITH query_terms AS (
     SELECT term FROM UNNEST($1::text[]) AS t(term)
@@ -55,25 +56,8 @@ prefiltered AS MATERIALIZED (
     ORDER BY prefilter_score DESC, s.id ASC
     LIMIT GREATEST($6 * 20, 200)
 ),
-semantic_fallback AS (
-    SELECT se.station_id AS id
-    FROM station_embeddings AS se
-    JOIN stations AS s ON s.id = se.station_id
-    WHERE $7::text IS NOT NULL
-      AND se.model = $8
-      AND se.version = $9
-      AND se.dimension = $10
-      AND ($3::text IS NULL OR s.language = $3)
-      AND ($4::text IS NULL OR s.country_code = $4)
-      AND NOT (s.id = ANY($5::text[]))
-      AND NOT EXISTS (SELECT 1 FROM prefiltered pf WHERE pf.id = s.id)
-    ORDER BY se.embedding <=> ($7::text)::vector
-    LIMIT $6
-),
 candidate_ids AS (
     SELECT id FROM prefiltered
-    UNION
-    SELECT id FROM semantic_fallback
 ),
 candidates AS (
     SELECT
@@ -104,6 +88,30 @@ candidates AS (
             WHERE length(qt.term) >= 3
               AND lower(s.name) LIKE '%' || qt.term || '%'
         ) AS substring_match_count,
+        (
+            SELECT COUNT(DISTINCT qt.term)
+            FROM query_terms qt
+            WHERE EXISTS (
+                SELECT 1
+                FROM regexp_split_to_table(lower(s.name), '[^[:alnum:]]+') AS token
+                WHERE token <> ''
+                  AND token = qt.term
+            )
+        ) AS name_token_match_count,
+        (
+            SELECT COUNT(*)
+            FROM regexp_split_to_table(lower(s.name), '[^[:alnum:]]+') AS token
+            WHERE token <> ''
+        ) AS name_token_count,
+        CASE
+            WHEN $15::bool THEN EXISTS (
+                SELECT 1
+                FROM UNNEST($16::text[]) AS hinted(query)
+                WHERE hinted.query <> ''
+                  AND regexp_replace(lower(s.name), '[^[:alnum:]]+', ' ', 'g') LIKE '%' || hinted.query || '%'
+            )
+            ELSE FALSE
+        END AS ordered_name_match,
         COALESCE((
             SELECT MAX(similarity(lower(s.name), qt.term))
             FROM query_terms qt
@@ -128,7 +136,21 @@ candidates AS (
 ), scored AS (
     SELECT
         *,
-        (matched_count::float8 + substring_match_count::float8 * 0.5 + trgm_score * 0.3)
+        (
+            matched_count::float8
+            + substring_match_count::float8 * 0.5
+            + trgm_score * 0.3
+            + CASE
+                -- Prefer exact station-name hits for short "play station X" style queries.
+                WHEN $13::int > 0 AND name_token_match_count >= $13::int
+                    THEN 1.0 / GREATEST(name_token_count, 1)::float8
+                ELSE 0.0
+              END
+            + CASE
+                WHEN ordered_name_match THEN 2.0
+                ELSE 0.0
+              END
+        )
             / GREATEST($13::int + cardinality($2::text[]), 1)
             AS metadata_score,
         CASE
@@ -214,6 +236,8 @@ impl StationRepository for PostgresStationRepository {
             .bind(parameters.semantic_weight)
             .bind(parameters.core_term_count)
             .bind(&parameters.raw_query)
+            .bind(parameters.prefer_station_name)
+            .bind(&parameters.station_name_hint_queries)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| RepositoryError::new("search", error))?;
@@ -336,6 +360,8 @@ struct PostgresSearchParameters {
     core_term_count: i32,
     /// Cleaned query for plainto_tsquery FTS matching.
     raw_query: String,
+    prefer_station_name: bool,
+    station_name_hint_queries: Vec<String>,
 }
 
 impl PostgresSearchParameters {
@@ -365,6 +391,8 @@ impl PostgresSearchParameters {
             semantic_weight: SEMANTIC_WEIGHT,
             core_term_count: query.core_term_count as i32,
             raw_query: query.raw_query.clone(),
+            prefer_station_name: query.prefer_station_name,
+            station_name_hint_queries: query.station_name_hint_queries.clone(),
         })
     }
 }

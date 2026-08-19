@@ -131,6 +131,8 @@ async fn postgres_migrations_seed_search_and_readiness() {
         country_code: None,
         core_term_count: 1,
         raw_query: "semantic-only".to_owned(),
+        prefer_station_name: false,
+        station_name_hint_queries: Vec::new(),
     };
     let semantic_results = semantic_service
         .search(
