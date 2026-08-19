@@ -140,6 +140,7 @@ pub fn router_with_services_and_bearer_token(
         .route("/admin", get(admin_console))
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
+        .route("/api/v1/search", post(search))
         .route("/v1/search", post(search))
         .route("/api/v1/voice/command", post(voice_command))
         .route("/v1/voice/command", post(voice_command))

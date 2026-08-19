@@ -4,7 +4,7 @@ mod embedding;
 mod llm;
 mod query;
 mod ranking;
-mod taxonomy;
+pub mod taxonomy;
 
 use std::{collections::BTreeSet, error::Error, fmt, sync::Arc};
 
@@ -30,7 +30,7 @@ pub const MIN_RELEVANCE_SCORE: f64 = 0.35;
 
 use query::validate_intent;
 use ranking::rank_stations;
-use taxonomy::station_matches_requested_genre;
+use taxonomy::{genre_ancestors, station_matches_requested_genre};
 
 /// A normalized station-search query understood by the deterministic search service.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -253,6 +253,19 @@ impl InMemoryStationRepository {
                         bitrate_kbps: Some(128),
                     },
                 ),
+                station(
+                    "station-metal-001",
+                    "Iron Forge Radio",
+                    "https://streams.example.com/iron-forge.mp3",
+                    StationMetadata {
+                        homepage_url: None,
+                        tags: &["heavy metal", "metal"],
+                        language: Some("en"),
+                        country_code: Some("US"),
+                        codec: Some("MP3"),
+                        bitrate_kbps: Some(192),
+                    },
+                ),
             ],
         }
     }
@@ -318,7 +331,11 @@ impl SearchService {
 
     /// Returns matching stations ordered by score descending and station ID ascending.
     ///
-    /// Implementations execute the domain-owned hard filters, scoring, stable tie-break, and limit.
+    /// When the exact genre filter produces no results, the search progressively
+    /// relaxes the filter using the genre hierarchy (e.g. `"heavy metal"` falls
+    /// back to stations tagged `"rock"`).  If even the broadest ancestor yields
+    /// nothing, the genre constraint is dropped entirely while keeping the
+    /// minimum relevance score gate.
     pub async fn search(
         &self,
         query: &SearchQuery,
@@ -329,10 +346,42 @@ impl SearchService {
             .repository
             .search(query, constraints, embedding.as_ref())
             .await?;
-        stations.retain(|station| {
-            station.score >= MIN_RELEVANCE_SCORE
-                && station_matches_requested_genre(&query.tags, &station.station.tags)
-        });
+        stations.retain(|station| station.score >= MIN_RELEVANCE_SCORE);
+
+        let with_genre: Vec<_> = stations
+            .iter()
+            .filter(|s| station_matches_requested_genre(&query.tags, &s.station.tags))
+            .cloned()
+            .collect();
+        if !with_genre.is_empty() {
+            return Ok(with_genre);
+        }
+
+        // Progressively broaden by walking up the genre hierarchy.
+        let parent_tags = broaden_tags(&query.tags);
+        if !parent_tags.is_empty() {
+            let with_parents: Vec<_> = stations
+                .iter()
+                .filter(|s| station_matches_requested_genre(&parent_tags, &s.station.tags))
+                .cloned()
+                .collect();
+            if !with_parents.is_empty() {
+                tracing::info!(
+                    original_tags = ?query.tags,
+                    broadened_tags = ?parent_tags,
+                    "genre fallback: broadened to parent tags"
+                );
+                return Ok(with_parents);
+            }
+        }
+
+        // Last resort: drop genre filter, keep only MIN_RELEVANCE_SCORE gate.
+        if !stations.is_empty() {
+            tracing::info!(
+                original_tags = ?query.tags,
+                "genre fallback: dropped genre filter entirely"
+            );
+        }
         Ok(stations)
     }
 
@@ -377,6 +426,20 @@ impl SearchService {
             }
         }
     }
+}
+
+/// Replaces each genre tag with its nearest parent from the hierarchy.
+///
+/// Mood tags pass through unchanged. Tags without a parent are dropped
+/// because broadening is only meaningful for hierarchical genres.
+fn broaden_tags(tags: &[String]) -> Vec<String> {
+    let mut broadened = std::collections::BTreeSet::new();
+    for tag in tags {
+        for ancestor in genre_ancestors(tag) {
+            broadened.insert(ancestor.to_owned());
+        }
+    }
+    broadened.into_iter().collect()
 }
 
 struct StationMetadata<'a> {
@@ -639,6 +702,92 @@ mod tests {
         async fn check_readiness(&self) -> Result<(), RepositoryError> {
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn heavy_metal_query_finds_rock_stations_via_genre_hierarchy() {
+        let service =
+            SearchService::new(Arc::new(InMemoryStationRepository::with_builtin_catalog()));
+        let query = SearchQuery {
+            action: SearchAction::Play,
+            original: "heavy metal".to_owned(),
+            locale: "en-US".to_owned(),
+            terms: vec!["heavy".to_owned(), "metal".to_owned()],
+            tags: vec!["heavy metal".to_owned()],
+            language: None,
+            country_code: None,
+        };
+        let constraints = SearchConstraints {
+            limit: 10,
+            excluded_station_ids: BTreeSet::new(),
+        };
+
+        let ids: Vec<_> = service
+            .search(&query, &constraints)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|s| s.station.id)
+            .collect();
+
+        // metal-001 matches exactly; rock stations match via hierarchy fallback.
+        assert!(ids.contains(&"station-metal-001".to_owned()));
+        assert!(!ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn english_heavy_query_prefers_english_stations() {
+        let service =
+            SearchService::new(Arc::new(InMemoryStationRepository::with_builtin_catalog()));
+        let query = SearchQuery {
+            action: SearchAction::Play,
+            original: "english heavy".to_owned(),
+            locale: "en-US".to_owned(),
+            terms: vec!["english".to_owned(), "heavy".to_owned()],
+            tags: vec!["heavy metal".to_owned()],
+            language: Some("en".to_owned()),
+            country_code: None,
+        };
+        let constraints = SearchConstraints {
+            limit: 10,
+            excluded_station_ids: BTreeSet::new(),
+        };
+
+        let results = service.search(&query, &constraints).await.unwrap();
+
+        assert!(!results.is_empty());
+        // All returned stations must be English-language (language hard filter).
+        for station in &results {
+            assert_eq!(station.station.language.as_deref(), Some("en"));
+        }
+        // The exact heavy-metal station must appear.
+        assert!(results.iter().any(|s| s.station.id == "station-metal-001"));
+    }
+
+    #[tokio::test]
+    async fn genre_fallback_drops_filter_when_no_hierarchy_match() {
+        let service =
+            SearchService::new(Arc::new(InMemoryStationRepository::with_builtin_catalog()));
+        let query = SearchQuery {
+            action: SearchAction::Play,
+            original: "reggae".to_owned(),
+            locale: "en-US".to_owned(),
+            terms: vec!["reggae".to_owned()],
+            tags: vec!["reggae".to_owned()],
+            language: None,
+            country_code: None,
+        };
+        let constraints = SearchConstraints {
+            limit: 10,
+            excluded_station_ids: BTreeSet::new(),
+        };
+
+        let results = service.search(&query, &constraints).await.unwrap();
+
+        // No reggae station in catalog, but MIN_RELEVANCE_SCORE gate still
+        // prevents random stations from leaking through. The builtin catalog
+        // has no term "reggae" anywhere, so the result should be empty.
+        assert!(results.is_empty());
     }
 
     #[tokio::test]

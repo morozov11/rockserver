@@ -24,6 +24,8 @@ pub const TIMEOUT_SECS_ENV: &str = "RADIO_BROWSER_TIMEOUT_SECS";
 pub const PAGE_SIZE_ENV: &str = "RADIO_BROWSER_PAGE_SIZE";
 /// Optional maximum number of pages fetched per run.
 pub const MAX_PAGES_ENV: &str = "RADIO_BROWSER_MAX_PAGES";
+/// Optional comma-separated tags to query by (fetches one pass per tag).
+pub const TAGS_ENV: &str = "RADIO_BROWSER_TAGS";
 
 /// Default DNS-balanced official Radio Browser endpoint.
 pub const DEFAULT_BASE_URL: &str = "https://all.api.radio-browser.info";
@@ -169,11 +171,21 @@ use std::fmt;
 pub struct RadioBrowserClient {
     client: reqwest::Client,
     endpoint: Url,
+    /// Optional tag filter applied to each request.
+    tag_filter: Option<String>,
 }
 
 impl RadioBrowserClient {
     /// Creates a client with an explicit User-Agent, timeout, and response-size cap.
     pub fn new(config: &RadioBrowserConfig) -> Result<Self, CatalogImportError> {
+        Self::with_tag(config, None)
+    }
+
+    /// Creates a client that filters by a specific tag.
+    pub fn with_tag(
+        config: &RadioBrowserConfig,
+        tag: Option<String>,
+    ) -> Result<Self, CatalogImportError> {
         let client = reqwest::Client::builder()
             .user_agent(&config.user_agent)
             .timeout(config.timeout)
@@ -185,7 +197,11 @@ impl RadioBrowserClient {
             .base_url
             .join("json/stations/search")
             .map_err(|_| CatalogImportError::safe("Radio Browser endpoint construction failed"))?;
-        Ok(Self { client, endpoint })
+        Ok(Self {
+            client,
+            endpoint,
+            tag_filter: tag,
+        })
     }
 }
 
@@ -200,17 +216,22 @@ impl CatalogImportProvider for RadioBrowserClient {
         offset: usize,
         limit: usize,
     ) -> Result<ImportPage, CatalogImportError> {
+        let mut params = vec![
+            ("hidebroken", "true".to_owned()),
+            ("order", "name".to_owned()),
+            ("reverse", "false".to_owned()),
+            ("offset", offset.to_string()),
+            ("limit", limit.to_string()),
+        ];
+        if let Some(tag) = &self.tag_filter {
+            params.push(("tag", tag.clone()));
+            params.push(("tagExact", "true".to_owned()));
+        }
         let mut response = self
             .client
             .get(self.endpoint.clone())
             .header(ACCEPT, "application/json")
-            .query(&[
-                ("hidebroken", "true".to_owned()),
-                ("order", "name".to_owned()),
-                ("reverse", "false".to_owned()),
-                ("offset", offset.to_string()),
-                ("limit", limit.to_string()),
-            ])
+            .query(&params)
             .send()
             .await
             .map_err(|error| {

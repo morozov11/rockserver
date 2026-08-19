@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-08-18
+Last updated: 2026-08-19
 
 ## Local ONNX semantic search
 
@@ -102,7 +102,7 @@ The unbounded vector column remains dimension-neutral for tests and future provi
 
 ## Verification
 
-The regular suite passes with 57 deterministic unit, HTTP, contract, and WebSocket tests; the real PostgreSQL, SpeechKit, and four Yandex LLM integration cases remain opt-in and ignored by default. Coverage includes typed command serde/schema/semantic validation, loopback Yandex LLM mocks for header/model/schema, non-2xx, timeout, malformed/oversized response, and secret-safe errors; a real loopback WebSocket upgrade with fake recognition; application Bearer rejection while health stays public; the unauthenticated admin-preview shell; and existing query, provider-fallback, embedding, ranking, and persistence boundaries.
+The regular suite passes with 67 deterministic unit, HTTP, contract, and WebSocket tests; the real PostgreSQL, SpeechKit, and four Yandex LLM integration cases remain opt-in and ignored by default. Coverage includes typed command serde/schema/semantic validation, loopback Yandex LLM mocks for header/model/schema, non-2xx, timeout, malformed/oversized response, and secret-safe errors; a real loopback WebSocket upgrade with fake recognition; application Bearer rejection while health stays public; the unauthenticated admin-preview shell; and existing query, provider-fallback, embedding, ranking, and persistence boundaries.
 
 Docker Engine 29.7.2 and Compose 5.3.1 ran isolated project `rockserver-rs007-test` on host port 55438 with `pgvector/pgvector:pg17`. The real integration test passed for extension/migrations, embedding insert and repeat update, provenance/dimension storage, exact cosine similarity, hard filters, exclusions, final limit, semantic tie-break, metadata fallback, HTTP search, and repository-only readiness. The real deterministic backfill command also completed twice; inspection showed seven unique development rows for `rockserver-deterministic-dev:1:8`. Only that project's container, network, and volume were removed afterward.
 
@@ -110,6 +110,16 @@ For RS-015, `cargo fmt --check`, strict all-target/all-feature Clippy, and `carg
 
 For RS-016, `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test --all-features` passed with 50 regular tests; six credential/asset/database-dependent tests remained ignored. The real local import produced 999 Radio Browser stations alongside six built-ins, and E5 backfill produced 1,005 `intfloat/multilingual-e5-small:onnx-v1:384` rows. Live search ranked `Midnight Jazz Lounge` first for `спокойный джаз` and `# RdMix Classic Rock 70s 80s 90s` first for `рок 80-х`. `классическая музыка без слов` returned weaker ambient/jazz results, documenting a current catalog/locale-filter quality limitation. `graphify update .` rebuilt 809 nodes, 1,774 edges, and 42 communities with the known zero-node `hooks.json` and stale-label warnings.
 
+## Genre hierarchy and search fallback
+
+RS-019 introduces a genre taxonomy hierarchy and progressive search fallback. `CANONICAL_TAGS` now includes subgenres present in the real Radio Browser catalog (`black metal`, `death metal`, `alternative rock`, `classic rock`, `pop rock`, `smooth jazz`, etc.). A `genre_parent` function maps each subgenre to its nearest parent (`black metal` → `metal` → `rock`, `smooth jazz` → `jazz`). `station_matches_requested_genre` accepts stations whose tags match any ancestor of the requested genre, so a `"heavy metal"` query matches stations tagged `"rock"`.
+
+`SearchService::search` applies progressive fallback when the exact genre filter yields no results: first broadening to parent genres, then dropping the genre constraint entirely while keeping the `MIN_RELEVANCE_SCORE` gate. The LLM system prompt automatically includes the expanded tag vocabulary. A new builtin catalog station (`Iron Forge Radio`, tags `heavy metal`/`metal`, language `en`) validates the hierarchy. Deterministic tests confirm that `"english heavy"` finds English rock/metal stations, that subgenre queries match parent-tagged stations, and that unrelated genres remain rejected.
+
+## Genre database and stream probing
+
+RS-020 moves the genre hierarchy from compiled-in constants to a PostgreSQL `genre_hierarchy` table seeded with ~250 genres across 25 root categories. `GenreTaxonomy` loads from the database at startup with a builtin fallback for in-memory mode. A new `probe_streams` binary connects to each stream URL (8-second timeout, 50 concurrent), marking unreachable streams as `degraded` with the error stored in `last_probe_error`. The PostgreSQL search CTE now excludes `degraded` streams. The Radio Browser importer supports `RADIO_BROWSER_TAGS` for per-tag import passes, enabling broader genre coverage. Migrations 0006 and 0007 are applied automatically on connect.
+
 ## Next step
 
-Implement and select the first production `StreamingSpeechRecognizer` adapter (Yandex SpeechKit v3 is the preferred Russian MVP), then connect RockCast microphone capture with timeout/cancellation and local-catalog fallback. Add OpenAI behind the same trait after the shared conformance tests pass.
+Populate the `rockserver` database with multi-tag import and run stream probing. Then implement and select the first production `StreamingSpeechRecognizer` adapter (Yandex SpeechKit v3 is the preferred Russian MVP), connect RockCast microphone capture with timeout/cancellation and local-catalog fallback, and add OpenAI behind the same trait after the shared conformance tests pass.

@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RockServer — PostgreSQL и поиск</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f172a;color:#e2e8f0;padding:24px;line-height:1.5}
+h1{text-align:center;font-size:1.6rem;color:#38bdf8;margin-bottom:8px}
+.subtitle{text-align:center;color:#94a3b8;font-size:.9rem;margin-bottom:32px}
+
+/* ── tabs ── */
+.tabs{display:flex;gap:4px;justify-content:center;margin-bottom:24px;flex-wrap:wrap}
+.tab{padding:8px 20px;border-radius:8px 8px 0 0;cursor:pointer;background:#1e293b;color:#94a3b8;
+     border:1px solid #334155;border-bottom:none;font-size:.85rem;transition:.15s}
+.tab.active,.tab:hover{background:#334155;color:#f1f5f9}
+
+/* ── panels ── */
+.panel{display:none;background:#1e293b;border:1px solid #334155;border-radius:0 12px 12px 12px;padding:28px;max-width:1200px;margin:0 auto}
+.panel.active{display:block}
+
+/* ── ER diagram ── */
+.er{display:flex;flex-wrap:wrap;gap:24px;justify-content:center}
+.table-card{background:#0f172a;border:1px solid #475569;border-radius:10px;min-width:260px;max-width:340px;overflow:hidden}
+.table-card h3{background:#334155;padding:8px 14px;font-size:.95rem;color:#38bdf8;display:flex;align-items:center;gap:6px}
+.table-card h3 .icon{font-size:1.1rem}
+.col{padding:4px 14px;font-size:.82rem;display:flex;gap:8px;border-top:1px solid #1e293b}
+.col:nth-child(even){background:#131c2e}
+.col .name{color:#f1f5f9;min-width:130px;font-family:'Cascadia Code',monospace}
+.col .type{color:#94a3b8;font-family:'Cascadia Code',monospace;font-size:.78rem}
+.pk{color:#fbbf24}
+.fk{color:#a78bfa}
+.idx{color:#34d399;font-size:.7rem;margin-left:auto;white-space:nowrap}
+
+/* ── flow ── */
+.flow{display:flex;flex-direction:column;gap:0;align-items:center}
+.step{background:#0f172a;border:1px solid #475569;border-radius:10px;padding:16px 22px;max-width:700px;width:100%;position:relative}
+.step h4{color:#38bdf8;font-size:.92rem;margin-bottom:6px}
+.step p,.step ul{font-size:.83rem;color:#cbd5e1}
+.step ul{padding-left:18px}
+.step code{background:#334155;padding:1px 5px;border-radius:3px;font-size:.8rem;color:#fde68a}
+.arrow{width:2px;height:28px;background:#475569;position:relative}
+.arrow::after{content:'▼';position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);color:#475569;font-size:.7rem}
+
+/* ── SQL highlight ── */
+.sql-box{background:#0f172a;border:1px solid #475569;border-radius:8px;padding:16px;overflow-x:auto;font-size:.78rem;line-height:1.6;font-family:'Cascadia Code','Fira Code',monospace;color:#e2e8f0;max-height:600px;overflow-y:auto}
+.sql-box .kw{color:#c084fc}
+.sql-box .fn{color:#38bdf8}
+.sql-box .str{color:#34d399}
+.sql-box .num{color:#fbbf24}
+.sql-box .cmt{color:#64748b;font-style:italic}
+.sql-box .param{color:#fb923c}
+
+/* ── weights ── */
+.formula{background:#0f172a;border:1px solid #475569;border-radius:10px;padding:20px;text-align:center;margin:16px auto;max-width:600px}
+.formula .big{font-size:1.3rem;color:#fde68a;font-family:'Cascadia Code',monospace;letter-spacing:1px}
+.formula .note{font-size:.8rem;color:#94a3b8;margin-top:8px}
+
+/* ── legend ── */
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.78rem;margin-top:16px;justify-content:center}
+.legend span{display:flex;align-items:center;gap:4px}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+
+/* ── responsive ── */
+@media(max-width:700px){.er{flex-direction:column;align-items:center}.table-card{min-width:0;width:100%}}
+</style>
+</head>
+<body>
+
+<h1>RockServer — PostgreSQL и механизм поиска</h1>
+<p class="subtitle">Структуры данных, SQL-запрос, ранжирование и потоки данных</p>
+
+<!-- ── Tabs ── -->
+<div class="tabs">
+  <div class="tab active" onclick="show('schema')">Схема БД</div>
+  <div class="tab" onclick="show('flow')">Поток поиска</div>
+  <div class="tab" onclick="show('sql')">SQL-запрос</div>
+  <div class="tab" onclick="show('backfill')">Backfill эмбеддингов</div>
+  <div class="tab" onclick="show('import')">Импорт Radio Browser</div>
+</div>
+
+<!-- ═══════════════ 1. SCHEMA ═══════════════ -->
+<div id="schema" class="panel active">
+
+<div class="er">
+
+<!-- stations -->
+<div class="table-card">
+  <h3><span class="icon">📻</span> stations</h3>
+  <div class="col"><span class="name pk">🔑 id</span><span class="type">varchar(128) PK</span></div>
+  <div class="col"><span class="name">name</span><span class="type">text NOT NULL</span></div>
+  <div class="col"><span class="name">homepage_url</span><span class="type">text</span></div>
+  <div class="col"><span class="name">tags</span><span class="type">text[] NOT NULL</span><span class="idx">GIN</span></div>
+  <div class="col"><span class="name">language</span><span class="type">varchar(3)</span><span class="idx">B-tree ↕</span></div>
+  <div class="col"><span class="name">country_code</span><span class="type">char(2)</span><span class="idx">B-tree ↕</span></div>
+  <div class="col"><span class="name">searchable_text</span><span class="type">text NOT NULL</span></div>
+  <div class="col"><span class="name">source</span><span class="type">varchar(32) NOT NULL</span></div>
+  <div class="col"><span class="name">source_station_id</span><span class="type">varchar(128) NOT NULL</span><span class="idx">UNIQUE(source,…)</span></div>
+  <div class="col"><span class="name fk">last_import_run_id</span><span class="type">uuid FK→import_runs</span></div>
+  <div class="col"><span class="name">created_at</span><span class="type">timestamptz</span></div>
+  <div class="col"><span class="name">updated_at</span><span class="type">timestamptz</span></div>
+</div>
+
+<!-- station_streams -->
+<div class="table-card">
+  <h3><span class="icon">🎵</span> station_streams</h3>
+  <div class="col"><span class="name pk">🔑 id</span><span class="type">bigint IDENTITY PK</span></div>
+  <div class="col"><span class="name fk">station_id</span><span class="type">varchar(128) FK→stations</span><span class="idx">B-tree</span></div>
+  <div class="col"><span class="name">stream_url</span><span class="type">text NOT NULL</span><span class="idx">B-tree</span></div>
+  <div class="col"><span class="name">codec</span><span class="type">text</span></div>
+  <div class="col"><span class="name">bitrate_kbps</span><span class="type">integer >0</span></div>
+  <div class="col"><span class="name">health</span><span class="type">text (healthy|degraded|unknown)</span></div>
+  <div class="col"><span class="name">is_primary</span><span class="type">boolean NOT NULL</span><span class="idx">UNIQUE partial</span></div>
+  <div class="col"><span class="name">source</span><span class="type">varchar(32) NOT NULL</span></div>
+  <div class="col"><span class="name">source_stream_id</span><span class="type">varchar(128) NOT NULL</span><span class="idx">UNIQUE(source,…)</span></div>
+  <div class="col"><span class="name fk">last_import_run_id</span><span class="type">uuid FK→import_runs</span></div>
+</div>
+
+<!-- station_embeddings -->
+<div class="table-card">
+  <h3><span class="icon">🧠</span> station_embeddings</h3>
+  <div class="col"><span class="name pk fk">🔑 station_id</span><span class="type">varchar(128) FK→stations</span></div>
+  <div class="col"><span class="name pk">🔑 model</span><span class="type">varchar(128)</span></div>
+  <div class="col"><span class="name pk">🔑 version</span><span class="type">varchar(64)</span></div>
+  <div class="col"><span class="name">dimension</span><span class="type">integer 1–16000</span></div>
+  <div class="col"><span class="name">embedding</span><span class="type">vector (pgvector)</span><span class="idx">HNSW partial*</span></div>
+  <div class="col"><span class="name">created_at</span><span class="type">timestamptz</span></div>
+  <div class="col"><span class="name">updated_at</span><span class="type">timestamptz</span></div>
+  <div class="col" style="font-size:.72rem;color:#64748b;padding:6px 14px">
+    * HNSW cosine только для<br>intfloat/multilingual-e5-small:onnx-v1:384
+  </div>
+  <div class="col" style="font-size:.72rem;color:#64748b;padding:6px 14px">
+    CHECK: vector_dims(embedding) = dimension<br>CHECK: vector_norm(embedding) > 0
+  </div>
+</div>
+
+<!-- import_runs -->
+<div class="table-card">
+  <h3><span class="icon">📥</span> import_runs</h3>
+  <div class="col"><span class="name pk">🔑 id</span><span class="type">uuid PK</span></div>
+  <div class="col"><span class="name">source</span><span class="type">varchar(32) NOT NULL</span></div>
+  <div class="col"><span class="name">status</span><span class="type">started|completed|failed</span></div>
+  <div class="col"><span class="name">fetched_count</span><span class="type">bigint ≥0</span></div>
+  <div class="col"><span class="name">imported_count</span><span class="type">bigint ≥0</span></div>
+  <div class="col"><span class="name">skipped_count</span><span class="type">bigint ≥0</span></div>
+  <div class="col"><span class="name">failed_count</span><span class="type">bigint ≥0</span></div>
+  <div class="col"><span class="name">error_summary</span><span class="type">varchar(500)</span></div>
+  <div class="col"><span class="name">started_at</span><span class="type">timestamptz</span></div>
+  <div class="col"><span class="name">completed_at</span><span class="type">timestamptz</span></div>
+</div>
+
+</div><!-- /er -->
+
+<div class="legend" style="margin-top:20px">
+  <span><span class="dot" style="background:#fbbf24"></span> Primary Key</span>
+  <span><span class="dot" style="background:#a78bfa"></span> Foreign Key</span>
+  <span><span class="dot" style="background:#34d399"></span> Индекс</span>
+</div>
+
+<div style="margin-top:20px;padding:14px;background:#0f172a;border-radius:8px;border:1px solid #475569;font-size:.82rem;color:#94a3b8">
+  <strong style="color:#f1f5f9">Связи:</strong><br>
+  station_streams.station_id → stations.id (ON DELETE CASCADE)<br>
+  station_embeddings.station_id → stations.id (ON DELETE CASCADE)<br>
+  stations.last_import_run_id → import_runs.id<br>
+  station_streams.last_import_run_id → import_runs.id<br><br>
+  <strong style="color:#f1f5f9">Уникальные ограничения:</strong><br>
+  stations: (source, source_station_id) — один внешний ID на провайдера<br>
+  station_streams: (source, source_stream_id) — один стрим-ID на провайдера<br>
+  station_streams: один is_primary=true на station_id (partial unique)<br>
+  station_embeddings: (station_id, model, version) — одна модель-версия на станцию
+</div>
+
+</div><!-- /schema -->
+
+<!-- ═══════════════ 2. SEARCH FLOW ═══════════════ -->
+<div id="flow" class="panel">
+
+<div class="flow">
+
+<div class="step">
+  <h4>1. HTTP-запрос → SearchService</h4>
+  <p><code>POST /v1/search</code> или <code>POST /api/v1/voice/command</code></p>
+  <p>Принимает: <code>query</code>, <code>locale</code>, <code>limit</code>, <code>exclude_stations</code></p>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>2. Интерпретация запроса (QueryParser)</h4>
+  <p>LLM-парсер (Yandex) или детерминированный fallback.<br>
+  Провайдер получает только текст + локаль, <strong>не каталог</strong>.</p>
+  <p>Результат: <code>QueryIntent</code> → terms, tags, language, country_code</p>
+  <ul>
+    <li>Ошибка парсера → автоматический fallback на детерминированный парсер</li>
+    <li>Невалидные фильтры (напр. <code>language="english"</code>) → тоже fallback</li>
+  </ul>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>3. Генерация эмбеддинга запроса (EmbeddingProvider)</h4>
+  <p>Опционально: <code>onnx-e5-local</code> (384-dim E5) или <code>deterministic-dev</code>.</p>
+  <p>Если провайдер недоступен → поиск только по метаданным, без semantic score.</p>
+</div>
+<div class="arrow"></div>
+
+<div class="step" style="border-color:#38bdf8">
+  <h4>4. SQL-запрос в PostgreSQL (SEARCH_SQL)</h4>
+  <p>Параметры из домена:</p>
+  <ul>
+    <li><code>$1</code> terms[], <code>$2</code> tags[] — для metadata score</li>
+    <li><code>$3</code> language, <code>$4</code> country_code — жёсткие фильтры</li>
+    <li><code>$5</code> excluded_station_ids[] — исключения</li>
+    <li><code>$6</code> limit</li>
+    <li><code>$7</code> query embedding vector, <code>$8–$10</code> model/version/dimension</li>
+    <li><code>$11</code> metadata_weight=0.70, <code>$12</code> semantic_weight=0.30</li>
+  </ul>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>5. CTE «candidates» — фильтрация</h4>
+  <ul>
+    <li>WHERE: language = $3, country_code = $4, NOT id IN excluded</li>
+    <li>JOIN LATERAL: первый поток (is_primary DESC, id ASC)</li>
+    <li>LEFT JOIN station_embeddings: только совпадающий model+version+dimension</li>
+    <li>Подсчёт matched_count: совпадение term-в из name/tags + точное совпадение tag-ов</li>
+  </ul>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>6. CTE «scored» — скоринг</h4>
+  <p><code>metadata_score</code> = matched_count / max(len(terms) + len(tags), 1)</p>
+  <p><code>semantic_score</code> = clamp(0…1, 1 − cosine_distance / 2)</p>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>7. Финальный SELECT — гибридный ранг</h4>
+</div>
+
+<div class="formula">
+  <div class="big">score = 0.70 × metadata + 0.30 × semantic</div>
+  <div class="note">Если semantic_score IS NULL → score = metadata_score (полный вес метаданных)</div>
+</div>
+
+<div class="step">
+  <h4>8. Сортировка и обрезка</h4>
+  <p><code>ORDER BY score DESC, id ASC</code> — стабильный tie-break по station ID</p>
+  <p><code>LIMIT $6</code></p>
+  <p>WHERE metadata_score > 0 OR semantic_score > 0 — нулевые не возвращаются</p>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>9. Пост-фильтрация в Rust (SearchService)</h4>
+  <ul>
+    <li>score ≥ <code>MIN_RELEVANCE_SCORE</code> (0.35)</li>
+    <li>Проверка совпадения жанра: если запрос содержит теги, хотя бы один должен совпадать</li>
+  </ul>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>10. HTTP-ответ</h4>
+  <p>Массив <code>RankedStation</code> с полями station + score + reason</p>
+</div>
+
+</div><!-- /flow -->
+</div><!-- /flow panel -->
+
+<!-- ═══════════════ 3. SQL ═══════════════ -->
+<div id="sql" class="panel">
+
+<h3 style="color:#38bdf8;margin-bottom:12px">SEARCH_SQL — полный текст с комментариями</h3>
+
+<div class="sql-box"><span class="cmt">-- CTE 1: кандидаты после жёстких фильтров</span>
+<span class="kw">WITH</span> candidates <span class="kw">AS</span> (
+    <span class="kw">SELECT</span>
+        s.id, s.name,
+        primary_stream.stream_url, s.homepage_url,
+        s.tags, s.language, s.country_code,
+        primary_stream.codec, primary_stream.bitrate_kbps,
+        primary_stream.health,
+        station_embedding.embedding,
+
+        <span class="cmt">-- Metadata match: сколько query-термов нашлось в name+tags</span>
+        (
+            <span class="kw">SELECT</span> <span class="fn">COUNT</span>(<span class="kw">DISTINCT</span> query_term.term)
+            <span class="kw">FROM</span> <span class="fn">UNNEST</span>(<span class="param">$1</span>::text[]) <span class="kw">AS</span> query_term(term)
+            <span class="kw">WHERE EXISTS</span> (
+                <span class="kw">SELECT</span> <span class="num">1</span> <span class="kw">FROM</span> (
+                    <span class="cmt">-- токены из имени станции</span>
+                    <span class="kw">SELECT</span> token <span class="kw">FROM</span> <span class="fn">regexp_split_to_table</span>(<span class="fn">lower</span>(s.name), <span class="str">'[^[:alnum:]]+'</span>) <span class="kw">AS</span> token
+                    <span class="kw">UNION</span>
+                    <span class="cmt">-- токены из тегов</span>
+                    <span class="kw">SELECT</span> token <span class="kw">FROM</span> <span class="fn">UNNEST</span>(s.tags) <span class="kw">AS</span> tag
+                    <span class="kw">CROSS JOIN LATERAL</span> <span class="fn">regexp_split_to_table</span>(<span class="fn">lower</span>(tag), <span class="str">'[^[:alnum:]]+'</span>) <span class="kw">AS</span> token
+                ) <span class="kw">AS</span> searchable_terms
+                <span class="kw">WHERE</span> token &lt;&gt; <span class="str">''</span> <span class="kw">AND</span> token = query_term.term
+            )
+        ) + (
+            <span class="cmt">-- Точное совпадение тегов целиком</span>
+            <span class="kw">SELECT</span> <span class="fn">COUNT</span>(<span class="kw">DISTINCT</span> query_tag.tag)
+            <span class="kw">FROM</span> <span class="fn">UNNEST</span>(<span class="param">$2</span>::text[]) <span class="kw">AS</span> query_tag(tag)
+            <span class="kw">WHERE</span> query_tag.tag = <span class="kw">ANY</span>(s.tags)
+        ) <span class="kw">AS</span> matched_count
+
+    <span class="kw">FROM</span> stations <span class="kw">AS</span> s
+
+    <span class="cmt">-- Первый (primary) поток станции</span>
+    <span class="kw">JOIN LATERAL</span> (
+        <span class="kw">SELECT</span> stream_url, codec, bitrate_kbps, health
+        <span class="kw">FROM</span> station_streams
+        <span class="kw">WHERE</span> station_id = s.id
+        <span class="kw">ORDER BY</span> is_primary <span class="kw">DESC</span>, id <span class="kw">ASC</span>
+        <span class="kw">LIMIT</span> <span class="num">1</span>
+    ) <span class="kw">AS</span> primary_stream <span class="kw">ON</span> <span class="num">true</span>
+
+    <span class="cmt">-- Embedding только если совпадает model+version+dimension И вектор запроса не NULL</span>
+    <span class="kw">LEFT JOIN</span> station_embeddings <span class="kw">AS</span> station_embedding
+      <span class="kw">ON</span> station_embedding.station_id = s.id
+     <span class="kw">AND</span> station_embedding.model = <span class="param">$8</span>
+     <span class="kw">AND</span> station_embedding.version = <span class="param">$9</span>
+     <span class="kw">AND</span> station_embedding.dimension = <span class="param">$10</span>
+     <span class="kw">AND</span> <span class="param">$7</span>::text <span class="kw">IS NOT NULL</span>
+
+    <span class="cmt">-- Жёсткие фильтры</span>
+    <span class="kw">WHERE</span> (<span class="param">$3</span>::text <span class="kw">IS NULL OR</span> s.language = <span class="param">$3</span>)
+      <span class="kw">AND</span> (<span class="param">$4</span>::text <span class="kw">IS NULL OR</span> s.country_code = <span class="param">$4</span>)
+      <span class="kw">AND NOT</span> (s.id = <span class="kw">ANY</span>(<span class="param">$5</span>::text[]))
+),
+
+<span class="cmt">-- CTE 2: скоринг</span>
+scored <span class="kw">AS</span> (
+    <span class="kw">SELECT</span> *,
+        matched_count::float8
+            / <span class="fn">GREATEST</span>(<span class="fn">cardinality</span>(<span class="param">$1</span>::text[]) + <span class="fn">cardinality</span>(<span class="param">$2</span>::text[]), <span class="num">1</span>)
+            <span class="kw">AS</span> metadata_score,
+        <span class="kw">CASE</span>
+            <span class="kw">WHEN</span> embedding <span class="kw">IS NULL OR</span> <span class="param">$7</span>::text <span class="kw">IS NULL THEN NULL</span>
+            <span class="kw">ELSE</span> <span class="fn">LEAST</span>(<span class="num">1.0</span>, <span class="fn">GREATEST</span>(<span class="num">0.0</span>, <span class="num">1.0</span> - (embedding <span class="kw">&lt;=&gt;</span> (<span class="param">$7</span>::text)::vector) / <span class="num">2.0</span>))
+        <span class="kw">END AS</span> semantic_score
+    <span class="kw">FROM</span> candidates
+)
+
+<span class="cmt">-- Финальный выбор с гибридным ранжированием</span>
+<span class="kw">SELECT</span>
+    id, name, stream_url, homepage_url, tags,
+    language, country_code, codec, bitrate_kbps, health,
+    metadata_score, semantic_score,
+    <span class="kw">CASE</span>
+        <span class="kw">WHEN</span> semantic_score <span class="kw">IS NULL THEN</span> metadata_score
+        <span class="kw">ELSE</span> <span class="param">$11</span>::float8 * metadata_score + <span class="param">$12</span>::float8 * semantic_score
+    <span class="kw">END AS</span> score
+<span class="kw">FROM</span> scored
+<span class="kw">WHERE</span> metadata_score > <span class="num">0</span> <span class="kw">OR</span> semantic_score > <span class="num">0</span>
+<span class="kw">ORDER BY</span> score <span class="kw">DESC</span>, id <span class="kw">ASC</span>
+<span class="kw">LIMIT</span> <span class="param">$6</span>
+</div>
+
+<div style="margin-top:16px;font-size:.82rem;color:#94a3b8">
+  <strong style="color:#f1f5f9">Параметры:</strong><br>
+  $1 = terms[] &nbsp; $2 = tags[] &nbsp; $3 = language &nbsp; $4 = country_code<br>
+  $5 = excluded_ids[] &nbsp; $6 = limit &nbsp; $7 = query_embedding_vector<br>
+  $8 = model &nbsp; $9 = version &nbsp; $10 = dimension<br>
+  $11 = METADATA_WEIGHT (0.70) &nbsp; $12 = SEMANTIC_WEIGHT (0.30)
+</div>
+</div>
+
+<!-- ═══════════════ 4. BACKFILL ═══════════════ -->
+<div id="backfill" class="panel">
+
+<div class="flow">
+
+<div class="step">
+  <h4>Backfill эмбеддингов (отдельный CLI)</h4>
+  <p><code>cargo run --features onnx-local --bin backfill_embeddings</code></p>
+  <p>Запускается вне HTTP-сервера. Не вызывается при старте или поиске.</p>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>1. Чтение документов постранично</h4>
+  <p>SELECT id, searchable_text FROM stations ORDER BY id ASC</p>
+  <p><code>searchable_text</code> = name + tags + language + country_code (конкатенация через пробел)</p>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>2. Генерация эмбеддинга для каждой станции</h4>
+  <p>EmbeddingProvider.embed_document(text) → Embedding(model, version, dimension, vector)</p>
+  <p>Для E5: текст оборачивается в <code>"passage: {text}"</code></p>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>3. Upsert в station_embeddings</h4>
+  <p><code>INSERT ... ON CONFLICT (station_id, model, version) DO UPDATE</code></p>
+  <p>Идемпотентно: повторный запуск обновляет существующие строки</p>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>Результат</h4>
+  <p>Каждая станция получает строку в station_embeddings с:<br>
+  model=<code>intfloat/multilingual-e5-small</code>, version=<code>onnx-v1</code>, dimension=<code>384</code></p>
+</div>
+
+</div>
+</div>
+
+<!-- ═══════════════ 5. IMPORT ═══════════════ -->
+<div id="import" class="panel">
+
+<div class="flow">
+
+<div class="step">
+  <h4>Импорт Radio Browser (отдельный CLI)</h4>
+  <p><code>cargo run --bin import_radio_browser</code></p>
+  <p>Отдельный от HTTP-сервера процесс.</p>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>1. Создание import_run (status=started)</h4>
+  <p>Записывает UUID, source=<code>radio_browser</code>, started_at</p>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>2. Постраничная загрузка с Radio Browser API</h4>
+  <p>Пагинация по offset, сортировка по stationuuid.<br>
+  Ограничения: max 500 на страницу, max 100 страниц, 8 MiB на ответ.</p>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>3. Валидация и нормализация каждой записи</h4>
+  <ul>
+    <li>lastcheckok=1, непустой UUID и name, валидный HTTP(S) stream URL</li>
+    <li>Теги: lowercase, сортировка, дедупликация</li>
+    <li>Язык: первый валидный 2-буквенный код; fallback на 3-буквенный</li>
+    <li>Страна: валидный alpha-2</li>
+    <li>Битрейт: 1–2000 kbps</li>
+  </ul>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>4. Upsert в stations и station_streams</h4>
+  <p>Ключ: <code>(source='radio_browser', source_station_id=stationuuid)</code></p>
+  <p>Существующие 6 builtin-станций не затрагиваются (другой source)</p>
+</div>
+<div class="arrow"></div>
+
+<div class="step">
+  <h4>5. Финализация import_run</h4>
+  <p>status → completed/failed, счётчики: fetched, imported, skipped, failed</p>
+</div>
+
+</div>
+</div>
+
+<script>
+function show(id){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  const tabs=document.querySelectorAll('.tab');
+  const map={schema:0,flow:1,sql:2,backfill:3,import:4};
+  tabs[map[id]].classList.add('active');
+}
+</script>
+
+</body>
+</html>

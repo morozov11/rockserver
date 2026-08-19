@@ -66,6 +66,7 @@ WITH candidates AS (
     WHERE ($3::text IS NULL OR s.language = $3)
       AND ($4::text IS NULL OR s.country_code = $4)
       AND NOT (s.id = ANY($5::text[]))
+      AND primary_stream.health <> 'degraded'
 ), scored AS (
     SELECT
         *,

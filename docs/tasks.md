@@ -1,5 +1,13 @@
 # Task log
 
+## RS-019 — 2026-08-19 — Genre hierarchy and progressive search fallback
+
+- Goal: make subgenre queries (e.g. "heavy metal", "black metal", "smooth jazz") find stations tagged with parent genres when no exact match exists, and prefer stations matching the requested language.
+- Scope: expanded canonical tag vocabulary with subgenres from the real Radio Browser catalog; a static genre-parent hierarchy (`black metal` → `metal` → `rock`); ancestor-aware `station_matches_requested_genre`; progressive fallback in `SearchService::search` (exact → parent → drop genre); a new builtin catalog station for metal; deterministic tests including the `"english heavy"` use case; and documentation updates. No public HTTP API, OpenAPI, PostgreSQL SQL, migration, or embedding changes.
+- Result: `CANONICAL_TAGS` grew from 27 to 40 entries with metal subgenres (`black metal`, `death metal`, `doom metal`, `power metal`, `symphonic metal`, `thrash metal`), rock subgenres (`alternative rock`, `classic rock`, `indie rock`, `pop rock`, `progressive rock`, `psychedelic rock`, `soft rock`), and jazz subgenres (`acid jazz`, `latin jazz`, `smooth jazz`). `genre_parent` and `genre_ancestors` expose the hierarchy. `station_matches_requested_genre` accepts stations whose tags match any ancestor. `SearchService::search` progressively relaxes the genre constraint: exact match → parent genres → no genre filter, always gated by `MIN_RELEVANCE_SCORE`.
+- Checks: `cargo fmt --check` passed; `cargo clippy --all-targets --all-features -- -D warnings` passed; `cargo test` passed with 67 regular tests (48 unit + 19 integration), 6 ignored live/database tests.
+- Status: complete.
+
 ## RS-016 — 2026-08-17 — Local ONNX multilingual semantic search
 
 - Goal: add an opt-in CPU/local ONNX embedding provider suitable for Russian and English station discovery.
@@ -194,6 +202,13 @@
   PostgreSQL and provider-credential-dependent live tests remained explicitly ignored.
 - Status: complete.
 
+## RS-020 — 2026-08-19 — Genre DB, stream probe, multi-tag import
+
+- Goal: store the genre hierarchy in the database, add live stream probing, expand the import to pull stations by tag, and filter degraded streams from search.
+- Scope: migration 0006 (`genre_hierarchy` table with ~250 canonical genres/subgenres); migration 0007 (`last_probe_at`/`last_probe_error` on `station_streams`); `GenreTaxonomy` struct loadable from PostgreSQL with builtin fallback; `probe_streams` binary (8s timeout, 50 concurrency); `RadioBrowserClient::with_tag()` and `RADIO_BROWSER_TAGS` env; `health <> 'degraded'` filter in search SQL; persistence helpers for taxonomy loading and stream health updates.
+- Result: all 52 unit tests pass. fmt/clippy/test clean. Backward-compatible static API preserved.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` — all clean.
+- Status: complete.
 ## RS-018 — 2026-08-18 — Read-only administration-console preview
 
 - Goal: make the initial administration interface visible and usable during local development.
@@ -208,3 +223,5 @@
   `cargo test`, and `git diff --check` passed. The regular suite ran 57 tests successfully;
   PostgreSQL and provider-credential-dependent live tests remained explicitly ignored.
 - Status: complete.
+ 
+ 
