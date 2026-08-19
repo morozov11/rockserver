@@ -14,8 +14,68 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
 // Hard filters and exclusions are applied in `candidates`, before scoring and the final limit.
 // Metadata fallback remains exact; compatible embeddings add an exact cosine-derived score.
+/// Two-phase search: a fast pre-filter narrows candidates using tag/name
+/// overlap, then full scoring (token match, substring, cosine) runs only on
+/// the pre-filtered set.  If the pre-filter yields nothing but a query
+/// embedding is available, a semantic-only fallback uses the pgvector index.
 const SEARCH_SQL: &str = r#"
-WITH candidates AS (
+WITH query_terms AS (
+    SELECT term FROM UNNEST($1::text[]) AS t(term)
+),
+query_tags AS (
+    SELECT tag FROM UNNEST($2::text[]) AS t(tag)
+),
+prefiltered AS MATERIALIZED (
+    SELECT
+        s.id,
+        (
+            (
+                SELECT COUNT(DISTINCT qt.tag)
+                FROM query_tags qt
+                WHERE s.tags @> ARRAY[qt.tag]::text[]
+            )::float8
+            + CASE
+                WHEN $14::text = '' THEN 0.0
+                ELSE ts_rank_cd(s.searchable_tsv, plainto_tsquery('simple', $14))
+            END
+        ) AS prefilter_score
+    FROM stations AS s
+    WHERE ($3::text IS NULL OR s.language = $3)
+      AND ($4::text IS NULL OR s.country_code = $4)
+      AND NOT (s.id = ANY($5::text[]))
+      AND (
+          EXISTS (SELECT 1 FROM query_tags qt WHERE s.tags @> ARRAY[qt.tag]::text[])
+          OR ($14::text <> '' AND s.searchable_tsv @@ plainto_tsquery('simple', $14))
+          OR EXISTS (
+              SELECT 1 FROM query_terms qt
+              WHERE length(qt.term) >= 3
+                AND lower(s.name) % qt.term
+          )
+      )
+    ORDER BY prefilter_score DESC, s.id ASC
+    LIMIT GREATEST($6 * 20, 200)
+),
+semantic_fallback AS (
+    SELECT se.station_id AS id
+    FROM station_embeddings AS se
+    JOIN stations AS s ON s.id = se.station_id
+    WHERE $7::text IS NOT NULL
+      AND se.model = $8
+      AND se.version = $9
+      AND se.dimension = $10
+      AND ($3::text IS NULL OR s.language = $3)
+      AND ($4::text IS NULL OR s.country_code = $4)
+      AND NOT (s.id = ANY($5::text[]))
+      AND NOT EXISTS (SELECT 1 FROM prefiltered pf WHERE pf.id = s.id)
+    ORDER BY se.embedding <=> ($7::text)::vector
+    LIMIT $6
+),
+candidate_ids AS (
+    SELECT id FROM prefiltered
+    UNION
+    SELECT id FROM semantic_fallback
+),
+candidates AS (
     SELECT
         s.id,
         s.name,
@@ -29,27 +89,28 @@ WITH candidates AS (
         primary_stream.health,
         station_embedding.embedding,
         (
-            SELECT COUNT(DISTINCT query_term.term)
-            FROM UNNEST($1::text[]) AS query_term(term)
-            WHERE EXISTS (
-                SELECT 1
-                FROM (
-                    SELECT token
-                    FROM regexp_split_to_table(lower(s.name), '[^[:alnum:]]+') AS token
-                    UNION
-                    SELECT token
-                    FROM UNNEST(s.tags) AS station_tag(tag)
-                    CROSS JOIN LATERAL regexp_split_to_table(lower(station_tag.tag), '[^[:alnum:]]+') AS token
-                ) AS searchable_terms
-                WHERE searchable_terms.token <> ''
-                  AND searchable_terms.token = query_term.term
-            )
+            SELECT COUNT(DISTINCT qt.term)
+            FROM query_terms qt
+            WHERE qt.term <> ''
+              AND s.searchable_tsv @@ plainto_tsquery('simple', qt.term)
         ) + (
-            SELECT COUNT(DISTINCT query_tag.tag)
-            FROM UNNEST($2::text[]) AS query_tag(tag)
-            WHERE query_tag.tag = ANY(s.tags)
-        ) AS matched_count
+            SELECT COUNT(DISTINCT qt.tag)
+            FROM query_tags qt
+            WHERE s.tags @> ARRAY[qt.tag]::text[]
+        ) AS matched_count,
+        (
+            SELECT COUNT(DISTINCT qt.term)
+            FROM query_terms qt
+            WHERE length(qt.term) >= 3
+              AND lower(s.name) LIKE '%' || qt.term || '%'
+        ) AS substring_match_count,
+        COALESCE((
+            SELECT MAX(similarity(lower(s.name), qt.term))
+            FROM query_terms qt
+            WHERE length(qt.term) >= 2
+        ), 0.0) AS trgm_score
     FROM stations AS s
+    JOIN candidate_ids ci ON ci.id = s.id
     JOIN LATERAL (
         SELECT stream_url, codec, bitrate_kbps, health
         FROM station_streams
@@ -63,15 +124,12 @@ WITH candidates AS (
      AND station_embedding.version = $9
      AND station_embedding.dimension = $10
      AND $7::text IS NOT NULL
-    WHERE ($3::text IS NULL OR s.language = $3)
-      AND ($4::text IS NULL OR s.country_code = $4)
-      AND NOT (s.id = ANY($5::text[]))
-      AND primary_stream.health <> 'degraded'
+    WHERE primary_stream.health <> 'degraded'
 ), scored AS (
     SELECT
         *,
-        matched_count::float8
-            / GREATEST(cardinality($1::text[]) + cardinality($2::text[]), 1)
+        (matched_count::float8 + substring_match_count::float8 * 0.5 + trgm_score * 0.3)
+            / GREATEST($13::int + cardinality($2::text[]), 1)
             AS metadata_score,
         CASE
             WHEN embedding IS NULL OR $7::text IS NULL THEN NULL
@@ -154,6 +212,8 @@ impl StationRepository for PostgresStationRepository {
             .bind(parameters.embedding_dimension)
             .bind(parameters.metadata_weight)
             .bind(parameters.semantic_weight)
+            .bind(parameters.core_term_count)
+            .bind(&parameters.raw_query)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| RepositoryError::new("search", error))?;
@@ -273,6 +333,9 @@ struct PostgresSearchParameters {
     embedding_dimension: Option<i32>,
     metadata_weight: f64,
     semantic_weight: f64,
+    core_term_count: i32,
+    /// Cleaned query for plainto_tsquery FTS matching.
+    raw_query: String,
 }
 
 impl PostgresSearchParameters {
@@ -300,6 +363,8 @@ impl PostgresSearchParameters {
             embedding_dimension,
             metadata_weight: METADATA_WEIGHT,
             semantic_weight: SEMANTIC_WEIGHT,
+            core_term_count: query.core_term_count as i32,
+            raw_query: query.raw_query.clone(),
         })
     }
 }

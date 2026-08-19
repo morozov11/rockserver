@@ -20,7 +20,7 @@ pub use llm::{
 };
 pub use query::{
     DeterministicQueryParser, QueryIntent, QueryParser, QueryParserError, QueryParserInput,
-    SearchAction, normalize_query,
+    SearchAction, normalize_query, tokenize,
 };
 pub use ranking::{METADATA_WEIGHT, SEMANTIC_WEIGHT, hybrid_score};
 
@@ -48,6 +48,12 @@ pub struct SearchQuery {
     pub language: Option<String>,
     /// Country constraint inferred from request terms, when available.
     pub country_code: Option<String>,
+    /// Number of original query terms before transliteration expansion.
+    /// Used as the denominator for score calculation so that alias terms
+    /// don't dilute match quality.
+    pub core_term_count: usize,
+    /// Cleaned query string (stop-words removed) for full-text search.
+    pub raw_query: String,
 }
 
 impl SearchQuery {
@@ -56,6 +62,8 @@ impl SearchQuery {
             action: intent.action,
             original,
             locale,
+            core_term_count: intent.core_term_count,
+            raw_query: intent.raw_query,
             terms: intent.terms,
             tags: intent.tags,
             language: intent.language,
@@ -406,8 +414,56 @@ impl SearchService {
                     .expect("deterministic query parser cannot fail")
             }
         };
+        // Providers (LLMs) may occasionally return:
+        // - both empty `terms` and `tags`
+        // - only `tags` but no `terms` (hurts station name matching)
+        //
+        // For station-name matching deterministic tokenization is more reliable.
+        let mut intent = intent;
+        if intent.terms.is_empty() {
+            let deterministic = DeterministicQueryParser
+                .parse(&input)
+                .await
+                .expect("deterministic query parser cannot fail");
+            let deterministic = validate_intent(deterministic.clone()).unwrap_or(deterministic);
+
+            if intent.tags.is_empty() {
+                // Full fallback: provider returned nothing actionable.
+                intent = deterministic;
+            } else {
+                // Partial fallback: keep provider's hard genre tags, but use deterministic
+                // `terms` for token/sub-tokен and trigram name matching.
+                intent.terms = deterministic.terms;
+                intent.raw_query = deterministic.raw_query;
+                intent.core_term_count = deterministic.core_term_count;
+            }
+        }
+
         let query = SearchQuery::from_intent(input.query, input.locale, intent);
+        tracing::debug!(
+            original = %query.original,
+            terms = ?query.terms,
+            tags = ?query.tags,
+            core_term_count = query.core_term_count,
+            language = ?query.language,
+            country_code = ?query.country_code,
+            "search query parsed"
+        );
         let stations = self.search(&query, constraints).await?;
+        if stations.is_empty() {
+            tracing::debug!(original = %query.original, "search returned zero results");
+        } else {
+            for (i, s) in stations.iter().take(5).enumerate() {
+                tracing::debug!(
+                    rank = i + 1,
+                    id = %s.station.id,
+                    name = %s.station.name,
+                    score = s.score,
+                    reason = %s.reason,
+                    "search result"
+                );
+            }
+        }
         Ok(SearchOutcome { query, stations })
     }
 
@@ -500,12 +556,14 @@ mod tests {
             .map(|station| station.station.id)
             .collect::<Vec<_>>();
 
+        // "Радио Рок" scores higher because transliteration adds "рок"
+        // which substring-matches in its name, boosting its score.
         assert_eq!(
             ids,
             [
+                "station-rock-ru-001",
                 "station-rock-001",
                 "station-rock-002",
-                "station-rock-ru-001"
             ]
         );
     }
@@ -549,6 +607,8 @@ mod tests {
                 tags: vec!["rock".to_owned()],
                 language: Some("en".to_owned()),
                 country_code: None,
+                core_term_count: 1,
+                raw_query: "rock".to_owned(),
             })
         }
     }
@@ -581,7 +641,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(*input_seen.lock().unwrap(), Some(input));
-        assert_eq!(outcome.query.terms, ["rock"]);
+        assert!(outcome.query.terms.contains(&"rock".to_owned()));
+        assert!(outcome.query.terms.contains(&"рок".to_owned()));
         assert_eq!(outcome.stations.len(), 2);
     }
 
@@ -626,9 +687,9 @@ mod tests {
                 .map(|station| station.station.id.as_str())
                 .collect::<Vec<_>>(),
             [
+                "station-rock-ru-001",
                 "station-rock-001",
                 "station-rock-002",
-                "station-rock-ru-001"
             ]
         );
     }
@@ -644,6 +705,8 @@ mod tests {
                 tags: Vec::new(),
                 language: Some("english".to_owned()),
                 country_code: None,
+                core_term_count: 1,
+                raw_query: "jazz".to_owned(),
             })
         }
     }
@@ -670,7 +733,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(outcome.query.language, None);
-        assert_eq!(outcome.query.terms, ["rock"]);
+        assert!(outcome.query.terms.contains(&"rock".to_owned()));
     }
 
     struct FixedEmbeddingProvider;
@@ -716,6 +779,8 @@ mod tests {
             tags: vec!["heavy metal".to_owned()],
             language: None,
             country_code: None,
+            core_term_count: 2,
+            raw_query: "heavy metal".to_owned(),
         };
         let constraints = SearchConstraints {
             limit: 10,
@@ -747,6 +812,8 @@ mod tests {
             tags: vec!["heavy metal".to_owned()],
             language: Some("en".to_owned()),
             country_code: None,
+            core_term_count: 2,
+            raw_query: "english heavy".to_owned(),
         };
         let constraints = SearchConstraints {
             limit: 10,
@@ -776,6 +843,8 @@ mod tests {
             tags: vec!["reggae".to_owned()],
             language: None,
             country_code: None,
+            core_term_count: 1,
+            raw_query: "reggae".to_owned(),
         };
         let constraints = SearchConstraints {
             limit: 10,

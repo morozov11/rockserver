@@ -168,11 +168,17 @@ ON CONFLICT (source, source_stream_id) DO UPDATE SET
     }
 }
 
-/// Builds the bounded, normalized document used by local embedding backfills.
+/// Builds the bounded, normalized document used by local embedding backfills
+/// and PostgreSQL full-text search. CamelCase names are split so that
+/// `"radioDJ"` produces both `"radiodj"` and `"radio dj"`.
 fn searchable_text(station: &ImportedStation) -> String {
+    use crate::search::tokenize;
+
     let tags = station.tags.join(" ");
+    let name_tokens = tokenize(&station.name).join(" ");
     [
         station.name.as_str(),
+        name_tokens.as_str(),
         tags.as_str(),
         station.language.as_deref().unwrap_or_default(),
         station.country_code.as_deref().unwrap_or_default(),

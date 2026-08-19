@@ -58,6 +58,7 @@ fn country_matches(station: &Station, query: &SearchQuery) -> bool {
 
 fn rank_station(station: &Station, query: &SearchQuery) -> Option<RankedStation> {
     let searchable_terms = station_searchable_terms(station);
+    let station_name_lower = station.name.to_lowercase();
     let matched_terms = query
         .terms
         .iter()
@@ -71,13 +72,21 @@ fn rank_station(station: &Station, query: &SearchQuery) -> Option<RankedStation>
         .cloned()
         .collect::<BTreeSet<_>>();
 
-    if matched_terms.is_empty() && matched_tags.is_empty() {
+    // Substring matches for terms ≥ 3 chars not already exactly matched.
+    let substring_matches: usize = query
+        .terms
+        .iter()
+        .filter(|t| t.len() >= 3 && !matched_terms.contains(t.as_str()))
+        .filter(|t| station_name_lower.contains(t.as_str()))
+        .count();
+
+    if matched_terms.is_empty() && matched_tags.is_empty() && substring_matches == 0 {
         return None;
     }
 
-    let matched_count = matched_terms.len() + matched_tags.len();
-    let query_count = query.terms.len() + query.tags.len();
-    let score = matched_count as f64 / query_count.max(1) as f64;
+    let exact = matched_terms.len() + matched_tags.len();
+    let query_count = query.core_term_count + query.tags.len();
+    let score = (exact as f64 + substring_matches as f64 * 0.5) / query_count.max(1) as f64;
     let reason_terms = matched_tags
         .into_iter()
         .chain(matched_terms)

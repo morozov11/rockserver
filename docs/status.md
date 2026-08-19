@@ -120,6 +120,48 @@ RS-019 introduces a genre taxonomy hierarchy and progressive search fallback. `C
 
 RS-020 moves the genre hierarchy from compiled-in constants to a PostgreSQL `genre_hierarchy` table seeded with ~250 genres across 25 root categories. `GenreTaxonomy` loads from the database at startup with a builtin fallback for in-memory mode. A new `probe_streams` binary connects to each stream URL (8-second timeout, 50 concurrent), marking unreachable streams as `degraded` with the error stored in `last_probe_error`. The PostgreSQL search CTE now excludes `degraded` streams. The Radio Browser importer supports `RADIO_BROWSER_TAGS` for per-tag import passes, enabling broader genre coverage. Migrations 0006 and 0007 are applied automatically on connect.
 
+## Station name search improvements (RS-021)
+
+RS-021 improves station name search accuracy for voice queries such as "включи радио диджей" → `radioDJ`:
+
+- **Stop-word filtering**: Command verbs (`включи`, `поставь`, `найди`, `play`, `find`, etc.) are removed from query terms before matching, preventing score dilution.
+- **CamelCase splitting**: `tokenize()` now splits `"radioDJ"` into `["radio", "dj"]` and `"XMLParser"` into `["XML", "Parser"]`. This affects both query tokenization and `searchable_text()` at import time.
+- **Transliteration expansion**: A word-level mapping (`радио`↔`radio`, `диджей`↔`dj`, `фм`↔`fm`, `рок`↔`rock`, ~50 entries) expands query terms so that Cyrillic queries match Latin station names and vice versa.
+- **Substring matching**: Both in-memory ranking and the PostgreSQL search CTE now award partial credit (0.5 per term) for substring matches in station names (terms ≥ 3 chars), so "радио" finds stations with "radio" in their name even without exact token match.
+- **Backfill script**: `fill-database.ps1` now includes `backfill_embeddings` as the final step after import and stream probing.
+- **LLM intent normalization + fallback**: Provider `terms` are normalized into atomic tokens (`tokenize()`), expanded with transliteration aliases, and if the provider returns empty `terms` and empty `tags` the system switches to deterministic parsing for more reliable station-name matching.
+- **Search performance**: Added a PostgreSQL `pg_trgm` + trigram index on `lower(stations.name)` to accelerate `LIKE '%term%'` prefiltering/substrings.
+
+## Full-text search and similarity scoring (RS-023)
+
+RS-023 replaces the expensive sequential `LIKE '%term%'` prefilter with three index-backed search layers:
+
+1. **PostgreSQL FTS (tsvector)**: Migration 0009 adds a `searchable_tsv` tsvector column derived from `searchable_text` with a GIN index and auto-update trigger (config `simple` for language-neutral exact tokens). The prefilter uses `plainto_tsquery('simple', $14)` for O(log n) candidate selection.
+2. **pg_trgm similarity**: The prefilter now uses the `%` operator (`lower(s.name) % qt.term`) instead of `LIKE '%term%'`, leveraging the existing GIN trigram index for fuzzy name matching. A `trgm_score` (max similarity) contributes 0.3 weight to the metadata score.
+3. **Embedding cosine (unchanged)**: Semantic fallback via pgvector HNSW index remains as before.
+
+`raw_query` (stop-words removed) is passed through `QueryIntent` → `SearchQuery` → `PostgresSearchParameters` → `$14` for FTS matching.
+
+## Correct name ranking when LLM omits terms (RS-024)
+
+RS-024 fixes incorrect ranking and extra latency when the LLM returns `tags` but omits `terms` (e.g. "включи радио рокс"). Previously this caused name-token matching to be skipped and ranking fell back to mostly genre-tag + semantic similarity.
+
+Now in `SearchService::interpret_and_search`:
+
+- if `intent.terms` is empty, we run `DeterministicQueryParser` and:
+  - keep provider genre `tags` (when present),
+  - but replace `terms`, `core_term_count`, and `raw_query` with deterministic tokenization output.
+- the transliteration vocabulary was extended with common voice tokens:
+  - `ультра`↔`ultra`, `рокс`↔`roks`, `викер`↔`viker`.
+
+## Narrow prefilter candidate set before heavy scoring (RS-025)
+
+RS-025 reduces slow broad queries by making the `prefiltered` CTE `MATERIALIZED`, assigning each row a cheap `prefilter_score` (exact tag hits + `ts_rank_cd` + max trigram similarity), and limiting the candidate pool to `GREATEST(limit * 20, 200)` before the expensive exact-token, substring, and embedding scoring phase.
+
+## Remove per-candidate regex tokenization from exact matching (RS-026)
+
+RS-026 replaces the exact-term part of `matched_count` with `searchable_tsv @@ plainto_tsquery('simple', qt.term)` so PostgreSQL reuses the precomputed normalized document instead of re-running `regexp_split_to_table(...)` over station names and tags for every candidate row. The cheap prefilter ordering also now avoids early full-table trigram scoring and keeps trigram similarity only in the limited candidate phase.
+
 ## Next step
 
-Populate the `rockserver` database with multi-tag import and run stream probing. Then implement and select the first production `StreamingSpeechRecognizer` adapter (Yandex SpeechKit v3 is the preferred Russian MVP), connect RockCast microphone capture with timeout/cancellation and local-catalog fallback, and add OpenAI behind the same trait after the shared conformance tests pass.
+Implement and select the first production `StreamingSpeechRecognizer` adapter (Yandex SpeechKit v3 is the preferred Russian MVP), connect RockCast microphone capture with timeout/cancellation and local-catalog fallback, and add OpenAI behind the same trait after the shared conformance tests pass.

@@ -26,6 +26,7 @@ uuid = { version = "1", features = ["v4"] }
 ndarray = { version = "0.17", optional = true }
 ort = { version = "2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray"], optional = true }
 tokenizers = { version = "0.22", optional = true }
+tracing-appender = "0.2.5"
 
 [dev-dependencies]
 http-body-util = "0.1"

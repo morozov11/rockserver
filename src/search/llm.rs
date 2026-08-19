@@ -190,6 +190,8 @@ impl IntentDto {
                 ));
             }
         }
+        let raw_query = self.terms.join(" ");
+        let core_term_count = self.terms.len();
         Ok(QueryIntent {
             action: match self.action {
                 SearchActionDto::Play => SearchAction::Play,
@@ -199,6 +201,8 @@ impl IntentDto {
             tags: self.tags,
             language: self.language,
             country_code: self.country_code,
+            core_term_count,
+            raw_query,
         })
     }
 }

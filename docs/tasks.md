@@ -209,6 +209,57 @@
 - Result: all 52 unit tests pass. fmt/clippy/test clean. Backward-compatible static API preserved.
 - Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` — all clean.
 - Status: complete.
+## RS-021 — 2026-08-19 — Station name search accuracy
+
+- Goal: fix voice queries like "включи радио диджей" not finding station `radioDJ`; add embedding backfill to the database population script.
+- Scope: stop-word filtering (command verbs removed from query terms); CamelCase splitting in `tokenize()` (`radioDJ` → `radio` + `dj`); word-level Cyrillic↔Latin transliteration (~50 mappings: радио↔radio, диджей↔dj, фм↔fm, etc.); substring matching with 0.5 weight in both in-memory ranking and PostgreSQL search CTE; `searchable_text()` enriched with CamelCase-split tokens at import time; `fill-database.ps1` updated with `backfill_embeddings` step.
+- Result: all 59 unit tests pass; new tests cover stop-word removal, transliteration expansion, camelCase split, and tokenize integration. fmt/clippy/test clean.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` — all clean.
+- Status: complete.
+
+## RS-022 — 2026-08-19 — Search name performance + intent normalization
+
+- Goal: fix slow/timeouts for station name searches and improve relevance when the LLM returns empty or multi-word `terms`.
+- Scope: normalize provider `terms` by splitting into atomic tokens (`tokenize()`), apply transliteration alias expansion for query terms, and add deterministic fallback when both `terms` and `tags` are empty; add PostgreSQL `pg_trgm` index on `lower(stations.name)` to speed up `LIKE '%term%'` prefiltering and substring scoring; keep existing metadata/semantic hybrid ranking and degraded-stream filtering.
+- Result: unit/integration tests pass; SQL is still hybrid-ranked but prefiltering becomes index-friendly once `pg_trgm` is applied.
+- Checks: `cargo fmt --check`, strict `cargo clippy`, and `cargo test` passed.
+- Status: complete.
+
+## RS-023 — 2026-08-19 — Full-text search and similarity scoring
+
+- Goal: replace slow sequential `LIKE '%term%'` prefilter with index-backed FTS and pg_trgm similarity.
+- Scope: migration 0009 (`searchable_tsv` tsvector column, GIN index, auto-update trigger using `simple` config); prefilter rewritten to use `plainto_tsquery` (FTS) and `%` operator (pg_trgm similarity) instead of `LIKE`; `trgm_score` added to scoring with 0.3 weight; `raw_query` field threaded through `QueryIntent` → `SearchQuery` → `PostgresSearchParameters` → SQL `$14`.
+- Result: all 56 unit tests pass. fmt/clippy/test clean. Migration must be applied on live DB for effect.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` — all clean.
+- Status: complete.
+
+## RS-024 — 2026-08-19 — Correct name ranking when LLM omits terms
+
+- Goal: fix incorrect ranking and extra latency when the LLM returns only `tags` and `terms` is empty (e.g. "включи радио рокс"), which breaks station-name token matching.
+- Scope: in `SearchService::interpret_and_search`, if `intent.terms` is empty then we run `DeterministicQueryParser` and:
+  - keep provider hard genre tags (when present),
+  - but replace `terms`, `core_term_count`, and `raw_query` with deterministic tokenization outputs for name matching.
+  - extend transliteration vocabulary with common voice tokens: `ультра`↔`ultra`, `рокс`↔`roks`, `викер`↔`viker`.
+- Result: unit tests pass, including new transliteration coverage.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`.
+- Status: complete.
+
+## RS-025 — 2026-08-19 — Narrow prefilter candidate set before heavy scoring
+
+- Goal: reduce slow search queries and timeouts on broad requests where `prefiltered` matched too many stations before exact scoring.
+- Scope: make `prefiltered` `MATERIALIZED`, compute a cheap `prefilter_score` from exact tag hits + `ts_rank_cd` + max trigram similarity, sort by that score, and cap the prefiltered pool to `GREATEST(limit * 20, 200)` before running expensive `regexp_split_to_table`, substring, and embedding scoring.
+- Result: library checks are clean; the change is designed to keep relevance while cutting the number of rows that reach the expensive scoring phase.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --lib`.
+- Status: complete.
+
+## RS-026 — 2026-08-19 — Remove per-candidate regex tokenization from exact matching
+
+- Goal: speed up candidate scoring further by removing repeated `regexp_split_to_table(...)` work on each candidate station row.
+- Scope: replace exact term matching in `matched_count` with `s.searchable_tsv @@ plainto_tsquery('simple', qt.term)` so the scoring phase uses the precomputed `searchable_tsv` document instead of re-tokenizing station names and tags; simplify `prefilter_score` to tag hits + `ts_rank_cd`, leaving trigram similarity only for the already-limited candidate set.
+- Result: library checks stay green while candidate scoring becomes cheaper for broad queries.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --lib`.
+- Status: complete.
+
 ## RS-018 — 2026-08-18 — Read-only administration-console preview
 
 - Goal: make the initial administration interface visible and usable during local development.
@@ -223,5 +274,6 @@
   `cargo test`, and `git diff --check` passed. The regular suite ran 57 tests successfully;
   PostgreSQL and provider-credential-dependent live tests remained explicitly ignored.
 - Status: complete.
- 
+
+ 
  

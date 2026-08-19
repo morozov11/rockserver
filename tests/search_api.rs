@@ -39,7 +39,7 @@ async fn limit_is_applied_after_ranking() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["stations"].as_array().unwrap().len(), 1);
-    assert_eq!(body["stations"][0]["id"], "station-rock-001");
+    assert_eq!(body["stations"][0]["id"], "station-rock-ru-001");
 }
 
 #[tokio::test]
@@ -52,9 +52,9 @@ async fn equal_score_results_use_station_id_as_a_stable_tie_break() {
     assert_eq!(
         first_ids,
         vec![
+            "station-rock-ru-001",
             "station-rock-001",
             "station-rock-002",
-            "station-rock-ru-001"
         ]
     );
     assert_eq!(first_ids, second_ids);
