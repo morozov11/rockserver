@@ -317,3 +317,20 @@
 
  
  
+
+## RS-032 — 2026-08-20 — Package layout and architecture review
+
+- Goal: review the repository for god objects and place related files into logical Rust packages
+  without changing the public HTTP contract.
+- Scope: catalog import packaging, voice-command/speech packaging, compatibility facades, graphify
+  architecture review, and verification.
+- Result: added `src/catalog/{mod.rs,import.rs}` and `src/voice/{mod.rs,command.rs,speech.rs}`;
+  updated internal consumers to use the new package boundaries while preserving the old speech and
+  voice-command module paths. Graphify identified `src/http/mod.rs` and `src/search/mod.rs` as the
+  next low-cohesion seams; they remain explicitly documented for a follow-up incremental split.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and
+  `cargo test` passed (61 unit/integration tests passed; 6 external/credential/database tests
+  remained ignored). The test run used an isolated target directory because the normal debug binary
+  was held open by an existing local process.
+- Status: complete; next refactor should extract HTTP transport DTO/error/auth modules, then split
+  search domain models, in-memory repository, and orchestration.

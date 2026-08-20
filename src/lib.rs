@@ -1,5 +1,5 @@
-/// Controlled catalog-import orchestration and provider-neutral models.
-pub mod catalog_import;
+/// Catalog domain and controlled import orchestration.
+pub mod catalog;
 /// Service configuration loaded from the process environment.
 pub mod config;
 /// HTTP routes and transport types.
@@ -10,12 +10,18 @@ pub mod persistence;
 pub mod providers;
 /// Deterministic station-search domain and catalog boundary.
 pub mod search;
-/// Provider-neutral streaming speech recognition boundaries.
-pub mod speech;
 /// Structured tracing setup.
 pub mod telemetry;
-/// Typed voice-command models and replaceable interpretation boundary.
-pub mod voice_command;
+/// Provider-neutral voice-command and streaming speech boundaries.
+pub mod voice;
+/// Backward-compatible facade for the pre-package speech API.
+pub mod speech {
+    pub use crate::voice::speech::*;
+}
+/// Backward-compatible facade for the pre-package voice-command API.
+pub mod voice_command {
+    pub use crate::voice::command::*;
+}
 
 use std::{future::Future, io};
 

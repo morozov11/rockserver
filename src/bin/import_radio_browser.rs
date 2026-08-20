@@ -7,7 +7,7 @@
 use std::{env, error::Error};
 
 use rockserver::{
-    catalog_import::{CatalogImportError, CatalogImporter},
+    catalog::{CatalogImportError, CatalogImporter},
     persistence::{DATABASE_URL_ENV, PostgresImportStore},
     providers::radio_browser::{RadioBrowserClient, RadioBrowserConfig, TAGS_ENV},
     telemetry,

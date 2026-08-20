@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use axum::{body::Body, http::Request};
 use http_body_util::BodyExt;
 use rockserver::{
-    catalog_import::{
+    catalog::{
         CatalogImportError, CatalogImportProvider, CatalogImporter, ImportLimits, ImportPage,
         ImportedStation,
     },

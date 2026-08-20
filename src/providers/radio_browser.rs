@@ -8,7 +8,7 @@ use serde::Deserialize;
 use url::Url;
 use uuid::Uuid;
 
-use crate::catalog_import::{
+use crate::catalog::{
     CatalogImportError, CatalogImportProvider, ImportLimits, ImportPage, ImportedStation,
 };
 
@@ -445,7 +445,7 @@ mod tests {
         BASE_URL_ENV, MAX_PAGES_ENV, PAGE_SIZE_ENV, RadioBrowserClient, RadioBrowserConfig,
         RadioBrowserStationDto, USER_AGENT_ENV,
     };
-    use crate::catalog_import::CatalogImportProvider;
+    use crate::catalog::CatalogImportProvider;
 
     #[test]
     fn dto_mapping_is_normalized_bounded_and_deterministic() {

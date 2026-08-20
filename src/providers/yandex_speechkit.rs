@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use reqwest::header;
 use serde::Deserialize;
 
-use crate::speech::{
+use crate::voice::{
     SpeechProviderError, SpeechStreamConfig, SpeechStreamSession, StreamingSpeechRecognizer,
     TranscriptUpdate,
 };

@@ -29,7 +29,7 @@ use crate::{
         InMemoryStationRepository, QueryParserInput, RankedStation, SearchConstraints,
         SearchService, StationHealth, StationRepository,
     },
-    speech::{
+    voice::{
         SpeechProviderError, SpeechStreamConfig, StreamingSpeechRecognizer, TranscriptUpdate,
         UnavailableSpeechRecognizer,
     },

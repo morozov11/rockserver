@@ -32,10 +32,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     tracing::info!(address = %config.bind_addr, "RockServer listening");
 
     let speech_recognizer = YandexSpeechKitRecognizer::optional_from_env()?
-        .map(|provider| {
-            Arc::new(provider) as Arc<dyn rockserver::speech::StreamingSpeechRecognizer>
-        })
-        .unwrap_or_else(|| Arc::new(rockserver::speech::UnavailableSpeechRecognizer));
+        .map(|provider| Arc::new(provider) as Arc<dyn rockserver::voice::StreamingSpeechRecognizer>)
+        .unwrap_or_else(|| Arc::new(rockserver::voice::UnavailableSpeechRecognizer));
     serve(
         listener,
         rockserver::http::router_with_services_and_bearer_token(

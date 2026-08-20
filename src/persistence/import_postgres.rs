@@ -4,9 +4,7 @@ use async_trait::async_trait;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use uuid::Uuid;
 
-use crate::catalog_import::{
-    CatalogImportError, CatalogImportStore, ImportCounts, ImportedStation,
-};
+use crate::catalog::{CatalogImportError, CatalogImportStore, ImportCounts, ImportedStation};
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 

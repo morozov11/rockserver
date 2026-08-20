@@ -2,6 +2,20 @@
 
 Last updated: 2026-08-20
 
+## Architecture refactor review
+
+The package layout was reviewed and the first safe refactor was completed. Catalog import code now
+lives under `src/catalog/`, and voice-command plus streaming speech boundaries live under
+`src/voice/`. Compatibility facades preserve the former `rockserver::speech` and
+`rockserver::voice_command` paths for existing clients and tests. HTTP and search remain the next
+large seams for incremental extraction: `src/http/mod.rs` still owns several transport concerns,
+and `src/search/mod.rs` still combines domain models, the in-memory repository, and orchestration.
+
+Verification for this refactor: `cargo fmt --check`, strict all-target/all-feature Clippy, and
+`cargo test` passed. Tests used an isolated `target-codex` directory because an existing local
+RockServer process held the normal debug executable open. No public route or OpenAPI behavior was
+changed.
+
 ## Local ONNX semantic search
 
 `onnx-local` provides CPU-only `intfloat/multilingual-e5-small` inference (384 dimensions) using local ONNX Runtime and tokenizer assets. Migration 0005 persists normalized station text and adds an E5-provenance cosine HNSW index. On 2026-08-17 the local PostgreSQL database contained 1,005 stations (999 imported from Radio Browser), all 1,005 searchable documents were backfilled with matching E5 embeddings, and live Russian queries completed through `POST /v1/search`.
