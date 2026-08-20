@@ -2,6 +2,8 @@ param(
     [string]$ApiBearerToken
 )
 
+$defaultApiBearerToken = 'rockserver-dev-bootstrap-7f4b9a2c1e6d8a40'
+
 $ErrorActionPreference = 'Stop'
 $projectRoot = 'C:\repos\rockserver'
 $assetsRoot = 'C:\Users\alex\Documents\Codex\2026-08-17\referenced-chatgpt-conversation-this-is-an\work\e5-assets'
@@ -14,21 +16,10 @@ Get-Content -LiteralPath $envFile | ForEach-Object {
     }
 }
 
-if ([string]::IsNullOrWhiteSpace($ApiBearerToken)) {
-    $ApiBearerToken = $env:ROCKSERVER_API_BEARER_TOKEN
+if (-not [string]::IsNullOrWhiteSpace($ApiBearerToken) -and $ApiBearerToken -ne $defaultApiBearerToken) {
+    Write-Host 'The local launcher ignores a custom token and uses the fixed RockMobile bootstrap token.' -ForegroundColor Yellow
 }
-if ([string]::IsNullOrWhiteSpace($ApiBearerToken)) {
-    $randomBytes = New-Object byte[] 32
-    $randomGenerator = [Security.Cryptography.RandomNumberGenerator]::Create()
-    try {
-        $randomGenerator.GetBytes($randomBytes)
-        $ApiBearerToken = -join ($randomBytes | ForEach-Object { $_.ToString('x2') })
-    }
-    finally {
-        $randomGenerator.Dispose()
-    }
-    Write-Host 'ROCKSERVER_API_BEARER_TOKEN was not set; generated a temporary token for this local run.' -ForegroundColor Yellow
-}
+$ApiBearerToken = $defaultApiBearerToken
 $env:ROCKSERVER_API_BEARER_TOKEN = $ApiBearerToken
 
 if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) { throw 'DATABASE_URL is missing from the local .env file.' }
@@ -42,7 +33,72 @@ $env:ROCKSERVER_ONNX_MODEL_PATH = $model
 $env:ROCKSERVER_ONNX_TOKENIZER_PATH = $tokenizer
 $env:ORT_DYLIB_PATH = $runtime
 
+function Get-LanIPv4Addresses {
+    $addresses = @()
+    try {
+        $addresses += Get-NetIPConfiguration -ErrorAction Stop |
+            Where-Object { $_.IPv4DefaultGateway -and $_.IPv4Address } |
+            ForEach-Object { $_.IPv4Address.IPAddress }
+    }
+    catch {
+        # Fall back to .NET network interfaces when the network cmdlets are unavailable.
+        $addresses += [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
+            ForEach-Object {
+                if ($_.OperationalStatus -ne [System.Net.NetworkInformation.OperationalStatus]::Up) {
+                    return
+                }
+                if ($_.NetworkInterfaceType -in @(
+                        [System.Net.NetworkInformation.NetworkInterfaceType]::Loopback,
+                        [System.Net.NetworkInformation.NetworkInterfaceType]::Tunnel,
+                        [System.Net.NetworkInformation.NetworkInterfaceType]::Unknown
+                    )) {
+                    return
+                }
+                if ($_.Description -match '(?i)vpn|virtual|wireguard|tunnel') {
+                    return
+                }
+                $properties = $_.GetIPProperties()
+                $hasIpv4Gateway = $properties.GatewayAddresses |
+                    Where-Object { $_.Address.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork }
+                if (-not $hasIpv4Gateway) {
+                    return
+                }
+                $properties.UnicastAddresses |
+                    Where-Object { $_.Address.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork } |
+                    ForEach-Object { $_.Address.ToString() }
+            }
+    }
+
+    $addresses |
+        Where-Object { $_ -and $_ -notlike '127.*' -and $_ -notlike '169.254.*' } |
+        Sort-Object -Unique
+}
+
+$bindAddress = $env:ROCKSERVER_BIND_ADDR
+if ([string]::IsNullOrWhiteSpace($bindAddress)) {
+    $bindAddress = '0.0.0.0:3000'
+}
+if ($bindAddress -notmatch ':(?<port>\d+)$') {
+    throw "ROCKSERVER_BIND_ADDR has no valid port: $bindAddress"
+}
+$port = [int]$Matches.port
+
 Set-Location -LiteralPath $projectRoot
-Write-Host 'Starting RockServer at http://127.0.0.1:3000 ...'
-Write-Host "Admin preview: http://127.0.0.1:3000/admin (token: $ApiBearerToken)"
+Write-Host "Starting RockServer listener at $bindAddress ..."
+if ($bindAddress -match '^0\.0\.0\.0:') {
+    Write-Host ("Admin preview (localhost): http://127.0.0.1:{0}/admin (token: {1})" -f $port, $ApiBearerToken)
+    $lanAddresses = @(Get-LanIPv4Addresses)
+    if ($lanAddresses.Count -eq 0) {
+        Write-Host 'Admin preview (LAN): no active LAN IPv4 address detected.' -ForegroundColor Yellow
+    }
+    else {
+        foreach ($address in $lanAddresses) {
+            Write-Host ("Admin preview (LAN): http://{0}:{1}/admin (token: {2})" -f $address, $port, $ApiBearerToken)
+        }
+    }
+}
+else {
+    $displayAddress = $bindAddress -replace ':\d+$', ''
+    Write-Host ("Admin preview: http://{0}:{1}/admin (token: {2})" -f $displayAddress, $port, $ApiBearerToken)
+}
 cargo run --features onnx-local --bin rockserver

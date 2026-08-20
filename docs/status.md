@@ -43,9 +43,9 @@ Latest verification for this change: `cargo fmt --check`, `cargo clippy --all-ta
 
 ## Current state
 
-The first API-access security slice is implemented. Production startup now requires a unique
-`ROCKSERVER_API_BEARER_TOKEN` of at least 32 characters; `POST /v1/search`, both voice-command
-routes, and both WebSocket voice-stream handshakes reject absent, malformed, or invalid
+The first API-access security slice is implemented. Startup always uses the fixed development
+bootstrap credential shared with RockMobile; `POST /v1/search`, both voice-command
+routes, and both WebSocket voice-stream handshakes reject malformed or invalid
 `Authorization: Bearer` credentials with structured `401 authentication_required` responses.
 `/health/live` and `/health/ready` remain unauthenticated for process supervision. The initial
 token is deployment configuration only, compared without prefix-based early exit, and is not
@@ -55,9 +55,13 @@ remain the next deliveries described in `docs/admin-security-plan.md`.
 enters the existing application Bearer token, which stays only in the current tab's memory, then
 can inspect readiness and search catalog stations. It is not an administrator-account, session,
 audit, or catalog-management implementation.
-`run-rockserver-local.ps1` accepts an explicit local token or reads it from `.env`; if neither is
-set, it generates a cryptographically random token for that process and prints it alongside the
-admin-preview URL. The generated value is not persisted.
+`run-rockserver-local.ps1` always injects the stable bootstrap token
+`rockserver-dev-bootstrap-7f4b9a2c1e6d8a40`, ignoring stale custom token values from parameters,
+`.env`, or the parent environment. Its startup
+output now reports the configured bind address and derives localhost plus active LAN admin-preview
+URLs from the actual port and network interfaces instead of printing a fixed `127.0.0.1` address.
+This shared value is a temporary local compatibility mechanism, not a per-user secret; deployments
+should set `ROCKSERVER_API_BEARER_TOKEN`.
 `docs/service-diagrams.html` now distinguishes this deployed single deployment credential from
 the planned persisted RockCast clients and Bearer-based administrator sessions, and records the
 current RockCast Bearer voice-handshake integration.
@@ -88,10 +92,11 @@ Station embedding generation is a separate `backfill_embeddings` command. It is 
 
 ## Configuration and behavior
 
-- HTTP listener: `ROCKSERVER_BIND_ADDR`, default `127.0.0.1:3000`.
-- Required application access gate: `ROCKSERVER_API_BEARER_TOKEN`, a unique secret of at least
-  32 characters. Clients send it as `Authorization: Bearer <token>`; do not put it in logs or
-  commit it to `.env` files.
+- HTTP listener: `ROCKSERVER_BIND_ADDR`, default `0.0.0.0:3000`.
+- Verification on 2026-08-20: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test` passed; `graphify update .` refreshed the local code graph.
+- Application access gate: clients send `Authorization: Bearer <token>`. The fixed development
+  bootstrap token is used until persisted users and revocable client tokens exist. Do not use it
+  for a public deployment.
 - Logging filter: `RUST_LOG`, default `info` when unset or invalid.
 - HTTP catalog backend: `DATABASE_URL` selects PostgreSQL; absence selects the six-station in-memory metadata fallback.
 - Optional query embeddings: `ROCKSERVER_SEMANTIC_PROVIDER=deterministic-dev` for tests/development or `onnx-e5-local` with the `onnx-local` Cargo feature and local model/tokenizer/runtime paths; absence means metadata-only search.

@@ -1,5 +1,37 @@
 # Task log
 
+## RS-037 — 2026-08-20 — Reliable local launcher endpoint output
+
+- Goal: make the local launcher print the actual RockServer bind address and reachable admin URLs.
+- Scope: derive the bind port from `ROCKSERVER_BIND_ADDR`, detect active LAN IPv4 addresses with a restricted-shell fallback, and remove stale hardcoded localhost output.
+- Result: `run-rockserver-local.ps1` reports the configured listener, localhost preview, and one preview URL per detected LAN address; it no longer claims that `127.0.0.1` is the only endpoint when the server binds all interfaces.
+- Checks: PowerShell syntax validation, gateway-backed LAN-address detection (`192.168.31.133`), `git diff --check`, and `graphify update .` passed.
+- Status: complete.
+
+## RS-038 — 2026-08-20 — Enforce the fixed local bootstrap token
+
+- Goal: ensure the running RockServer cannot diverge from the token compiled into RockMobile because of stale environment values or an old custom launcher argument.
+- Scope: make Rust startup and the local PowerShell launcher use the fixed bootstrap token; improve admin-preview error wording so only HTTP 401 is reported as token rejection; update current-state documentation.
+- Result: `rockserver-dev-bootstrap-7f4b9a2c1e6d8a40` is now authoritative for local startup. Legacy `ROCKSERVER_API_BEARER_TOKEN` values are ignored until real user/client credentials replace this temporary mechanism.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, sequential `cargo test`, PowerShell syntax validation, `git diff --check`, and `graphify update .` passed. The regular suite passed 72 library tests plus HTTP/contract tests; external database/provider tests remained ignored.
+- Status: complete.
+
+## RS-036 — 2026-08-20 — Stable RockMobile bootstrap credential
+
+- Goal: keep the local RockServer/RockMobile connection working with one credential until user accounts and revocable client tokens exist.
+- Scope: add the stable development bootstrap credential to RockServer configuration and the local launcher; use the same default in RockMobile; retain environment/settings overrides; update current-state and API documentation.
+- Result: RockServer and `run-rockserver-local.ps1` use `rockserver-dev-bootstrap-7f4b9a2c1e6d8a40` when no override is configured, and RockMobile sends the same value by default. Configured `ROCKSERVER_API_BEARER_TOKEN` values remain validated and take precedence.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and sequential `cargo test` passed (72 library tests plus HTTP/contract tests; external database/provider tests remained ignored). PowerShell syntax validation, `git diff --check`, and `graphify update .` passed. RockMobile `:app:lintDebug` passed; its unit suite still has six unrelated existing failures involving unmocked `android.util.Log` and coroutine timing.
+- Status: complete.
+
+## RS-035 - 2026-08-20 - Bind HTTP listener on all interfaces
+
+- Goal: make the default RockServer listener reachable from other hosts on the configured network.
+- Scope: change the default socket address from `127.0.0.1:3000` to `0.0.0.0:3000`; keep `ROCKSERVER_BIND_ADDR` as the explicit override; update user-facing documentation.
+- Result: when `ROCKSERVER_BIND_ADDR` is unset, `Config::from_env` now configures `0.0.0.0:3000`. Localhost-only operation remains available by setting `ROCKSERVER_BIND_ADDR=127.0.0.1:3000`.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`, and `graphify update .` passed. The regular suite ran 70 library tests plus the HTTP/contract suites; database and credential-dependent live tests remained explicitly ignored.
+- Status: complete.
+
 ## RS-034 — 2026-08-20 — Buffered microphone-capture regression diagnosis
 
 - Goal: identify and correct the loss of recognition quality reported in both selectable voice modes.

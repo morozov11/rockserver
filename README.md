@@ -58,11 +58,17 @@ Tests must be deterministic and must not access real LLM providers or the extern
 
 ## Run locally
 
-By default, RockServer listens only on `127.0.0.1:3000`. Override the complete socket address with `ROCKSERVER_BIND_ADDR`, for example:
+By default, RockServer listens on all interfaces at `0.0.0.0:3000`. Override the complete socket address with `ROCKSERVER_BIND_ADDR`, for example:
 
 ```text
 ROCKSERVER_BIND_ADDR=127.0.0.1:8080 cargo run
 ```
+
+Application routes use `Authorization: Bearer <token>`. Until user accounts and revocable client
+tokens are implemented, RockServer always uses the fixed bootstrap token
+`rockserver-dev-bootstrap-7f4b9a2c1e6d8a40`; RockMobile uses the same value by default. The
+environment variable `ROCKSERVER_API_BEARER_TOKEN` is retained only as a legacy configuration name
+and cannot replace this temporary token.
 
 Use `RUST_LOG` to adjust the tracing filter. If it is unset or invalid, the service uses `info`.
 

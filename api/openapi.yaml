@@ -471,9 +471,8 @@ components:
       scheme: bearer
       bearerFormat: opaque
       description: >-
-        Required for all application routes. This first security slice reads one deployment
-        credential from `ROCKSERVER_API_BEARER_TOKEN`; persisted, revocable per-client
-        credentials follow in a later delivery.
+        Required for all application routes. Until persisted, revocable per-client credentials are
+        implemented, the service uses the fixed local bootstrap credential shared with RockMobile.
   responses:
     AuthenticationRequired:
       description: A required Bearer credential was absent, malformed, or invalid.
