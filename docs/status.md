@@ -20,6 +20,27 @@ changed.
 
 `onnx-local` provides CPU-only `intfloat/multilingual-e5-small` inference (384 dimensions) using local ONNX Runtime and tokenizer assets. Migration 0005 persists normalized station text and adds an E5-provenance cosine HNSW index. On 2026-08-17 the local PostgreSQL database contained 1,005 stations (999 imported from Radio Browser), all 1,005 searchable documents were backfilled with matching E5 embeddings, and live Russian queries completed through `POST /v1/search`.
 
+## Semantic language and country intent filters
+
+When the local E5 semantic embedding provider is configured, startup now prepares 28 compact,
+multilingual E5 language-label vectors. The query vector is reused for both the language decision
+and station ranking, so a request performs no duplicate query inference. A language becomes a hard
+filter only when its cosine score is at least 0.72 and exceeds the next candidate by at least 0.04;
+otherwise the search remains broad. `ROCKSERVER_SEMANTIC_LANGUAGE_FILTERS=off` disables only this
+hard-filter layer while preserving semantic station ranking.
+
+The parser distinguishes language wording from an explicit country request. For example,
+`Включи английский рок` can yield `language=en`, while `Включи рок из Англии` yields
+`country_code=GB`. The deterministic parser recognizes `англии`, and a validated LLM country is
+preserved only after an explicit `из` or `from` country phrase. This prevents the UI/STT locale or
+a cultural adjective from becoming a country hard filter. The E5 label set currently covers Arabic,
+Chinese, Czech, Danish, Dutch, English, Finnish, French, German, Greek, Hebrew, Hindi, Hungarian,
+Indonesian, Italian, Japanese, Korean, Norwegian, Polish, Portuguese, Romanian, Russian, Spanish,
+Swedish, Thai, Turkish, Ukrainian, and Vietnamese; additional labels require a deliberate quality
+evaluation before they are added.
+
+Latest verification for this change: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed. The regular suite ran 67 library tests plus HTTP/contract tests; database and credential-dependent live tests remained explicitly ignored.
+
 ## Current state
 
 The first API-access security slice is implemented. Production startup now requires a unique

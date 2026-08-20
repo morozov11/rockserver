@@ -6,7 +6,9 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::query::{deterministic_intent, infer_country_code, tokenize};
+use super::query::{
+    deterministic_intent, has_explicit_country_request, infer_country_code, tokenize,
+};
 use super::taxonomy::CANONICAL_TAGS;
 use super::{QueryIntent, QueryParser, QueryParserError, QueryParserInput, SearchAction};
 
@@ -148,11 +150,17 @@ impl QueryParser for LlmQueryParser {
         intent.tags.extend(deterministic.tags);
         intent.tags.sort();
         intent.tags.dedup();
-        // Locale describes recognition/UI, not a requested station-language filter.
-        intent.language = deterministic.language;
-        // Provider output is not allowed to turn UI/STT locale into a country hard filter.
-        // A country constraint exists only when the original command names it explicitly.
-        intent.country_code = infer_country_code(&tokenize(&input.query));
+        // Locale describes recognition/UI, not a requested station-language filter. Preserve a
+        // validated provider language when deterministic wording has no unambiguous result.
+        intent.language = deterministic.language.or(intent.language);
+        // Provider output is not allowed to turn UI/STT locale into a country hard filter. A
+        // country constraint exists only when the original command names one explicitly.
+        let command_terms = tokenize(&input.query);
+        intent.country_code = infer_country_code(&command_terms).or_else(|| {
+            has_explicit_country_request(&command_terms)
+                .then_some(intent.country_code)
+                .flatten()
+        });
         Ok(intent)
     }
 }
@@ -246,6 +254,7 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(intent.terms, ["Jazz"]);
+        assert_eq!(intent.language.as_deref(), Some("en"));
         assert_eq!(intent.country_code, None);
     }
 
@@ -261,6 +270,21 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(intent.country_code.as_deref(), Some("RU"));
+    }
+
+    #[tokio::test]
+    async fn provider_country_is_preserved_for_an_explicit_country_phrase() {
+        let intent = parser(
+            r#"{"action":"play","terms":[],"tags":["rock"],"language":null,"country_code":"GB"}"#,
+        )
+        .parse(&QueryParserInput {
+            query: "Включи рок из Англии".to_owned(),
+            locale: "ru-RU".to_owned(),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(intent.country_code.as_deref(), Some("GB"));
     }
 
     #[tokio::test]

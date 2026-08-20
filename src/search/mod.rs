@@ -4,6 +4,7 @@ mod embedding;
 mod llm;
 mod query;
 mod ranking;
+mod semantic_filters;
 pub mod taxonomy;
 
 use std::{collections::BTreeSet, error::Error, fmt, sync::Arc, time::Instant};
@@ -23,12 +24,15 @@ pub use query::{
     SearchAction, normalize_query, tokenize,
 };
 pub use ranking::{METADATA_WEIGHT, SEMANTIC_WEIGHT, hybrid_score};
+pub use semantic_filters::{
+    SEMANTIC_LANGUAGE_FILTERS_ENV, SemanticLanguageClassifier, semantic_language_filters_enabled,
+};
 
 /// Results below this score can be produced by semantic similarity alone and
 /// are not reliable enough to claim that a station matches the requested genre.
 pub const MIN_RELEVANCE_SCORE: f64 = 0.35;
 
-use query::{station_name_hint_queries, validate_intent};
+use query::{has_explicit_country_request, station_name_hint_queries, validate_intent};
 use ranking::rank_stations;
 use taxonomy::{genre_ancestors, station_matches_requested_genre};
 
@@ -317,6 +321,7 @@ pub struct SearchService {
     repository: Arc<dyn StationRepository + Send + Sync>,
     query_parser: Arc<dyn QueryParser>,
     embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
+    language_classifier: Option<Arc<SemanticLanguageClassifier>>,
 }
 
 impl SearchService {
@@ -326,6 +331,7 @@ impl SearchService {
             repository,
             query_parser: Arc::new(DeterministicQueryParser),
             embedding_provider: None,
+            language_classifier: None,
         }
     }
 
@@ -337,10 +343,29 @@ impl SearchService {
         query_parser: Arc<dyn QueryParser>,
         embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
     ) -> Self {
+        Self::with_providers_and_language_classifier(
+            repository,
+            query_parser,
+            embedding_provider,
+            None,
+        )
+    }
+
+    /// Creates search with an optional confidence-gated semantic language classifier.
+    ///
+    /// The classifier is deliberately separate from the station ranking embedding so a
+    /// deployment can disable hard language filters without disabling semantic ranking.
+    pub fn with_providers_and_language_classifier(
+        repository: Arc<dyn StationRepository + Send + Sync>,
+        query_parser: Arc<dyn QueryParser>,
+        embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
+        language_classifier: Option<Arc<SemanticLanguageClassifier>>,
+    ) -> Self {
         Self {
             repository,
             query_parser,
             embedding_provider,
+            language_classifier,
         }
     }
 
@@ -358,11 +383,27 @@ impl SearchService {
     ) -> Result<Vec<RankedStation>, RepositoryError> {
         let embedding_started_at = Instant::now();
         let embedding = self.query_embedding(&query.original).await;
-        let embedding_elapsed_ms = embedding_started_at.elapsed().as_millis();
+        self.search_with_embedding(
+            query,
+            constraints,
+            embedding.as_ref(),
+            embedding_started_at.elapsed().as_millis(),
+        )
+        .await
+    }
+
+    /// Searches with an already computed request embedding to avoid duplicate local inference.
+    async fn search_with_embedding(
+        &self,
+        query: &SearchQuery,
+        constraints: &SearchConstraints,
+        embedding: Option<&Embedding>,
+        embedding_elapsed_ms: u128,
+    ) -> Result<Vec<RankedStation>, RepositoryError> {
         let repository_started_at = Instant::now();
         let mut stations = self
             .repository
-            .search(query, constraints, embedding.as_ref())
+            .search(query, constraints, embedding)
             .await?;
         tracing::debug!(
             embedding_elapsed_ms,
@@ -456,6 +497,26 @@ impl SearchService {
             }
         }
 
+        let embedding_started_at = Instant::now();
+        let embedding = self.query_embedding(&input.query).await;
+        let request_terms = tokenize(&input.query);
+        if intent.language.is_none()
+            && !has_explicit_country_request(&request_terms)
+            && let (Some(classifier), Some(embedding)) = (&self.language_classifier, &embedding)
+        {
+            if let Some(language) = classifier.classify(embedding) {
+                tracing::debug!(
+                    language = %language.code,
+                    score = language.score,
+                    margin = language.margin,
+                    "semantic language filter accepted"
+                );
+                intent.language = Some(language.code);
+            } else {
+                tracing::debug!("semantic language filter rejected as low confidence");
+            }
+        }
+
         let query = SearchQuery::from_intent(input.query, input.locale, intent);
         tracing::debug!(
             parser_elapsed_ms = parser_started_at.elapsed().as_millis(),
@@ -467,7 +528,14 @@ impl SearchService {
             country_code = ?query.country_code,
             "search query parsed"
         );
-        let stations = self.search(&query, constraints).await?;
+        let stations = self
+            .search_with_embedding(
+                &query,
+                constraints,
+                embedding.as_ref(),
+                embedding_started_at.elapsed().as_millis(),
+            )
+            .await?;
         if stations.is_empty() {
             tracing::debug!(original = %query.original, "search returned zero results");
         } else {
@@ -553,7 +621,7 @@ mod tests {
         DeterministicQueryParser, Embedding, EmbeddingProvider, EmbeddingProviderError,
         InMemoryStationRepository, QueryIntent, QueryParser, QueryParserError, QueryParserInput,
         RankedStation, RepositoryError, SearchAction, SearchConstraints, SearchQuery,
-        SearchService, StationRepository, normalize_query,
+        SearchService, SemanticLanguageClassifier, StationRepository, normalize_query,
     };
 
     #[tokio::test]
@@ -913,6 +981,48 @@ mod tests {
                 .provenance()
                 .model,
             "fake"
+        );
+    }
+
+    #[tokio::test]
+    async fn confident_semantic_language_filter_is_applied_before_search() {
+        let classifier = SemanticLanguageClassifier::from_embeddings(vec![
+            (
+                "en",
+                Embedding::new("fake", "1", 2, vec![1.0, 0.0]).unwrap(),
+            ),
+            (
+                "es",
+                Embedding::new("fake", "1", 2, vec![0.0, 1.0]).unwrap(),
+            ),
+        ]);
+        let service = SearchService::with_providers_and_language_classifier(
+            Arc::new(InMemoryStationRepository::with_builtin_catalog()),
+            Arc::new(DeterministicQueryParser),
+            Some(Arc::new(FixedEmbeddingProvider)),
+            Some(Arc::new(classifier)),
+        );
+
+        let outcome = service
+            .interpret_and_search(
+                QueryParserInput {
+                    query: "Включи английский рок".to_owned(),
+                    locale: "ru-RU".to_owned(),
+                },
+                &SearchConstraints {
+                    limit: 10,
+                    excluded_station_ids: BTreeSet::new(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.query.language.as_deref(), Some("en"));
+        assert!(
+            outcome
+                .stations
+                .iter()
+                .all(|station| station.station.language.as_deref() == Some("en"))
         );
     }
 }

@@ -230,6 +230,10 @@ impl EmbeddingProvider for OnnxE5EmbeddingProvider {
     async fn embed_document(&self, text: &str) -> Result<Embedding, EmbeddingProviderError> {
         self.infer("passage", text)
     }
+
+    fn supports_semantic_intent_filters(&self) -> bool {
+        true
+    }
 }
 
 #[allow(dead_code)]

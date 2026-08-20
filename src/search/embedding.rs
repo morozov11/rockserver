@@ -153,6 +153,14 @@ pub trait EmbeddingProvider: Send + Sync {
     async fn embed_document(&self, text: &str) -> Result<Embedding, EmbeddingProviderError> {
         self.embed(text).await
     }
+
+    /// Reports whether this provider produces semantic vectors suitable for intent hard filters.
+    ///
+    /// Test fixtures and deterministic development embeddings return `false` by default because
+    /// their vector similarity is not meaningful enough to constrain a station search.
+    fn supports_semantic_intent_filters(&self) -> bool {
+        false
+    }
 }
 
 /// One station document read by the controlled embedding workflow.

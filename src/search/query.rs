@@ -626,6 +626,16 @@ pub(super) fn infer_country_code(terms: &[String]) -> Option<String> {
     (matched_codes.len() == 1).then(|| matched_codes.into_iter().next().unwrap().to_owned())
 }
 
+/// Returns whether a request explicitly asks for stations from a country.
+///
+/// Only unambiguous source-country prepositions are recognized. This prevents
+/// cultural adjectives such as "английский рок" from becoming country filters.
+pub(super) fn has_explicit_country_request(terms: &[String]) -> bool {
+    terms
+        .windows(2)
+        .any(|window| matches!(window[0].as_str(), "из" | "from") && !window[1].is_empty())
+}
+
 /// Returns whether a normalized country alias occurs as a complete token sequence.
 fn contains_country_alias(terms: &[String], alias: &str) -> bool {
     let alias_terms = alias.split_whitespace().collect::<Vec<_>>();
@@ -642,8 +652,12 @@ fn contains_country_alias(terms: &[String], alias: &str) -> bool {
 const COUNTRY_ALIASES: &str = "AF=afghanistan;афганистан;афганский;afghan|AL=albania;албания;албанский;albanian|DZ=algeria;алжир;алжирский;algerian|AD=andorra;андорра;andorran|AO=angola;ангола;angolan|AG=antigua and barbuda;антигуа и барбуда|AR=argentina;аргентина;аргентинский;argentinian|AM=armenia;армения;армянский;armenian|AU=australia;австралия;австралийский;australian|AT=austria;австрия;австрийский;austrian|AZ=azerbaijan;азербайджан;азербайджанский|BS=bahamas;багамы;bahamian|BH=bahrain;бахрейн;bahraini|BD=bangladesh;бангладеш;bangladeshi|BB=barbados;барбадос;barbadian|BY=belarus;беларусь;белоруссия;белорусский;belarusian|BE=belgium;бельгия;бельгийский;belgian|BZ=belize;белиз;belizean|BJ=benin;бенин;beninese|BT=bhutan;бутан;bhutanese|BO=bolivia;боливия;bolivian|BA=bosnia and herzegovina;босния и герцеговина;bosnian|BW=botswana;ботсвана;botswanan|BR=brazil;бразилия;бразильский;brazilian|BN=brunei;бруней;bruneian|BG=bulgaria;болгария;болгарский;bulgarian|BF=burkina faso;буркина фасо|BI=burundi;бурунди;burundian|CV=cabo verde;cape verde;кабо верде|KH=cambodia;камбоджа;cambodian|CM=cameroon;камерун;cameroonian|CA=canada;канада;канадский;canadian|CF=central african republic;центральноафриканская республика|TD=chad;чад;chadian|CL=chile;чили;chilean|CN=china;китай;китайский;chinese|CO=colombia;колумбия;colombian|KM=comoros;коморы;comorian|CG=republic of congo;республика конго|CD=democratic republic of congo;демократическая республика конго|CR=costa rica;коста рика;costa rican|CI=cote d ivoire;ivory coast;кот д ивуар;ivorian|HR=croatia;хорватия;croatian|CU=cuba;куба;cuban|CY=cyprus;кипр;cypriot|CZ=czechia;czech republic;чехия;czech|DK=denmark;дания;данский;danish|DJ=djibouti;джибути|DM=dominica;доминика|DO=dominican republic;доминиканская республика|EC=ecuador;эквадор;ecuadorian|EG=egypt;египет;египетский;egyptian|SV=el salvador;сальвадор;salvadoran|GQ=equatorial guinea;экваториальная гвинея|ER=eritrea;эритрея;eritrean|EE=estonia;эстония;эстонский;estonian|SZ=eswatini;свазиленд;эсватини|ET=ethiopia;эфиопия;ethiopian|FJ=fiji;фиджи;fijian|FI=finland;финляндия;финский;finnish|FR=france;франция;французский;french|GA=gabon;габон;gabonese|GM=gambia;гамбия;gambian|GE=georgia;грузия;грузинский;georgian|DE=germany;германия;немецкий;немецкая;немецкое;немецкие;german|GH=ghana;гана;ghanaian|GR=greece;греция;греческий;greek|GD=grenada;гренада|GT=guatemala;гватемала|GN=guinea;гвинея|GW=guinea bissau;гвинея бисау|GY=guyana;гайана|HT=haiti;гаити;haitian|VA=holy see;vatican;ватикан|HN=honduras;гондурас;honduran|HU=hungary;венгрия;венгерский;hungarian|IS=iceland;исландия;icelandic|IN=india;индия;индийский;indian|ID=indonesia;индонезия;indonesian|IR=iran;иран;iranian|IQ=iraq;ирак;iraqi|IE=ireland;ирландия;irish|IL=israel;израиль;israeli|IT=italy;италия;итальянский;italian|JM=jamaica;ямайка;jamaican|JP=japan;япония;японский;japanese|JO=jordan;иордания;jordanian|KZ=kazakhstan;казахстан;казахский;kazakh|KE=kenya;кения;kenyan|KI=kiribati;кирибати|KP=north korea;северная корея;северокорейский|KR=south korea;южная корея;южнокорейский|KW=kuwait;кувейт;kuwaiti|KG=kyrgyzstan;киргизия;кыргызстан;kyrgyz|LA=laos;лаос|LV=latvia;латвия;latvian|LB=lebanon;ливан;lebanese|LS=lesotho;лесото|LR=liberia;либерия;liberian|LY=libya;ливия;libyan|LI=liechtenstein;лихтенштейн|LT=lithuania;литва;lithuanian|LU=luxembourg;люксембург|MG=madagascar;мадагаскар;malagasy|MW=malawi;малави|MY=malaysia;малайзия;malaysian|MV=maldives;мальдивы|ML=mali;мали|MT=malta;мальта;maltese|MH=marshall islands;маршалловы острова|MR=mauritania;мавритания|MU=mauritius;маврикий|MX=mexico;мексика;мексиканский;mexican|FM=micronesia;микронезия|MD=moldova;молдова;moldovan|MC=monaco;монако|MN=mongolia;монголия;mongolian|ME=montenegro;черногория|MA=morocco;марокко;moroccan|MZ=mozambique;мозамбик|MM=myanmar;мьянма;бирма;burmese|NA=namibia;намибия|NR=nauru;науру|NP=nepal;непал;nepali|NL=netherlands;holland;нидерланды;голландия;dutch|NZ=new zealand;новая зеландия|NI=nicaragua;никарагуа;nicaraguan|NE=niger;нигер;nigerien|NG=nigeria;нигерия;nigerian|MK=north macedonia;северная македония;macedonian|NO=norway;норвегия;норвежский;norwegian|OM=oman;оман;omani|PK=pakistan;пакистан;pakistani|PW=palau;палау|PS=palestine;палестина;palestinian|PA=panama;панама;panamanian|PG=papua new guinea;папуа новая гвинея|PY=paraguay;парагвай;paraguayan|PE=peru;перу;peruvian|PH=philippines;филиппины;filipino|PL=poland;польша;польский;polish|PT=portugal;португалия;португальский;portuguese|QA=qatar;катар;qatari|RO=romania;румыния;румынский;romanian|RU=russia;россия;россии;российский;российская;русский;russian|RW=rwanda;руанда;rwandan|KN=saint kitts and nevis;сент китс и невис|LC=saint lucia;сент люсия|VC=saint vincent and the grenadines;сент винсент и гренадины|WS=samoa;самоа;samoan|SM=san marino;сан марино|ST=sao tome and principe;сан томе и принсипи|SA=saudi arabia;саудовская аравия;saudi|SN=senegal;сенегал;senegalese|RS=serbia;сербия;сербский;serbian|SC=seychelles;сейшелы|SL=sierra leone;сьерра леоне|SG=singapore;сингапур;singaporean|SK=slovakia;словакия;slovak|SI=slovenia;словения;slovenian|SB=solomon islands;соломоновы острова|SO=somalia;сомали;somali|ZA=south africa;южная африка;южноафриканский;south african|SS=south sudan;южный судан|ES=spain;испания;испанский;spanish|LK=sri lanka;шри ланка|SD=sudan;судан;sudanese|SR=suriname;суринам|SE=sweden;швеция;шведский;swedish|CH=switzerland;швейцария;швейцарский;swiss|SY=syria;сирия;syrian|TJ=tajikistan;таджикистан;tajik|TZ=tanzania;танзания;tanzanian|TH=thailand;таиланд;тайланд;тайский;thai|TL=timor leste;east timor;восточный тимор|TG=togo;того|TO=tonga;тонга|TT=trinidad and tobago;тринидад и тобаго|TN=tunisia;тунис;tunisian|TR=turkey;türkiye;турция;турецкий;turkish|TM=turkmenistan;туркменистан;turkmen|TV=tuvalu;тувалу|UG=uganda;уганда;ugandan|UA=ukraine;украина;украинский;ukrainian|AE=united arab emirates;объединенные арабские эмираты;эмираты;emirati|GB=united kingdom;great britain;britain;великобритания;британия;соединенное королевство;англия;британский;british;uk|US=united states;united states of america;сша;соединенные штаты;америка;американский;american;usa|UY=uruguay;уругвай;uruguayan|UZ=uzbekistan;узбекистан;узбекский;uzbek|VU=vanuatu;вануату|VE=venezuela;венесуэла;venezuelan|VN=vietnam;вьетнам;вьетнамский;vietnamese|YE=yemen;йемен;yemeni|ZM=zambia;замбия;zambian|ZW=zimbabwe;зимбабве;zimbabwean";
 
 /// Russian forms that cannot be safely derived by suffix stripping.
-const RUSSIAN_COUNTRY_INFLECTIONS: &[(&str, &str)] =
-    &[("германии", "DE"), ("германию", "DE"), ("германией", "DE")];
+const RUSSIAN_COUNTRY_INFLECTIONS: &[(&str, &str)] = &[
+    ("англии", "GB"),
+    ("германии", "DE"),
+    ("германию", "DE"),
+    ("германией", "DE"),
+];
 
 #[cfg(test)]
 mod tests {
@@ -722,6 +736,13 @@ mod tests {
                 "{request}"
             );
         }
+    }
+
+    #[test]
+    fn country_filter_recognizes_russian_genitive_for_england() {
+        let intent = deterministic_intent("Включи рок из Англии", "ru-RU");
+
+        assert_eq!(intent.country_code.as_deref(), Some("GB"));
     }
 
     #[test]

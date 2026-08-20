@@ -334,3 +334,25 @@
   was held open by an existing local process.
 - Status: complete; next refactor should extract HTTP transport DTO/error/auth modules, then split
   search domain models, in-memory repository, and orchestration.
+
+## RS-033 — 2026-08-20 — Confidence-gated local language and country intent filters
+
+- Goal: stop Russian voice/text requests such as `Включи английский рок`, `Включи рок из Англии`,
+  and `Включи испанские новости` from losing their requested language or country before station
+  search.
+- Scope: add an E5-based language-label classifier that reuses the query embedding, cache its
+  compact multilingual label vectors at startup, add score and runner-up-margin gates, preserve a
+  validated LLM language when deterministic parsing is silent, and preserve a validated LLM country
+  only for explicit `из` / `from` requests. Add the `англии` country inflection and an environment
+  rollback switch that does not disable semantic station ranking.
+- Result: a confident semantic match applies `language` before repository search; a low-confidence
+  match applies no hard filter. `из Англии` deterministically resolves to `GB`, and the existing
+  provider's `GB` output no longer disappears during normalization. `ROCKSERVER_SEMANTIC_LANGUAGE_FILTERS`
+  defaults to `on` when the local E5 embedding provider is configured and accepts `off` for
+  rollback. Deterministic development embeddings cannot enable hard filters.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and
+  `cargo test` are required before handoff. Unit coverage includes acceptance/rejection thresholds,
+  integration before in-memory search, `англии`, and explicit-country provider preservation.
+- Status: complete. `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`
+  passed; 67 library tests and the regular HTTP/contract suites passed, while external database and
+  credential-dependent tests remained explicitly ignored.
