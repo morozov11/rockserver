@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-08-19
+Last updated: 2026-08-20
 
 ## Local ONNX semantic search
 
@@ -157,6 +157,14 @@ Now in `SearchService::interpret_and_search`:
 ## Narrow prefilter candidate set before heavy scoring (RS-025)
 
 RS-025 reduces slow broad queries by making the `prefiltered` CTE `MATERIALIZED`, assigning each row a cheap `prefilter_score` (exact tag hits + `ts_rank_cd` + max trigram similarity), and limiting the candidate pool to `GREATEST(limit * 20, 200)` before the expensive exact-token, substring, and embedding scoring phase.
+
+## Indexed candidate-branch search (RS-030)
+
+RS-030 addresses slow PostgreSQL station searches observed in request logs. The search SQL now obtains candidate IDs through three independent, index-backed branches (tag GIN, FTS GIN, and name trigram GIN), unions and de-duplicates those IDs, and only then calculates the unchanged prefilter and final ranking scores. Full-text term queries are generated once per search term, and each candidate station name is normalized and tokenized once before its exact-name, substring, and trigram scores reuse those values. This removes repeated parsing and regex tokenization for expanded/transliterated voice terms without changing matching semantics. Query interpretation, matching rules, limits, hard filters, exclusion handling, score formulae, and deterministic ordering are unchanged. Debug logs now record parser, embedding, repository, and database-search elapsed milliseconds plus result count. Live `POST /api/v1/voice/command` checks against the configured PostgreSQL database returned 30 stations in 1,387 ms for `Включи немецкий рок или хэви метал` and in 1,388 ms for the STT transcription `Включи немецкий рок или хейли метал`; the latter spent 1,097 ms in parsing and 233 ms in PostgreSQL, below the five-second voice timeout. A production `EXPLAIN (ANALYZE, BUFFERS)` comparison remains useful for broader capacity monitoring.
+
+## Explicit world-country filters (RS-031)
+
+RS-031 expands deterministic country recognition from three countries to the ISO 3166-1 alpha-2 country set. It recognizes common Russian and English country names plus demonyms, including `немецкий`/`Germany` -> `DE`. The parser still derives `country_code` only from an explicit word sequence in the original request, never from locale or an LLM guess. If a phrase is ambiguous (for example, `Конго` without a republic qualifier), it emits no hard country filter.
 
 ## Remove per-candidate regex tokenization from exact matching (RS-026)
 

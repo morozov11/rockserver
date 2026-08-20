@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use sqlx::{FromRow, PgPool, postgres::PgPoolOptions};
+use std::time::Instant;
 
 use crate::search::{
     Embedding, METADATA_WEIGHT, RankedStation, RepositoryError, SEMANTIC_WEIGHT, SearchConstraints,
@@ -14,17 +15,64 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
 // Hard filters and exclusions are applied in `candidates`, before scoring and the final limit.
 // Metadata fallback remains exact; compatible embeddings add an exact cosine-derived score.
-/// Two-phase search: a fast pre-filter narrows candidates using tag/name
-/// overlap, then full scoring (token match, substring, cosine) runs only on
-/// the pre-filtered set. If pre-filter returns no candidates, the query
-/// returns quickly with an empty result instead of running semantic-only
-/// fallback across the whole embedding corpus.
+/// Two-phase search: independent index-backed tag, FTS, and trigram branches
+/// first produce the candidate IDs. Full scoring (token match, substring,
+/// cosine) then runs only on the same bounded candidate set. If no branch
+/// produces candidates, the query returns quickly instead of running
+/// semantic-only fallback across the whole embedding corpus.
 const SEARCH_SQL: &str = r#"
 WITH query_terms AS (
-    SELECT term FROM UNNEST($1::text[]) AS t(term)
+    SELECT
+        term,
+        CASE
+            WHEN term = '' THEN NULL
+            ELSE plainto_tsquery('simple', term)
+        END AS fts_query
+    FROM UNNEST($1::text[]) AS t(term)
 ),
 query_tags AS (
     SELECT tag FROM UNNEST($2::text[]) AS t(tag)
+),
+search_input AS MATERIALIZED (
+    SELECT CASE
+        WHEN $14::text = '' THEN NULL
+        ELSE plainto_tsquery('simple', $14)
+    END AS fts_query
+),
+tag_candidate_ids AS (
+    SELECT s.id
+    FROM stations AS s
+    JOIN query_tags AS qt ON s.tags @> ARRAY[qt.tag]::text[]
+    WHERE ($3::text IS NULL OR s.language = $3)
+      AND ($4::text IS NULL OR s.country_code = $4)
+      AND NOT (s.id = ANY($5::text[]))
+),
+fts_candidate_ids AS (
+    SELECT s.id
+    FROM stations AS s
+    CROSS JOIN search_input AS input
+    WHERE input.fts_query IS NOT NULL
+      AND s.searchable_tsv @@ input.fts_query
+      AND ($3::text IS NULL OR s.language = $3)
+      AND ($4::text IS NULL OR s.country_code = $4)
+      AND NOT (s.id = ANY($5::text[]))
+),
+trigram_candidate_ids AS (
+    SELECT s.id
+    FROM stations AS s
+    JOIN query_terms AS qt
+      ON length(qt.term) >= 3
+     AND lower(s.name) % qt.term
+    WHERE ($3::text IS NULL OR s.language = $3)
+      AND ($4::text IS NULL OR s.country_code = $4)
+      AND NOT (s.id = ANY($5::text[]))
+),
+candidate_match_ids AS (
+    SELECT id FROM tag_candidate_ids
+    UNION
+    SELECT id FROM fts_candidate_ids
+    UNION
+    SELECT id FROM trigram_candidate_ids
 ),
 prefiltered AS MATERIALIZED (
     SELECT
@@ -36,23 +84,15 @@ prefiltered AS MATERIALIZED (
                 WHERE s.tags @> ARRAY[qt.tag]::text[]
             )::float8
             + CASE
-                WHEN $14::text = '' THEN 0.0
-                ELSE ts_rank_cd(s.searchable_tsv, plainto_tsquery('simple', $14))
+                -- `ts_rank_cd` is only non-zero for an FTS match, so avoid
+                -- calculating it for the broad tag/trigram candidates.
+                WHEN input.fts_query IS NULL OR NOT s.searchable_tsv @@ input.fts_query THEN 0.0
+                ELSE ts_rank_cd(s.searchable_tsv, input.fts_query)
             END
         ) AS prefilter_score
     FROM stations AS s
-    WHERE ($3::text IS NULL OR s.language = $3)
-      AND ($4::text IS NULL OR s.country_code = $4)
-      AND NOT (s.id = ANY($5::text[]))
-      AND (
-          EXISTS (SELECT 1 FROM query_tags qt WHERE s.tags @> ARRAY[qt.tag]::text[])
-          OR ($14::text <> '' AND s.searchable_tsv @@ plainto_tsquery('simple', $14))
-          OR EXISTS (
-              SELECT 1 FROM query_terms qt
-              WHERE length(qt.term) >= 3
-                AND lower(s.name) % qt.term
-          )
-      )
+    JOIN candidate_match_ids AS match_ids ON match_ids.id = s.id
+    CROSS JOIN search_input AS input
     ORDER BY prefilter_score DESC, s.id ASC
     LIMIT GREATEST($6 * 20, 200)
 ),
@@ -75,8 +115,8 @@ candidates AS (
         (
             SELECT COUNT(DISTINCT qt.term)
             FROM query_terms qt
-            WHERE qt.term <> ''
-              AND s.searchable_tsv @@ plainto_tsquery('simple', qt.term)
+            WHERE qt.fts_query IS NOT NULL
+              AND s.searchable_tsv @@ qt.fts_query
         ) + (
             SELECT COUNT(DISTINCT qt.tag)
             FROM query_tags qt
@@ -86,23 +126,17 @@ candidates AS (
             SELECT COUNT(DISTINCT qt.term)
             FROM query_terms qt
             WHERE length(qt.term) >= 3
-              AND lower(s.name) LIKE '%' || qt.term || '%'
+              AND station_name.normalized LIKE '%' || qt.term || '%'
         ) AS substring_match_count,
         (
             SELECT COUNT(DISTINCT qt.term)
             FROM query_terms qt
             WHERE EXISTS (
-                SELECT 1
-                FROM regexp_split_to_table(lower(s.name), '[^[:alnum:]]+') AS token
-                WHERE token <> ''
-                  AND token = qt.term
+                SELECT 1 FROM UNNEST(name_tokens.tokens) AS token
+                WHERE token = qt.term
             )
         ) AS name_token_match_count,
-        (
-            SELECT COUNT(*)
-            FROM regexp_split_to_table(lower(s.name), '[^[:alnum:]]+') AS token
-            WHERE token <> ''
-        ) AS name_token_count,
+        cardinality(name_tokens.tokens) AS name_token_count,
         CASE
             WHEN $15::bool THEN EXISTS (
                 SELECT 1
@@ -113,12 +147,22 @@ candidates AS (
             ELSE FALSE
         END AS ordered_name_match,
         COALESCE((
-            SELECT MAX(similarity(lower(s.name), qt.term))
+            SELECT MAX(similarity(station_name.normalized, qt.term))
             FROM query_terms qt
             WHERE length(qt.term) >= 2
         ), 0.0) AS trgm_score
     FROM stations AS s
     JOIN candidate_ids ci ON ci.id = s.id
+    CROSS JOIN LATERAL (
+        SELECT lower(s.name) AS normalized
+    ) AS station_name
+    CROSS JOIN LATERAL (
+        SELECT ARRAY(
+            SELECT token
+            FROM regexp_split_to_table(station_name.normalized, '[^[:alnum:]]+') AS token
+            WHERE token <> ''
+        ) AS tokens
+    ) AS name_tokens
     JOIN LATERAL (
         SELECT stream_url, codec, bitrate_kbps, health
         FROM station_streams
@@ -221,6 +265,7 @@ impl StationRepository for PostgresStationRepository {
     ) -> Result<Vec<RankedStation>, RepositoryError> {
         let parameters = PostgresSearchParameters::from_domain(query, constraints, embedding)
             .map_err(|error| RepositoryError::new("parameter conversion", error))?;
+        let started_at = Instant::now();
         let rows = sqlx::query_as::<_, StationRow>(SEARCH_SQL)
             .bind(&parameters.terms)
             .bind(&parameters.tags)
@@ -241,6 +286,11 @@ impl StationRepository for PostgresStationRepository {
             .fetch_all(&self.pool)
             .await
             .map_err(|error| RepositoryError::new("search", error))?;
+        tracing::debug!(
+            elapsed_ms = started_at.elapsed().as_millis(),
+            result_count = rows.len(),
+            "PostgreSQL station search completed"
+        );
 
         rows.into_iter()
             .map(RankedStation::try_from)
@@ -420,7 +470,7 @@ impl std::error::Error for ParameterConversionError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{PostgresSearchParameters, StationRow};
+    use super::{PostgresSearchParameters, SEARCH_SQL, StationRow};
     use crate::search::{
         METADATA_WEIGHT, RankedStation, SEMANTIC_WEIGHT, SearchConstraints, StationHealth,
         normalize_query,
@@ -473,5 +523,24 @@ mod tests {
             parameters.excluded_station_ids,
             ["station-rock-001", "station-rock-002"]
         );
+    }
+
+    #[test]
+    fn search_sql_unions_index_backed_candidate_branches_before_scoring() {
+        for branch in [
+            "tag_candidate_ids AS",
+            "fts_candidate_ids AS",
+            "trigram_candidate_ids AS",
+        ] {
+            assert!(SEARCH_SQL.contains(branch), "missing {branch}");
+        }
+        assert!(SEARCH_SQL.contains("candidate_match_ids AS"));
+        assert!(SEARCH_SQL.contains("JOIN candidate_match_ids AS match_ids"));
+        assert_eq!(SEARCH_SQL.matches("UNION\n    SELECT id FROM").count(), 2);
+        assert!(SEARCH_SQL.contains("search_input AS MATERIALIZED"));
+        assert!(SEARCH_SQL.contains("END AS fts_query"));
+        assert!(SEARCH_SQL.contains("CROSS JOIN LATERAL"));
+        assert!(SEARCH_SQL.contains("station_name.normalized"));
+        assert!(SEARCH_SQL.contains("UNNEST(name_tokens.tokens)"));
     }
 }

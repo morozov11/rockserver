@@ -6,7 +6,7 @@ mod query;
 mod ranking;
 pub mod taxonomy;
 
-use std::{collections::BTreeSet, error::Error, fmt, sync::Arc};
+use std::{collections::BTreeSet, error::Error, fmt, sync::Arc, time::Instant};
 
 use async_trait::async_trait;
 
@@ -356,11 +356,20 @@ impl SearchService {
         query: &SearchQuery,
         constraints: &SearchConstraints,
     ) -> Result<Vec<RankedStation>, RepositoryError> {
+        let embedding_started_at = Instant::now();
         let embedding = self.query_embedding(&query.original).await;
+        let embedding_elapsed_ms = embedding_started_at.elapsed().as_millis();
+        let repository_started_at = Instant::now();
         let mut stations = self
             .repository
             .search(query, constraints, embedding.as_ref())
             .await?;
+        tracing::debug!(
+            embedding_elapsed_ms,
+            repository_elapsed_ms = repository_started_at.elapsed().as_millis(),
+            result_count = stations.len(),
+            "station search stages completed"
+        );
         stations.retain(|station| station.score >= MIN_RELEVANCE_SCORE);
 
         let with_genre: Vec<_> = stations
@@ -406,6 +415,7 @@ impl SearchService {
         input: QueryParserInput,
         constraints: &SearchConstraints,
     ) -> Result<SearchOutcome, RepositoryError> {
+        let parser_started_at = Instant::now();
         let intent = match self
             .query_parser
             .parse(&input)
@@ -448,6 +458,7 @@ impl SearchService {
 
         let query = SearchQuery::from_intent(input.query, input.locale, intent);
         tracing::debug!(
+            parser_elapsed_ms = parser_started_at.elapsed().as_millis(),
             original = %query.original,
             terms = ?query.terms,
             tags = ?query.tags,

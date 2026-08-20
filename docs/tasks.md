@@ -1,5 +1,21 @@
 # Task log
 
+## RS-031 — 2026-08-20 — Explicit world-country parsing
+
+- Goal: make explicit country requests such as `немецкий рок` consistently set the ISO country hard filter without treating locale or an LLM guess as country intent.
+- Scope: replace the three-country mapping with ISO 3166-1 alpha-2 aliases in Russian and English, including common demonyms and multi-word country names; add regression tests. Public HTTP/OpenAPI behavior and ranking are unchanged.
+- Result: `немецкий` and the natural request form `рок из Германии` now produce `country_code=DE`; explicit names and demonyms across the supported country set produce their alpha-2 code. Ambiguous matches intentionally produce no country filter.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed (61 unit tests, integration/contract tests, with opt-in live/database tests ignored as intended).
+- Status: complete.
+
+## RS-030 — 2026-08-20 — Indexed candidate-branch PostgreSQL search
+
+- Goal: remove timeout-prone broad PostgreSQL station searches without changing query-to-station matching or ranking behavior.
+- Scope: replace the correlated `OR` prefilter with separate tag, full-text, and trigram candidate-ID branches; union/de-duplicate IDs before the existing bounded prefilter and unchanged final scoring; construct FTS input once, precompute FTS queries per expanded term, and normalize/tokenize each candidate station name once; add stage-duration debug logs and a structural regression test for the query shape. Public HTTP/OpenAPI behavior is unchanged.
+- Result: broad candidate selection can use the existing GIN indexes independently before expensive scoring, while expanded voice terms no longer repeat FTS parsing, name normalization, or regex tokenization. The original hard filters, exclusions, candidate limit, score calculations, and `score DESC, id ASC` ordering remain in place.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed. The opt-in PostgreSQL integration test remains ignored because no disposable `TEST_DATABASE_URL` was available. Live voice-command checks against the configured PostgreSQL database returned 30 stations in 1,387 ms for `Включи немецкий рок или хэви метал` and in 1,388 ms for the observed STT transcription `Включи немецкий рок или хейли метал`; PostgreSQL took 233 ms for the latter.
+- Status: complete.
+
 ## RS-019 — 2026-08-19 — Genre hierarchy and progressive search fallback
 
 - Goal: make subgenre queries (e.g. "heavy metal", "black metal", "smooth jazz") find stations tagged with parent genres when no exact match exists, and prefer stations matching the requested language.
