@@ -6,6 +6,7 @@ use rockserver::{
     providers::embedding_provider_from_env,
     providers::yandex_llm::YandexLlmProvider,
     providers::yandex_speechkit::YandexSpeechKitRecognizer,
+    providers::yandex_speechkit_streaming::YandexSpeechKitStreamingRecognizer,
     search::{
         DeterministicQueryParser, LlmProvider, LlmQueryParser, QueryParser, SearchService,
         SemanticLanguageClassifier, semantic_language_filters_enabled,
@@ -61,14 +62,22 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let listener = TcpListener::bind(config.bind_addr).await?;
     tracing::info!(address = %config.bind_addr, "RockServer listening");
 
-    let speech_recognizer = YandexSpeechKitRecognizer::optional_from_env()?
+    let unavailable = Arc::new(rockserver::voice::UnavailableSpeechRecognizer)
+        as Arc<dyn rockserver::voice::StreamingSpeechRecognizer>;
+    let buffered_speech_recognizer = YandexSpeechKitRecognizer::optional_from_env()?
         .map(|provider| Arc::new(provider) as Arc<dyn rockserver::voice::StreamingSpeechRecognizer>)
-        .unwrap_or_else(|| Arc::new(rockserver::voice::UnavailableSpeechRecognizer));
+        .unwrap_or_else(|| Arc::clone(&unavailable));
+    let streaming_speech_recognizer = YandexSpeechKitStreamingRecognizer::optional_from_env()?
+        .map(|provider| Arc::new(provider) as Arc<dyn rockserver::voice::StreamingSpeechRecognizer>)
+        .unwrap_or(unavailable);
     serve(
         listener,
-        rockserver::http::router_with_services_and_bearer_token(
+        rockserver::http::router_with_speech_recognizers_and_bearer_token(
             search_service,
-            speech_recognizer,
+            rockserver::voice::SpeechRecognizers::new(
+                buffered_speech_recognizer,
+                streaming_speech_recognizer,
+            ),
             rockserver::http::DEFAULT_VOICE_COMMAND_TIMEOUT,
             config.api_bearer_token,
         ),

@@ -1,7 +1,7 @@
 //! Provider-neutral streaming speech-recognition boundaries.
 
 use async_trait::async_trait;
-use std::{error::Error, fmt};
+use std::{error::Error, fmt, sync::Arc};
 
 /// Validated audio and language settings for one recognition session.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,6 +19,56 @@ pub struct TranscriptUpdate {
     pub transcript: String,
     /// Whether the provider considers this utterance complete.
     pub is_final: bool,
+}
+
+/// The recognition transport selected by the voice client for one session.
+///
+/// `BufferedV1` remains the compatibility default. `StreamingV3` forwards bounded
+/// PCM chunks to the provider as they arrive and can return partial transcripts.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SpeechRecognizerMode {
+    /// The existing REST recognition request, submitted after the client commits audio.
+    #[default]
+    BufferedV1,
+    /// SpeechKit v3 bidirectional streaming recognition.
+    StreamingV3,
+}
+
+/// Pair of independently configurable recognizers selected per WebSocket session.
+#[derive(Clone)]
+pub struct SpeechRecognizers {
+    buffered_v1: Arc<dyn StreamingSpeechRecognizer>,
+    streaming_v3: Arc<dyn StreamingSpeechRecognizer>,
+}
+
+impl SpeechRecognizers {
+    /// Creates the provider set exposed by the voice WebSocket transport.
+    pub fn new(
+        buffered_v1: Arc<dyn StreamingSpeechRecognizer>,
+        streaming_v3: Arc<dyn StreamingSpeechRecognizer>,
+    ) -> Self {
+        Self {
+            buffered_v1,
+            streaming_v3,
+        }
+    }
+
+    /// Creates a provider set for tests and compatibility callers using one recognizer.
+    pub fn same(recognizer: Arc<dyn StreamingSpeechRecognizer>) -> Self {
+        Self::new(Arc::clone(&recognizer), recognizer)
+    }
+
+    /// Starts the recognizer chosen by a validated client setting.
+    pub async fn start(
+        &self,
+        mode: SpeechRecognizerMode,
+        config: SpeechStreamConfig,
+    ) -> Result<Box<dyn SpeechStreamSession>, SpeechProviderError> {
+        match mode {
+            SpeechRecognizerMode::BufferedV1 => self.buffered_v1.start(config).await,
+            SpeechRecognizerMode::StreamingV3 => self.streaming_v3.start(config).await,
+        }
+    }
 }
 
 /// Sanitized provider failure safe to log and map to the public API.

@@ -131,7 +131,7 @@
     </section>
 
     <section id="contract">
-      <p><strong>CURRENT:</strong> JSON voice commands remain stable and both voice transports require a Bearer credential before work or WebSocket upgrade. The WebSocket <code>GET /api/v1/voice/stream</code> adds bounded PCM16 mono chunks, partial/final transcript events, provider-neutral STT sessions, and final <code>SearchService</code> resolution. RockCast supplies its configured token during the handshake. The default production process reports <code>speech_provider_unavailable</code> until a Yandex/OpenAI adapter is configured.</p>
+      <p><strong>CURRENT:</strong> JSON voice commands remain stable and both voice transports require a Bearer credential before work or WebSocket upgrade. The WebSocket <code>GET /api/v1/voice/stream</code> adds bounded PCM16 mono chunks, partial/final transcript events, provider-neutral STT sessions, and final <code>SearchService</code> resolution. RockCast supplies its configured token and chooses <code>buffered_v1</code> (default, recognition after commit) or <code>streaming_v3</code> (SpeechKit chunks during recording) in the start event. The process reports <code>speech_provider_unavailable</code> until a provider key is configured.</p>
       <h2>5. Контракт и ошибки</h2>
       <div class="flow">
         <article class="node current"><h3>SearchRequest</h3><p><code>query</code>, <code>locale</code>, <code>limit</code>, <code>exclude_station_ids</code>.</p></article>

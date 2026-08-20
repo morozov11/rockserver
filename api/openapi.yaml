@@ -342,7 +342,8 @@ paths:
       description: >-
         Canonical WebSocket endpoint. After the HTTP upgrade the client sends one JSON
         `VoiceStreamStart` text frame, then binary PCM signed 16-bit little-endian mono chunks,
-        and finally one JSON `VoiceStreamCommit` text frame. RockServer emits `ready`, zero or
+        and finally one JSON `VoiceStreamCommit` text frame. `recognizer_mode` selects either the
+        compatible buffered v1 provider (default) or v3 upstream streaming. RockServer emits `ready`, zero or
         more `transcript`, and one terminal `result` or `error` event. Each binary message is
         limited to 65,536 bytes and the session to 10 MiB. Provider operations time out after
         ten seconds; final station search retains the five-second voice-command boundary.
@@ -612,6 +613,11 @@ components:
         sample_rate_hz:
           type: integer
           enum: [8000, 16000, 24000, 48000]
+        recognizer_mode:
+          type: string
+          enum: [buffered_v1, streaming_v3]
+          default: buffered_v1
+          description: Buffered v1 recognizes after commit; streaming v3 forwards chunks while recording.
         limit:
           type: integer
           minimum: 1

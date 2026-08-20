@@ -25,36 +25,29 @@ RockCast microphone
 - Keep database credentials in environment variables; never store them in Git, logs, or documentation.
 - The local development database is disposable and may be reset when a clean migration/backfill run is required.
 
-### 2. Integrate remote text search into RockCast
+### 2. Integrate remote text search into RockCast — complete
 
-- Add a RockCast client for `POST /v1/search`.
-- Map returned stations into the existing playback path.
-- Preserve RockCast's local catalog as the offline/server-failure fallback.
-- Add bounded timeouts, cancellation, and user-visible distinctions between no results, server failure, and network failure.
-- Keep all RockCast UI and playback changes in the RockCast repository.
+- RockCast calls the protected search endpoint and maps returned stations into the existing playback path.
+- Its local catalog remains the fallback when RockServer search is unavailable or fails.
+- Bounded timeout/cancellation behavior and a deterministic client/server integration suite remain to be added.
 
-### 3. Add microphone capture to Windows RockCast
+### 3. Add microphone capture to Windows RockCast — MVP complete
 
-- Let the user select and test an input device.
-- Implement start, stop, cancellation, retry, maximum duration, and maximum upload size.
-- Show explicit recording, uploading, recognizing, searching, playing, and failure states.
-- Release the audio device reliably after success, cancellation, errors, and application shutdown.
+- RockCast records PCM16 mono from the default input device until release or the 60-second limit, then sends it to the canonical WebSocket endpoint.
+- It handles configured-token, invalid-token, unavailable-server, and generic voice-result states and can play the selected result.
+- Input-device selection/test, explicit upload/recognition states, cancellation after upload starts, retry policy, and deterministic end-to-end coverage remain.
 
-### 4. Add the RockServer voice command path
+### 4. Add the RockServer voice command path — MVP complete
 
-- RS-008 defines the stable JSON transcript contract. RS-009 adds canonical WebSocket `GET /api/v1/voice/stream` with a deprecated `/v1/voice/stream` alias.
-- Stream bounded PCM16 mono chunks through a provider-neutral recognizer, return incremental/final transcripts, and resolve the final transcript through the existing `SearchService`.
-- Pass the transcript through the existing query parser and `SearchService`; do not create a second search implementation.
-- Return the transcript, selected station/stream data, propagated/generated request ID, and the standard structured error shape where appropriate.
-- Keep provider credentials exclusively on RockServer.
+- RS-008/RS-009 provide the JSON transcript contract and canonical WebSocket `GET /api/v1/voice/stream`; `/v1/voice/stream` remains a deprecated alias.
+- The bounded PCM16 session is resolved through `SearchService`, and provider credentials remain exclusively on RockServer.
+- When `YANDEX_AI_API_KEY` is configured, RockServer exposes both `YandexSpeechKitRecognizer` (buffered v1 after `commit`) and `YandexSpeechKitStreamingRecognizer` (v3 upstream gRPC). RockCast selects the mode for each voice session; buffered v1 stays the compatibility default.
 
-### 5. Introduce production AI providers
+### 5. Introduce production AI providers — partially complete
 
-- Add a production speech-to-text provider behind a testable trait.
-- Add a production embedding provider and controlled backfill/migration procedure.
-- Add an LLM query parser that receives only request text and locale, never the catalog.
-- Add timeouts, bounded retries, safe logging, failure fallbacks, and circuit breaking where justified.
-- Keep deterministic fakes and metadata fallback for ordinary tests and degraded operation.
+- Yandex SpeechKit provides bounded commit-time and selectable upstream-streaming recognition; local ONNX E5 supplies production-like embeddings; Yandex AI Studio parses structured request intent without receiving the catalog.
+- Deterministic fakes and metadata fallback remain the ordinary offline/degraded path.
+- Provider retries/circuit breaking, a second STT provider, and live end-to-end streaming coverage remain.
 
 ### 6. Complete Windows end-to-end behavior
 
@@ -75,4 +68,4 @@ ESP32 work begins only after the Windows client and RockServer meet production a
 
 ## Immediate next task
 
-RS-009 now stabilizes the server-side streaming wire protocol and provider seam. Next, implement the Yandex SpeechKit v3 adapter, then connect RockCast microphone capture with bounded cancellation, explicit no-result/server/network states, and local-catalog fallback. OpenAI remains a second adapter behind the same conformance tests.
+The bounded end-to-end MVP exists: RockCast captures from the default microphone, RockServer can select Yandex SpeechKit, and the result returns through the existing search/playback path. Next, add deterministic client/server end-to-end tests, input-device selection, cancellation across recording/upload/recognition, explicit no-result/server/network states, and retention-safe logging. OpenAI or another recognizer remains a second adapter behind shared conformance tests.

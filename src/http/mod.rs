@@ -30,8 +30,8 @@ use crate::{
         SearchService, StationHealth, StationRepository,
     },
     voice::{
-        SpeechProviderError, SpeechStreamConfig, StreamingSpeechRecognizer, TranscriptUpdate,
-        UnavailableSpeechRecognizer,
+        SpeechProviderError, SpeechRecognizerMode, SpeechRecognizers, SpeechStreamConfig,
+        StreamingSpeechRecognizer, TranscriptUpdate, UnavailableSpeechRecognizer,
     },
 };
 
@@ -129,9 +129,27 @@ pub fn router_with_services_and_bearer_token(
     voice_command_timeout: Duration,
     api_bearer_token: impl Into<String>,
 ) -> Router {
+    router_with_speech_recognizers_and_bearer_token(
+        search_service,
+        SpeechRecognizers::same(speech_recognizer),
+        voice_command_timeout,
+        api_bearer_token,
+    )
+}
+
+/// Creates the router with the recognizers selectable by each voice WebSocket session.
+///
+/// The compatibility constructor above uses one recognizer for both modes, which keeps existing
+/// integrations and deterministic tests unchanged.
+pub fn router_with_speech_recognizers_and_bearer_token(
+    search_service: SearchService,
+    speech_recognizers: SpeechRecognizers,
+    voice_command_timeout: Duration,
+    api_bearer_token: impl Into<String>,
+) -> Router {
     let state = AppState {
         search_service,
-        speech_recognizer,
+        speech_recognizers,
         voice_command_timeout,
         api_bearer_token: api_bearer_token.into(),
     };
@@ -275,10 +293,13 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
 
     let mut session = match tokio::time::timeout(
         DEFAULT_STREAM_OPERATION_TIMEOUT,
-        state.speech_recognizer.start(SpeechStreamConfig {
-            locale: start.locale.clone(),
-            sample_rate_hz: start.sample_rate_hz,
-        }),
+        state.speech_recognizers.start(
+            start.recognizer_mode,
+            SpeechStreamConfig {
+                locale: start.locale.clone(),
+                sample_rate_hz: start.sample_rate_hz,
+            },
+        ),
     )
     .await
     {
@@ -976,7 +997,7 @@ fn with_request_id(mut response: Response, request_id: &str) -> Response {
 #[derive(Clone)]
 struct AppState {
     search_service: SearchService,
-    speech_recognizer: Arc<dyn StreamingSpeechRecognizer>,
+    speech_recognizers: SpeechRecognizers,
     voice_command_timeout: Duration,
     api_bearer_token: String,
 }
@@ -1017,6 +1038,8 @@ enum VoiceStreamStartDto {
         locale: Option<String>,
         sample_rate_hz: u32,
         #[serde(default)]
+        recognizer_mode: Option<String>,
+        #[serde(default)]
         limit: Option<u8>,
         #[serde(default)]
         exclude_station_ids: Vec<String>,
@@ -1032,6 +1055,7 @@ enum VoiceStreamCommitDto {
 struct ValidatedVoiceStreamStart {
     locale: String,
     sample_rate_hz: u32,
+    recognizer_mode: SpeechRecognizerMode,
     limit: usize,
     exclude_station_ids: BTreeSet<String>,
 }
@@ -1043,10 +1067,22 @@ impl TryFrom<VoiceStreamStartDto> for ValidatedVoiceStreamStart {
         let VoiceStreamStartDto::Start {
             locale,
             sample_rate_hz,
+            recognizer_mode,
             limit,
             exclude_station_ids,
         } = value;
         let mut details = Map::new();
+        let recognizer_mode = match recognizer_mode.as_deref().unwrap_or("buffered_v1") {
+            "buffered_v1" => SpeechRecognizerMode::BufferedV1,
+            "streaming_v3" => SpeechRecognizerMode::StreamingV3,
+            _ => {
+                details.insert(
+                    "recognizer_mode".to_owned(),
+                    json!("must be buffered_v1 or streaming_v3"),
+                );
+                SpeechRecognizerMode::default()
+            }
+        };
         if !matches!(sample_rate_hz, 8_000 | 16_000 | 24_000 | 48_000) {
             details.insert(
                 "sample_rate_hz".to_owned(),
@@ -1063,6 +1099,7 @@ impl TryFrom<VoiceStreamStartDto> for ValidatedVoiceStreamStart {
             Ok(validated) if details.is_empty() => Ok(Self {
                 locale: validated.locale,
                 sample_rate_hz,
+                recognizer_mode,
                 limit: validated.limit,
                 exclude_station_ids: validated.exclude_station_ids,
             }),

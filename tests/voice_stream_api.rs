@@ -43,7 +43,7 @@ async fn websocket_stream_emits_transcript_and_station_result() {
     write_client_frame(
         &mut stream,
         0x1,
-        br#"{"type":"start","locale":"en-US","sample_rate_hz":16000}"#,
+        br#"{"type":"start","locale":"en-US","sample_rate_hz":16000,"recognizer_mode":"streaming_v3"}"#,
     )
     .await;
     let ready = read_json_frame(&mut stream).await;

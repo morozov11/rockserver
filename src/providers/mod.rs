@@ -15,6 +15,7 @@ pub mod radio_browser;
 pub mod yandex_llm;
 /// Local-configuration Yandex SpeechKit adapter for voice streaming.
 pub mod yandex_speechkit;
+pub mod yandex_speechkit_streaming;
 
 /// Selects an explicitly configured embedding provider without exposing model
 /// files, stream data, or environment values in errors or logs.

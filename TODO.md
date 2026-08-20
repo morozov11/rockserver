@@ -28,7 +28,7 @@
    - Added provider-neutral query-parser and embedding traits, deterministic fakes and an explicit development embedder, dimension-neutral pgvector persistence with provenance, controlled backfill/update, and deterministic exact hybrid ranking.
    - Acceptance met: providers never receive the full catalog; failures and missing/incompatible embeddings preserve metadata fallback; hard filters/exclusions precede final limit; station ID is the last tie-break; in-memory mode and public HTTP schemas remain compatible; real pgvector integration is covered.
 
-8. Windows RockCast production path — next
-   - First verify RS-007 against the disposable local PostgreSQL/pgvector database, then connect RockCast text search to `POST /v1/search` with the local catalog retained as fallback.
-   - The versioned JSON and WebSocket voice endpoints are implemented. Next add the Yandex SpeechKit adapter, Windows microphone capture, provider conformance/end-to-end tests, and production hardening in the order defined by `docs/windows-production-roadmap.md`.
+8. Windows RockCast production path — in progress
+   - RockCast text search uses `POST /v1/search` with the local catalog retained as fallback. Its Voice control captures bounded PCM16 mono from the default microphone and uses the protected canonical WebSocket endpoint.
+   - RockServer exposes both Yandex SpeechKit adapters when `YANDEX_AI_API_KEY` is configured: `buffered_v1` remains the default compatibility mode; `streaming_v3` sends bounded chunks upstream and returns partial transcripts. Input-device selection, deterministic end-to-end coverage, richer cancellation/error states, provider retries/circuit breaking, and production hardening remain.
    - ESP32 is outside the current delivery plan and remains a future client of the stabilized RockServer API.

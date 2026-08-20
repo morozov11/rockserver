@@ -1,5 +1,13 @@
 # Task log
 
+## RS-033 — 2026-08-20 — Selectable SpeechKit streaming recognition
+
+- Goal: add upstream streaming recognition without removing the existing bounded, buffered voice path.
+- Scope: SpeechKit v3 gRPC adapter, per-session `recognizer_mode` selection in the existing WebSocket start event, backwards-compatible `buffered_v1` default, OpenAPI/docs, deterministic request/response tests, and RockCast settings integration. No live SpeechKit call is made by ordinary tests.
+- Result: `streaming_v3` sends PCM chunks to SpeechKit while RockCast records and can forward partial/final transcript events. `buffered_v1` remains the default and continues to submit the bounded recording after `commit`.
+- Checks: changed-file formatting, `cargo check`, 70 library tests, the streaming WebSocket integration test, and strict all-target/all-feature Clippy passed. `graphify update .` refreshed the ignored local graph.
+- Status: complete.
+
 ## RS-031 — 2026-08-20 — Explicit world-country parsing
 
 - Goal: make explicit country requests such as `немецкий рок` consistently set the ISO country hard filter without treating locale or an LLM guess as country intent.
@@ -356,3 +364,10 @@
 - Status: complete. `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`
   passed; 67 library tests and the regular HTTP/contract suites passed, while external database and
   credential-dependent tests remained explicitly ignored.
+
+## RS-032 — 2026-08-20 — Reconcile Windows voice documentation
+
+- Goal: align the Windows roadmap, near-term TODO, README, and status with the implemented RockCast/RockServer voice MVP.
+- Result: documentation now records that RockCast text search and default-microphone capture are implemented, and that RockServer selects the bounded, commit-time Yandex SpeechKit adapter when configured. It also records the remaining work accurately: deterministic end-to-end coverage, input-device selection, cancellation/state reporting, retention-safe logging, provider resilience, and true upstream partial recognition.
+- Checks: documentation-only review against `rockcast/src/{rockserver.rs,voice/}` and `rockserver/src/{main.rs,providers/yandex_speechkit.rs}`; no code or tests changed.
+- Status: complete.

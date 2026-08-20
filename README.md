@@ -4,7 +4,7 @@ RockServer is a planned Rust service for AI-assisted internet radio discovery. A
 
 ## Current status
 
-The repository contains a Rust edition 2024 Axum service. `POST /v1/search` uses provider-neutral query interpretation, optional embeddings, and a replaceable repository boundary. Canonical `POST /api/v1/voice/command` accepts an already-recognized text transcript. Canonical WebSocket `GET /api/v1/voice/stream` accepts bounded PCM16 mono chunks, emits incremental/final transcripts through a replaceable streaming recognizer, and resolves the final transcript through the same search path. Deprecated `/v1/voice/*` aliases remain for compatibility. PostgreSQL provides exact pgvector-backed hybrid ranking when compatible query and station embeddings exist; otherwise deterministic metadata ranking remains authoritative. No production Yandex/OpenAI recognizer is selected at startup yet, so an unconfigured stream terminates with `speech_provider_unavailable`.
+The repository contains a Rust edition 2024 Axum service. `POST /v1/search` uses provider-neutral query interpretation, optional embeddings, and a replaceable repository boundary. Canonical `POST /api/v1/voice/command` accepts an already-recognized text transcript. Canonical WebSocket `GET /api/v1/voice/stream` accepts bounded PCM16 mono chunks and resolves the final transcript through the same search path. With `YANDEX_AI_API_KEY`, clients may select `buffered_v1` (the compatible commit-time SpeechKit v1 request, and default) or `streaming_v3` (SpeechKit v3 bidirectional chunks with partial transcripts) in the start frame. Without the key, either mode terminates with `speech_provider_unavailable`. Deprecated `/v1/voice/*` aliases remain for compatibility. PostgreSQL provides exact pgvector-backed hybrid ranking when compatible query and station embeddings exist; otherwise deterministic metadata ranking remains authoritative.
 
 ## Intended architecture
 
@@ -34,9 +34,10 @@ See [docs/architecture.md](docs/architecture.md) for boundaries and the planned 
 8. Stable server-side voice-command JSON contract with request IDs, validation, body/time boundaries, and deterministic search reuse — complete.
 9. Provider-neutral WebSocket audio/STT contract and deterministic integration coverage — complete.
 10. Yandex AI Studio structured intent parsing with deterministic fallback — complete.
-11. Configure a production speech recognizer and connect RockCast microphone capture — next.
+11. Yandex SpeechKit recognition and RockCast microphone capture — complete for buffered v1 and selectable streaming v3.
+12. Validate and harden the end-to-end Windows voice path — next.
 
-RS-008 stabilizes the voice-command JSON contract. The next work is a small RockCast integration using its recognized transcript output, retaining the local catalog as fallback; detailed acceptance criteria remain in [TODO.md](TODO.md).
+RockCast now uses the protected search and voice endpoints, retains its local catalog for text-search fallback, and can capture a bounded microphone command. The next work is deterministic end-to-end coverage, user-visible cancellation/error states, and production hardening; detailed acceptance criteria remain in [TODO.md](TODO.md).
 
 ## Build and test
 
@@ -80,7 +81,7 @@ curl -X POST http://127.0.0.1:3000/api/v1/voice/command -H "content-type: applic
 ```
 
 The streaming endpoint is `ws://127.0.0.1:3000/api/v1/voice/stream`. Send a text frame
-`{"type":"start","locale":"ru-RU","sample_rate_hz":16000}`, binary PCM signed 16-bit
+`{"type":"start","locale":"ru-RU","sample_rate_hz":16000,"recognizer_mode":"streaming_v3"}`, binary PCM signed 16-bit
 little-endian mono frames, then `{"type":"commit"}`. See `api/openapi.yaml` for all events,
 limits, and terminal errors.
 
