@@ -1,5 +1,13 @@
 # Task log
 
+## RS-034 — 2026-08-20 — Buffered microphone-capture regression diagnosis
+
+- Goal: identify and correct the loss of recognition quality reported in both selectable voice modes.
+- Scope: a billable opt-in Yandex TTS-to-PCM-to-STT diagnostic, focused provider verification, and a RockCast buffered-capture correction. No production API or protocol change.
+- Result: a 1,841 ms Yandex-generated PCM16 command was recognized exactly by SpeechKit v1 in 925 ms, isolating the provider from the regression. RockCast buffered capture no longer routes audio through the bounded `try_send` queue introduced for live streaming, so it cannot silently discard callback chunks when that consumer falls behind. The streaming path remains separately queued for its next backpressure-focused iteration.
+- Checks: `cargo check --bin diagnose_speechkit_pcm`, 70 RockServer library tests, and 41 RockCast library tests (including the new buffered-frame preservation test) passed. `graphify update .` refreshed the local RockServer code graph; it reported the existing `hooks.json` zero-node warning and stale community labels.
+- Status: complete.
+
 ## RS-033 — 2026-08-20 — Selectable SpeechKit streaming recognition
 
 - Goal: add upstream streaming recognition without removing the existing bounded, buffered voice path.
