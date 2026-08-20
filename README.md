@@ -2,6 +2,10 @@
 
 RockServer is a planned Rust service for AI-assisted internet radio discovery. A RockCast user will be able to enter a request such as "calm instrumental jazz" and receive a ranked list of playable station streams. RockCast remains responsible for playback through its existing `PlaybackController`.
 
+## License
+
+RockServer is licensed under the [GNU General Public License, version 3 or later (GPL-3.0-or-later)](https://www.gnu.org/licenses/gpl-3.0.html).
+
 ## Current status
 
 The repository contains a Rust edition 2024 Axum service. `POST /v1/search` uses provider-neutral query interpretation, optional embeddings, and a replaceable repository boundary. Canonical `POST /api/v1/voice/command` accepts an already-recognized text transcript. Canonical WebSocket `GET /api/v1/voice/stream` accepts bounded PCM16 mono chunks and resolves the final transcript through the same search path. With `YANDEX_AI_API_KEY`, clients may select `buffered_v1` (the compatible commit-time SpeechKit v1 request, and default) or `streaming_v3` (SpeechKit v3 bidirectional chunks with partial transcripts) in the start frame. Without the key, either mode terminates with `speech_provider_unavailable`. Deprecated `/v1/voice/*` aliases remain for compatibility. PostgreSQL provides exact pgvector-backed hybrid ranking when compatible query and station embeddings exist; otherwise deterministic metadata ranking remains authoritative.
