@@ -27,7 +27,7 @@ use tracing::Level;
 use crate::{
     search::{
         InMemoryStationRepository, QueryParserInput, RankedStation, SearchConstraints,
-        SearchService, StationHealth, StationRepository,
+        SearchService, StationHealth, StationRepository, UnavailableStationRepository,
     },
     voice::{
         SpeechProviderError, SpeechRecognizerMode, SpeechRecognizers, SpeechStreamConfig,
@@ -69,7 +69,12 @@ pub enum HealthStatus {
 
 /// Creates the application router with the default in-memory catalog backend.
 pub fn router() -> Router {
-    router_with_repository(Arc::new(InMemoryStationRepository::with_builtin_catalog()))
+    let repository: Arc<dyn StationRepository + Send + Sync> =
+        match InMemoryStationRepository::with_builtin_catalog() {
+            Ok(repository) => Arc::new(repository),
+            Err(error) => Arc::new(UnavailableStationRepository::from_preflight_error(error)),
+        };
+    router_with_repository(repository)
 }
 
 /// Creates the application router with a supplied station repository backend.

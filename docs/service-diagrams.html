@@ -70,7 +70,7 @@
         <article class="node future"><span class="badge future">FUTURE</span><h3>Пользователь / голос</h3><p>Голосовой ввод, production STT и ESP32-клиент.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>RockCast Windows</h3><p>Отправляет Bearer-токен для RockServer voice WebSocket; локальный каталог остаётся fallback.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>RockServer</h3><p>Health routes и защищённые Bearer application API: поиск и voice.</p></article>
-        <article class="node current"><span class="badge current">CURRENT</span><h3>Каталог / поиск</h3><p>PostgreSQL при <code>DATABASE_URL</code>; иначе встроенный in-memory fallback.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>Каталог / поиск</h3><p>PostgreSQL при <code>DATABASE_URL</code>; иначе встроенный in-memory fallback. Проверенный full-catalog export создаёт SQLite для RockMobile.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>StationResult</h3><p>Voice result передаётся RockCast; remote text-search UI остаётся NEXT.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>PlaybackController</h3><p>RockCast воспроизводит принятый voice result и сохраняет fallback кандидатов.</p></article>
       </div>
@@ -107,6 +107,7 @@
         <article class="card current"><span class="badge current">CURRENT</span><h3>EmbeddingProvider trait</h3><p>Optional query vector; deterministic-dev fixture, без production model.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>StationRepository</h3><p>PostgreSQL + migrations/seed или встроенный in-memory fallback.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>CatalogImporter</h3><p>Ограниченный Radio Browser client + import store; отдельный CLI, не request path и не HTTP startup.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>Mobile catalog exporter</h3><p>Отдельный PostgreSQL→SQLite CLI. Выпускает только полный active/playable каталог после строгой проверки; health, embeddings и import runs не экспортирует.</p></article>
         <article class="card next"><span class="badge next">NEXT</span><h3>Admin / client identity</h3><p>Persisted revocable RockCast clients, Bearer admin sessions, login throttling, audit records and HTMX console.</p></article>
         <article class="card future"><span class="badge future">FUTURE</span><h3>StreamHealthChecker</h3><p>Фоновая проверка потоков, не в request path.</p></article>
       </div>
@@ -114,7 +115,14 @@
 
     <section id="catalog">
       <h2>4. Данные каталога</h2>
-      <p><strong>CURRENT:</strong> versioned migrations создают <code>stations</code>, <code>station_streams</code>, source identity, <code>import_runs</code> и provenance-aware <code>station_embeddings</code>. Pgvector column не закреплён за dev dimension; exact search сравнивает только одинаковые model/version/dimension. Radio Browser ownership не изменён. <strong>NEXT:</strong> persisted principals, revocable client credentials and request/audit records; RockCast remote text search keeps its local fallback.</p>
+      <p><strong>CURRENT:</strong> versioned migrations создают <code>stations</code>, <code>station_streams</code>, source identity, <code>import_runs</code> и provenance-aware <code>station_embeddings</code>. Pgvector column не закреплён за dev dimension; exact search сравнивает только одинаковые model/version/dimension. Radio Browser ownership не изменён. Отдельный CLI экспортирует только active/playable станции с единственным primary HTTP(S) stream в проверяемый SQLite-пакет для RockMobile; health/probes, embeddings и import runs туда не попадают. <strong>NEXT:</strong> persisted principals, revocable client credentials and request/audit records; RockCast remote text search keeps its local fallback.</p>
+      <div class="flow" aria-label="RM-004 immutable offline catalog flow">
+        <article class="node current"><h3>RockCatalog authoring</h3><p>Единственный authoring source curated baseline.</p></article>
+        <article class="node current"><h3>Immutable 2026.08.2</h3><p>JSON + schema + manifest; SHA-256 pin.</p></article>
+        <article class="node current"><h3>release_sync</h3><p>Явный offline sync/verify; без ручных копий и download.</p></article>
+        <article class="node current"><h3>RockServer</h3><p>Проверяет pin fail-closed; lifecycle/tombstones сохраняются.</p></article>
+        <article class="node current"><h3>RockCast / RockMobile</h3><p>Работают без сервера с baseline; Mobile сначала использует проверенный extended SQLite.</p></article>
+      </div>
       <div class="diagram">
         <svg viewBox="0 0 940 350" role="img" aria-labelledby="catalog-title catalog-desc">
           <title id="catalog-title">Текущие и будущие связи данных каталога</title>

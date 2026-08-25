@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::catalog::{
     CatalogImportError, CatalogImportProvider, ImportLimits, ImportPage, ImportedStation,
+    ImportedStream,
 };
 
 /// Stable catalog ownership name for Radio Browser records.
@@ -344,17 +345,21 @@ impl TryFrom<RadioBrowserStationDto> for ImportedStation {
         Ok(Self {
             source: SOURCE,
             id: format!("rb-{source_station_id}"),
-            source_station_id,
+            source_station_id: source_station_id.clone(),
             name,
-            stream_url,
             homepage_url: normalized_url(&dto.homepage, false),
             tags: normalized_tags(&dto.tags),
             language: normalized_language(&dto.languagecodes),
             country_code: normalized_country_code(&dto.countrycode),
-            codec: normalized_codec(&dto.codec),
-            bitrate_kbps: (1..=MAX_BITRATE_KBPS)
-                .contains(&dto.bitrate)
-                .then_some(dto.bitrate as u32),
+            streams: vec![ImportedStream {
+                source_stream_id: source_station_id.clone(),
+                stream_url,
+                codec: normalized_codec(&dto.codec),
+                bitrate_kbps: (1..=MAX_BITRATE_KBPS)
+                    .contains(&dto.bitrate)
+                    .then_some(dto.bitrate as u32),
+                is_primary: true,
+            }],
         })
     }
 }
@@ -473,13 +478,16 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.id, "rb-01234567-89ab-cdef-0123-456789abcdef");
         assert_eq!(first.name, "Test Radio");
-        assert_eq!(first.stream_url, "https://stream.example.com/live");
+        assert_eq!(
+            first.streams[0].stream_url,
+            "https://stream.example.com/live"
+        );
         assert_eq!(first.homepage_url, None);
         assert_eq!(first.tags, ["classic rock", "jazz", "rock"]);
         assert_eq!(first.language.as_deref(), Some("en"));
         assert_eq!(first.country_code.as_deref(), Some("US"));
-        assert_eq!(first.codec.as_deref(), Some("MP3"));
-        assert_eq!(first.bitrate_kbps, Some(128));
+        assert_eq!(first.streams[0].codec.as_deref(), Some("MP3"));
+        assert_eq!(first.streams[0].bitrate_kbps, Some(128));
     }
 
     #[test]

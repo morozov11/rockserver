@@ -4,6 +4,8 @@ pub mod catalog;
 pub mod config;
 /// HTTP routes and transport types.
 pub mod http;
+/// Deterministic prebuilt SQLite export for RockMobile's extended offline catalog.
+pub mod mobile_export;
 /// Persistent station-catalog backends and startup selection.
 pub mod persistence;
 /// External catalog providers used only by explicit background workflows.

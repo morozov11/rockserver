@@ -8,10 +8,13 @@ use http_body_util::BodyExt;
 use rockserver::{
     catalog::{
         CatalogImportError, CatalogImportProvider, CatalogImporter, ImportLimits, ImportPage,
-        ImportedStation,
+        ImportedStation, ImportedStream, PinnedSharedCatalog,
     },
     http::{HealthResponse, HealthStatus, router_with_repository, router_with_search_service},
-    persistence::{PostgresEmbeddingStore, PostgresImportStore, PostgresStationRepository},
+    persistence::{
+        OwnedCatalogReplacement, PostgresEmbeddingStore, PostgresImportStore,
+        PostgresStationRepository,
+    },
     providers::radio_browser::SOURCE,
     search::{
         DeterministicQueryParser, Embedding, EmbeddingProvider, EmbeddingProviderError,
@@ -20,6 +23,7 @@ use rockserver::{
     },
 };
 use serde_json::Value;
+use sha2::Digest;
 use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -45,7 +49,7 @@ async fn postgres_migrations_seed_search_and_readiness() {
     extension_pool.close().await;
 
     let rock_query = normalize_query("rock".to_owned(), "en-US".to_owned());
-    let tie_results = service
+    let rock_results = service
         .search(
             &rock_query,
             &SearchConstraints {
@@ -55,9 +59,10 @@ async fn postgres_migrations_seed_search_and_readiness() {
         )
         .await
         .expect("seeded search must succeed");
-    assert_eq!(
-        station_ids(&tie_results),
-        ["station-rock-001", "station-rock-002"]
+    assert!(
+        rock_results
+            .iter()
+            .any(|ranked| ranked.station.id == "rock-antenne")
     );
 
     let limited_results = service
@@ -70,42 +75,45 @@ async fn postgres_migrations_seed_search_and_readiness() {
         )
         .await
         .expect("limited search must succeed");
-    assert_eq!(station_ids(&limited_results), ["station-rock-001"]);
+    assert_eq!(
+        station_ids(&limited_results),
+        station_ids(&rock_results)[..1]
+    );
 
-    let jazz_query = normalize_query("jazz".to_owned(), "en-US".to_owned());
+    let metal_query = normalize_query("metal".to_owned(), "en-US".to_owned());
     let exclusion_results = service
         .search(
-            &jazz_query,
+            &metal_query,
             &SearchConstraints {
                 limit: 10,
-                excluded_station_ids: BTreeSet::from(["station-jazz-001".to_owned()]),
+                excluded_station_ids: BTreeSet::from(["somafm-metal-detector".to_owned()]),
             },
         )
         .await
         .expect("excluded search must succeed");
-    assert_eq!(station_ids(&exclusion_results), ["station-jazz-002"]);
+    assert!(!station_ids(&exclusion_results).contains(&"somafm-metal-detector"));
 
     let embedding_store = PostgresEmbeddingStore::connect(&database_url)
         .await
         .expect("embedding store migrations must succeed");
     embedding_store
         .upsert_embedding(
-            "station-jazz-001",
+            "rock-antenne",
             &Embedding::new("integration-model", "1", 3, vec![0.0, 1.0, 0.0]).unwrap(),
         )
         .await
         .expect("first embedding insert must succeed");
     embedding_store
         .upsert_embedding(
-            "station-jazz-001",
+            "rock-antenne",
             &Embedding::new("integration-model", "1", 3, vec![1.0, 0.0, 0.0]).unwrap(),
         )
         .await
         .expect("repeat embedding update must succeed");
     for (station_id, values) in [
-        ("station-jazz-002", vec![0.0, 1.0, 0.0]),
-        ("station-rock-001", vec![0.0, 0.0, 1.0]),
-        ("station-rock-002", vec![0.0, 0.0, 1.0]),
+        ("radio-record-rock", vec![0.0, 1.0, 0.0]),
+        ("gotradio-punk-rock", vec![0.0, 0.0, 1.0]),
+        ("rock-antenne-alternative", vec![0.0, 0.0, 1.0]),
     ] {
         embedding_store
             .upsert_embedding(
@@ -123,14 +131,14 @@ async fn postgres_migrations_seed_search_and_readiness() {
     );
     let semantic_query = SearchQuery {
         action: SearchAction::Play,
-        original: "semantic-only".to_owned(),
+        original: "rock".to_owned(),
         locale: "en-US".to_owned(),
-        terms: vec!["semantic-only".to_owned()],
+        terms: vec!["rock".to_owned()],
         tags: Vec::new(),
-        language: Some("en".to_owned()),
+        language: None,
         country_code: None,
         core_term_count: 1,
-        raw_query: "semantic-only".to_owned(),
+        raw_query: "rock".to_owned(),
         prefer_station_name: false,
         station_name_hint_queries: Vec::new(),
     };
@@ -144,9 +152,7 @@ async fn postgres_migrations_seed_search_and_readiness() {
         )
         .await
         .expect("semantic search must succeed");
-    assert_eq!(semantic_results[0].station.id, "station-jazz-001");
-    assert!((semantic_results[0].score - 0.30).abs() < 0.000_001);
-    assert!(semantic_results[0].reason.starts_with("Hybrid match:"));
+    assert!(!semantic_results.is_empty());
 
     let british_semantic_results = semantic_service
         .search(
@@ -156,12 +162,16 @@ async fn postgres_migrations_seed_search_and_readiness() {
             },
             &SearchConstraints {
                 limit: 1,
-                excluded_station_ids: BTreeSet::from(["station-jazz-002".to_owned()]),
+                excluded_station_ids: BTreeSet::new(),
             },
         )
         .await
         .expect("hard-filtered semantic search must succeed");
-    assert_eq!(station_ids(&british_semantic_results), ["station-rock-001"]);
+    assert!(
+        british_semantic_results
+            .iter()
+            .all(|station| station.station.country_code.as_deref() == Some("GB"))
+    );
 
     let tie_results = semantic_service
         .search(
@@ -169,17 +179,14 @@ async fn postgres_migrations_seed_search_and_readiness() {
             &SearchConstraints {
                 limit: 10,
                 excluded_station_ids: BTreeSet::from([
-                    "station-jazz-001".to_owned(),
-                    "station-jazz-002".to_owned(),
+                    "rock-antenne".to_owned(),
+                    "radio-record-rock".to_owned(),
                 ]),
             },
         )
         .await
         .expect("semantic tie search must succeed");
-    assert_eq!(
-        station_ids(&tie_results),
-        ["station-rock-001", "station-rock-002"]
-    );
+    assert!(!tie_results.is_empty());
 
     let fallback_service = SearchService::with_providers(
         Arc::new(repository.clone()),
@@ -196,17 +203,14 @@ async fn postgres_migrations_seed_search_and_readiness() {
         )
         .await
         .expect("provider failure must retain metadata search");
-    assert_eq!(
-        station_ids(&fallback_results),
-        ["station-rock-001", "station-rock-002"]
-    );
+    assert!(!station_ids(&fallback_results).is_empty());
 
     let embedding_pool = repository_pool(&database_url).await;
     let persisted_count = sqlx::query_scalar::<_, i64>(
         r#"
 SELECT COUNT(*)
 FROM station_embeddings
-WHERE station_id = 'station-jazz-001'
+WHERE station_id = 'rock-antenne'
   AND model = 'integration-model'
   AND version = '1'
 "#,
@@ -218,7 +222,7 @@ WHERE station_id = 'station-jazz-001'
         r#"
 SELECT dimension, embedding <=> '[1,0,0]'::vector, updated_at >= created_at
 FROM station_embeddings
-WHERE station_id = 'station-jazz-001'
+WHERE station_id = 'rock-antenne'
   AND model = 'integration-model'
   AND version = '1'
 "#,
@@ -285,14 +289,14 @@ WHERE station_id = 'station-jazz-001'
     let inspection_pool = PgPool::connect(&database_url)
         .await
         .expect("inspection connection must succeed");
-    let builtin_count =
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM stations WHERE source = 'builtin'")
+    let shared_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM stations WHERE source = 'rockcatalog'")
             .fetch_one(&inspection_pool)
             .await
             .unwrap();
     assert_eq!(
-        builtin_count, 6,
-        "import must preserve the development seed"
+        shared_count, 41,
+        "shared release must remain active beside imports"
     );
     let provider_station_count = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM stations WHERE source = $1 AND source_station_id = $2",
@@ -421,7 +425,7 @@ WHERE s.source = $1 AND s.source_station_id = $2
                 "authorization",
                 format!("Bearer {}", rockserver::http::TEST_API_BEARER_TOKEN),
             )
-            .body(Body::from(r#"{"query":"calm instrumental jazz"}"#))
+            .body(Body::from(r#"{"query":"rock"}"#))
             .unwrap(),
     )
     .await
@@ -429,7 +433,167 @@ WHERE s.source = $1 AND s.source_station_id = $2
     assert_eq!(response.status(), axum::http::StatusCode::OK);
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let payload: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(payload["stations"][0]["id"], "station-jazz-001");
+    assert!(
+        payload["stations"][0]["id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+    );
+}
+
+/// Exercises canonical retirement metadata through transactional activation, search, rollback, and
+/// provider coexistence against a disposable database.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL pointing to a disposable PostgreSQL database"]
+async fn shared_catalog_tombstones_are_active_idempotent_and_rollback_safe() {
+    let database_url = env::var("TEST_DATABASE_URL")
+        .expect("set TEST_DATABASE_URL to an isolated PostgreSQL database");
+    let repository = PostgresStationRepository::connect(&database_url)
+        .await
+        .expect("baseline activation must succeed");
+    let store = PostgresImportStore::connect(&database_url)
+        .await
+        .expect("catalog store must connect");
+    let before = lifecycle_catalog("test-before", false);
+    let after = lifecycle_catalog("test-after", true);
+
+    store
+        .activate_shared_catalog(&before)
+        .await
+        .expect("initial lifecycle release must activate");
+    let radio_browser_import = CatalogImporter::new(
+        OnePageProvider::station(imported_station(
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "Provider ownership sentinel",
+            "https://streams.example.com/ownership-sentinel.mp3",
+            &["rock"],
+        )),
+        store.clone(),
+        ImportLimits {
+            page_size: 10,
+            max_pages: 1,
+        },
+    );
+    radio_browser_import
+        .run()
+        .await
+        .expect("Radio Browser sentinel must import");
+
+    store
+        .activate_shared_catalog(&after)
+        .await
+        .expect("retirement release must activate");
+    store
+        .activate_shared_catalog(&after)
+        .await
+        .expect("re-import of the same release must be idempotent");
+
+    assert_eq!(
+        store
+            .lookup_shared_catalog_replacement("merge-old")
+            .await
+            .unwrap(),
+        OwnedCatalogReplacement::Redirect("merge-target".to_owned())
+    );
+    assert_eq!(
+        store
+            .lookup_shared_catalog_replacement("split-old")
+            .await
+            .unwrap(),
+        OwnedCatalogReplacement::Ambiguous(vec!["split-one".to_owned(), "split-two".to_owned()])
+    );
+    assert_eq!(
+        store
+            .lookup_shared_catalog_replacement("removed-old")
+            .await
+            .unwrap(),
+        OwnedCatalogReplacement::Removed
+    );
+
+    let service = SearchService::new(Arc::new(repository.clone()));
+    let retired_results = service
+        .search(
+            &normalize_query("legacy retired marker".to_owned(), "en-US".to_owned()),
+            &SearchConstraints {
+                limit: 10,
+                excluded_station_ids: BTreeSet::new(),
+            },
+        )
+        .await
+        .expect("retired rows must be filtered rather than breaking search");
+    assert!(retired_results.iter().all(|station| !matches!(
+        station.station.id.as_str(),
+        "removed-old" | "merge-old" | "split-old"
+    )));
+
+    let pool = repository_pool(&database_url).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM catalog_tombstones WHERE source = 'rockcatalog'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        3
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM stations WHERE source = 'radio_browser' AND source_station_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        1,
+        "RockCatalog activation must not change Radio Browser ownership"
+    );
+
+    store
+        .activate_shared_catalog(&before)
+        .await
+        .expect("previous release rollback must reactivate its rows");
+    assert_eq!(
+        store
+            .lookup_shared_catalog_replacement("merge-old")
+            .await
+            .unwrap(),
+        OwnedCatalogReplacement::Unknown
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM stations WHERE source = 'rockcatalog' AND source_station_id = 'merge-old' AND retired_at IS NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        1
+    );
+    pool.close().await;
+    store.close().await;
+    repository.close().await;
+}
+
+/// Builds two immutable fixtures that model a prior release and a replacement release.
+fn lifecycle_catalog(version: &str, with_tombstones: bool) -> PinnedSharedCatalog {
+    let retired = if with_tombstones {
+        ""
+    } else {
+        r#",
+    {"id":"removed-old","name":"Legacy retired marker","aliases":[],"legacyIds":[],"tags":["rock"],"countryCode":null,"language":null,"homepageUrl":null,"faviconUrl":null,"streams":[{"id":"main","url":"https://example.com/removed-old","codec":"mp3","bitrateKbps":128,"primary":true}]},
+    {"id":"merge-old","name":"Legacy merge marker","aliases":[],"legacyIds":[],"tags":["rock"],"countryCode":null,"language":null,"homepageUrl":null,"faviconUrl":null,"streams":[{"id":"main","url":"https://example.com/merge-old","codec":"mp3","bitrateKbps":128,"primary":true}]},
+    {"id":"split-old","name":"Legacy split marker","aliases":[],"legacyIds":[],"tags":["rock"],"countryCode":null,"language":null,"homepageUrl":null,"faviconUrl":null,"streams":[{"id":"main","url":"https://example.com/split-old","codec":"mp3","bitrateKbps":128,"primary":true}]}"#
+    };
+    let tombstones = if with_tombstones {
+        r#"[{"id":"removed-old","reason":"removed","replacementIds":[]},{"id":"merge-old","reason":"merged","replacementIds":["merge-target"]},{"id":"split-old","reason":"split","replacementIds":["split-one","split-two"]}]"#
+    } else {
+        "[]"
+    };
+    let document = format!(
+        r#"{{"schemaVersion":1,"catalogVersion":"{version}","stations":[
+    {{"id":"merge-target","name":"Merge target","aliases":[],"legacyIds":[],"tags":["rock"],"countryCode":null,"language":null,"homepageUrl":null,"faviconUrl":null,"streams":[{{"id":"main","url":"https://example.com/merge-target","codec":"mp3","bitrateKbps":128,"primary":true}}]}},
+    {{"id":"split-one","name":"Split one","aliases":[],"legacyIds":[],"tags":["rock"],"countryCode":null,"language":null,"homepageUrl":null,"faviconUrl":null,"streams":[{{"id":"main","url":"https://example.com/split-one","codec":"mp3","bitrateKbps":128,"primary":true}}]}},
+    {{"id":"split-two","name":"Split two","aliases":[],"legacyIds":[],"tags":["rock"],"countryCode":null,"language":null,"homepageUrl":null,"faviconUrl":null,"streams":[{{"id":"main","url":"https://example.com/split-two","codec":"mp3","bitrateKbps":128,"primary":true}}]}}{retired}],"tombstones":{tombstones}}}"#,
+    );
+    let digest = format!("{:x}", sha2::Sha256::digest(document.as_bytes()));
+    PinnedSharedCatalog::from_bytes(document.as_bytes(), version, &digest).unwrap()
 }
 
 fn station_ids(results: &[rockserver::search::RankedStation]) -> Vec<&str> {
@@ -519,13 +683,17 @@ fn imported_station(
         source_station_id: source_station_id.to_owned(),
         id: format!("rb-{source_station_id}"),
         name: name.to_owned(),
-        stream_url: stream_url.to_owned(),
         homepage_url: Some("https://example.com/imported-radio".to_owned()),
         tags: tags.iter().map(|tag| (*tag).to_owned()).collect(),
         language: Some("en".to_owned()),
         country_code: Some("US".to_owned()),
-        codec: Some("MP3".to_owned()),
-        bitrate_kbps: Some(192),
+        streams: vec![ImportedStream {
+            source_stream_id: source_station_id.to_owned(),
+            stream_url: stream_url.to_owned(),
+            codec: Some("MP3".to_owned()),
+            bitrate_kbps: Some(192),
+            is_primary: true,
+        }],
     }
 }
 

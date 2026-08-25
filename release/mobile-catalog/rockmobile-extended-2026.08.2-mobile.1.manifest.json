@@ -1,0 +1,8 @@
+{
+  "manifest_schema_version": 1,
+  "catalog_version": "2026.08.2-mobile.1",
+  "database_schema_version": 1,
+  "file": "rockmobile-extended-2026.08.2-mobile.1.sqlite",
+  "sha256": "ad469d405f177d7e476cf9b3d9985497d0e2c6132ac0f3ce14485f4eab402073",
+  "station_count": 16825
+}

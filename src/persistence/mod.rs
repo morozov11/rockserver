@@ -7,7 +7,7 @@ mod postgres;
 use std::{env, sync::Arc};
 
 pub use embedding_postgres::PostgresEmbeddingStore;
-pub use import_postgres::PostgresImportStore;
+pub use import_postgres::{OwnedCatalogReplacement, PostgresImportStore};
 pub use postgres::PostgresStationRepository;
 
 use crate::search::taxonomy::{GenreRow, GenreTaxonomy};
@@ -18,8 +18,8 @@ pub const DATABASE_URL_ENV: &str = "DATABASE_URL";
 
 /// Selects and initializes the catalog backend from the process environment.
 ///
-/// PostgreSQL migrations and the development seed are applied before the backend is returned.
-/// When `DATABASE_URL` is absent, the six-station in-memory fallback remains the default.
+/// PostgreSQL migrations and the pinned-catalog activation are applied before the backend is returned.
+/// When `DATABASE_URL` is absent, the validated pinned shared catalog is used in memory.
 pub async fn repository_from_env()
 -> Result<Arc<dyn StationRepository + Send + Sync>, crate::search::RepositoryError> {
     match env::var(DATABASE_URL_ENV) {
@@ -30,7 +30,7 @@ pub async fn repository_from_env()
         }
         Err(env::VarError::NotPresent) => {
             tracing::info!(backend = "in_memory", "station repository selected");
-            Ok(Arc::new(InMemoryStationRepository::with_builtin_catalog()))
+            Ok(Arc::new(InMemoryStationRepository::with_builtin_catalog()?))
         }
         Err(error) => Err(crate::search::RepositoryError::new("configuration", error)),
     }

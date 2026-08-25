@@ -1,5 +1,33 @@
 # Task log
 
+## RM-004-D — 2026-08-21 — RockServer shared station catalog integration
+
+- Goal: integrate the approved immutable RockCatalog release candidate without adding a network or
+  build-time dependency.
+- Scope: vendor the v1 schema/catalog/manifest for version `2026.08.2`; add a checksum- and
+  invariant-validated provider-neutral adapter; replace the runtime in-memory development catalog;
+  atomically activate provider-owned PostgreSQL rows; support stable multi-stream ownership,
+  provider-scoped retirement, and preservation/invalidation of operational and derived fields.
+- Result: canonical station IDs are both RockServer IDs and `source_station_id` under `rockcatalog`;
+  streams use `<station-id>:<stream-id>`. Activation does not cross-provider merge or mutate Radio
+  Browser rows, retains absent baseline records through soft retirement, keeps health/probe data for
+  an unchanged URL, resets only a changed stream URL, and invalidates station embeddings on metadata
+  changes. No public HTTP/OpenAPI fields or DTO shape changed. The extended RockMobile export is not
+  part of this stage.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and
+  `cargo test` passed. The opt-in PostgreSQL integration test also passed against a disposable local
+  PostgreSQL/pgvector container on port 15432. Catalog validation, formatting, and all nine offline
+  catalog-tool tests passed.
+- Status: complete at the RM-004-D acceptance gate.
+
+## RM-004-B — 2026-08-21 — Catalog repository and validation tooling
+
+- Goal: establish the approved shared-catalog v1 authoring infrastructure without consumer integration or legacy data migration.
+- Scope: create the local `C:\repos\rockcast-station-catalog` git repository, final-name schema, minimal canonical catalog, offline standard-library tools, fixtures, release manifest, and ownership/release documentation; record its location here.
+- Result: author validation rejects unknown fields and contract/semantic violations; consumer mode tolerates unknown optional v1 fields; formatting and SHA-256 output are deterministic. No RockServer code/API/database changes, network access, actual provider data, 41-station conversion, or extended PostgreSQL snapshot occurred.
+- Checks: catalog validation, formatting check, eight `unittest` fixture tests, and SHA-256 manifest generation passed offline. `graphify update .` follows below for the RockServer documentation reference.
+- Status: complete.
+
 ## RS-037 — 2026-08-20 — Reliable local launcher endpoint output
 
 - Goal: make the local launcher print the actual RockServer bind address and reachable admin URLs.
@@ -411,3 +439,122 @@
 - Result: documentation now records that RockCast text search and default-microphone capture are implemented, and that RockServer selects the bounded, commit-time Yandex SpeechKit adapter when configured. It also records the remaining work accurately: deterministic end-to-end coverage, input-device selection, cancellation/state reporting, retention-safe logging, provider resilience, and true upstream partial recognition.
 - Checks: documentation-only review against `rockcast/src/{rockserver.rs,voice/}` and `rockserver/src/{main.rs,providers/yandex_speechkit.rs}`; no code or tests changed.
 - Status: complete.
+
+## DOC-RM-004 — 2026-08-21 — Shared station catalog implementation plan
+
+- Goal: split RM-004 into independently executable, approval-gated tasks and assign the appropriate
+  Codex model and reasoning effort to every stage.
+- Scope: planning only for the canonical schema, catalog repository, legacy conversion, RockServer,
+  RockMobile, RockCast, release automation, cross-project review, and final cutover.
+- Result: added `docs/rm-004-shared-station-catalog-plan.md` with subplans RM-004-A through RM-004-I,
+  model assignments, dependencies, boundaries, acceptance gates, rollback, and completion criteria.
+- Checks: documentation reviewed against the existing catalog/import graph and current project
+  contributor instructions; no implementation checks were run because no code or behavior changed.
+- Status: complete; implementation not started and requires an explicit follow-up request.
+
+## RM-004-A — 2026-08-21 — Shared catalog contract and migration design
+
+- Goal: define the proposed canonical station-catalog v1 contract and migration policy without
+  starting implementation.
+- Scope: read-only architecture inventory of RockServer, RockCast, and RockMobile; proposed envelope,
+  station, stream, legacy-ID, tombstone, ownership, versioning, immutable-release, checksum,
+  migration, coexistence, rollout, rollback, risk, and compatibility rules. Writes were limited to
+  `docs/**`; the existing RM-004 plan was not modified.
+- Result: added `docs/rm-004-contract-proposal.md`,
+  `docs/rm-004-stations-v1.schema.proposed.json`, and
+  `docs/rm-004-stations-v1.example.json`. The proposal is explicitly **PROPOSED / NOT APPROVED /
+  NOT IMPLEMENTED** and lists all decisions requiring user approval before RM-004-B.
+- Checks: restarted Graphify navigation sequentially at user request; RockServer query completed,
+  while hanging RockCast/RockMobile queries were stopped after bounded waits and replaced by the
+  documented read-only `graph.json` fallback, with all findings checked against current source.
+  Both JSON files parse, the schema declares Draft 2020-12 and a stable `$id`, and the embedded and
+  standalone examples match. `git diff --check` passed (with only Git's existing LF→CRLF working-
+  copy warning), and the complete working-tree change set is confined to `docs/**`. Cargo/Gradle
+  tests were not run because no code or build behavior changed.
+- Status: proposal complete at the RM-004-A acceptance gate; awaiting explicit user approval.
+
+## RM-004-D addendum — 2026-08-21 — RockMobile extended SQLite catalog release gate
+
+- Goal: prepare a real, prebuilt SQLite release package for the next RockMobile update without
+  misrepresenting a development-sized PostgreSQL catalog as complete.
+- Scope: a provider-neutral PostgreSQL-to-SQLite export CLI, strict active/playable eligibility,
+  deterministic primary-stream selection and provider-safe dedupe, exact-byte manifest hashing,
+  eligibility/gap reports, schema and consumption documentation. RockMobile source and any network
+  provider import remain out of scope.
+- Result: added `export_mobile_catalog` and schema-versioned SQLite output containing only stable
+  station/provider identity, discovery metadata, normalized name/tags and selected primary stream.
+  It excludes health/probe data, embeddings, import runs, timestamps, credentials and provider
+  operational metadata. A complete release requires at least 16,000 eligible stations. The verified
+  local disposable database initially had 42 and correctly emitted only a gap report. After the
+  local `rockserver` migrations and checksum-pinned baseline activation, the verified real catalog
+  had 16,825 eligible rows and produced the complete `2026.08.2-mobile.1` SQLite, manifest, and
+  eligibility report. The exact SQLite SHA-256 is
+  `ad469d405f177d7e476cf9b3d9985497d0e2c6132ac0f3ce14485f4eab402073`.
+  `docs/rockmobile-extended-catalog.md` documents exact file names, tables, columns, indexes,
+  checksum verification, Room bundling, and release procedure.
+- Checks: SQLite fixture passed integrity, user/schema version, metadata/count, FTS-row-count,
+  ordinary search-index, and SHA-256 checks. The live PostgreSQL export recorded the 42/16,000
+  gap. Final Rust, catalog, graph, and diff checks are recorded in the task handoff.
+- Status: complete; verified bundleable RockMobile artifact released at the RM-004-D acceptance
+  gate. Android consumption remains a separately approved RM-004-E/F activity.
+
+## RM-004-G — 2026-08-25 — Release and synchronization automation
+
+- Goal: make immutable shared-catalog releases and consumer snapshot updates explicit, offline,
+  reproducible, and checksum-gated.
+- Scope: local catalog release tooling/tests/documentation and vendored snapshot metadata/artifacts
+  in RockServer, RockMobile, and RockCast; no runtime fetches, releases, pushes, or legacy removal.
+- Result: `tools/release_sync.py` publishes immutable `release/<version>` directories and validates
+  selected releases before syncing a consumer. It supports dry-run, drift verification, and rollback
+  to a retained prior release. RockMobile validates its independent extended SQLite manifest/hash,
+  integrity, DB schema, metadata version, and count without conflating it with baseline JSON.
+- Checks: catalog-tool unit suite passed, release publication/dry-runs/sync/verify passed for all
+  consumers. Consumer build/test checks are recorded with this handoff.
+- Status: complete at RM-004-G acceptance gate; RM-004-H/I not started.
+
+## RM-004-H remediation — 2026-08-25 — Preserve catalog lifecycle metadata and fail closed
+
+- Goal: resolve the two High findings in `docs/rm-004-h-cross-project-review.md` without changing
+  the public HTTP/OpenAPI contract or the ownership of Radio Browser records.
+- Scope: retain canonical tombstones and replacement semantics in RockServer preflight, activation,
+  PostgreSQL persistence, and internal lookup; prevent an invalid production pin from falling back
+  to the unrelated six-station test fixture.
+- Result: `PinnedSharedCatalog` exposes validated tombstones and returns `Redirect` only for a
+  single-target merge; splits return `Ambiguous` and removed IDs return `Removed`. Migration 0011
+  adds the provider-scoped active lifecycle table. Transactional activation updates the lifecycle
+  view, station/stream retirement, and import run atomically; reimport is idempotent and rollback
+  by reactivating the prior release removes the newer tombstones and reactivates its stations.
+  Search continues to exclude retired station/stream rows. Radio Browser is never included in
+  RockCatalog lifecycle writes. Pinned checksum/schema/semantic failures now surface as startup or
+  readiness failure and leave any already-active PostgreSQL release untouched; no production path
+  can select the fixture, which is test-only.
+- Checks: catalog unit coverage includes removed/merged/split semantics and invalid artifact
+  rejection; an ignored disposable-PostgreSQL integration scenario covers activation, active search
+  exclusion, replacement lookup, idempotence, rollback, and Radio Browser coexistence. Full Rust
+  verification is recorded with the handoff.
+- Status: complete pending the recorded verification results; RM-004-I was not started.
+
+## RM-004-I — 2026-08-25 — Cutover and legacy cleanup
+
+- Goal: complete the RM-004 cutover without weakening the already-remediated lifecycle/tombstone
+  and corrupt-pin safety findings.
+- Scope: synchronize and verify the approved immutable baseline across all consumers; remove only
+  expired legacy paths; document source ownership, baseline/extended flow, rollback, and exceptions.
+- Result: designated RockCatalog `2026.08.2` / SHA-256
+  `3fa20dca94fc059bd433a47b9fba9bb6d5e5e1aa2957a5ffb58b2a7b20b1d74d` as the shared consumer
+  baseline. RockMobile retains its separately verified `2026.08.2-mobile.1` SQLite package
+  (16,825 records; SHA-256 `ad469d405f177d7e476cf9b3d9985497d0e2c6132ac0f3ce14485f4eab402073`).
+  The only retained legacy item is RockCast's user-override TXT adapter: owner RockCast
+  maintainers, reason preserve offline overrides, removal date 2026-10-31. No manual consumer-copy
+  route is supported; `release_sync.py sync` and `verify` are the required offline workflow.
+- Checks: catalog tooling tests passed 12/12; `release_sync.py verify` passed for RockServer,
+  RockCast, and RockMobile; exact baseline and extended hashes, SQLite integrity/schema/count/FTS,
+  RockServer `cargo fmt --check`, strict Clippy, and `cargo test` passed (81 regular tests);
+  RockCast fmt, strict Clippy, and `cargo test` passed (50 regular tests). A loopback in-memory
+  RockServer readiness smoke returned 200 and was stopped cleanly. RockMobile Gradle unit/lint
+  checks were blocked before compilation because the configured API-36 SDK metadata is inaccessible
+  and licenses are unaccepted; no download, license acceptance, device, network, provider, or live
+  database test was performed.
+- Status: cutover work complete locally, but the RM-004-I acceptance gate is not fully passed until
+  RockMobile's offline unit/device verification can run against a readable, licensed Android API-36
+  SDK. This is an environment handoff item, not a claimed successful check.

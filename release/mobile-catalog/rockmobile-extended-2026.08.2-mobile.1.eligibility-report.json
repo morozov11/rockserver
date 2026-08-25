@@ -1,0 +1,26 @@
+{
+  "report_schema_version": 1,
+  "catalog_version": "2026.08.2-mobile.1",
+  "eligible_station_count": 16825,
+  "status": "released_complete_active_playable_catalog",
+  "eligibility": {
+    "station_active": true,
+    "primary_stream_active": true,
+    "exactly_one_primary_stream": true,
+    "http_stream_url": true,
+    "ordering": "stations.id ASC",
+    "deduplication": "one row per stable stations.id; no cross-provider name or URL merge"
+  },
+  "excluded_server_only_fields": [
+    "station_streams.health",
+    "station_streams.last_probe_at",
+    "station_streams.last_probe_error",
+    "station_embeddings",
+    "import_runs",
+    "last_import_run_id",
+    "created_at",
+    "updated_at",
+    "credentials",
+    "provider-private operational metadata"
+  ]
+}

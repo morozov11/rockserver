@@ -72,14 +72,46 @@ and cannot replace this temporary token.
 
 Use `RUST_LOG` to adjust the tracing filter. If it is unset or invalid, the service uses `info`.
 
-With no `DATABASE_URL`, startup logs `backend=in_memory` and uses the built-in metadata fallback. To run the local pgvector-capable PostgreSQL backend with documented development-only defaults:
+With no `DATABASE_URL`, startup logs `backend=in_memory` and searches the vendored, checksum-verified
+RockCatalog release `2026.08.2`. To run the local pgvector-capable PostgreSQL backend with documented
+development-only defaults:
 
 ```text
 docker compose up -d --wait
 DATABASE_URL=postgres://rockserver:rockserver_dev@127.0.0.1:5432/rockserver cargo run
 ```
 
-On PowerShell, set the variable with `$env:DATABASE_URL='postgres://rockserver:rockserver_dev@127.0.0.1:5432/rockserver'` before `cargo run`. Startup applies pending files from `migrations/`, including `CREATE EXTENSION vector`, and logs `backend=postgresql` without logging the URL. The PostgreSQL server must have pgvector installed and the migration role must be allowed to enable it. Stop the local database with `docker compose down`; add `-v` only when the development catalog and embeddings should also be discarded.
+On PowerShell, set the variable with `$env:DATABASE_URL='postgres://rockserver:rockserver_dev@127.0.0.1:5432/rockserver'` before `cargo run`. Startup applies pending files from `migrations/`, including `CREATE EXTENSION vector`, then atomically activates the vendored `rockcatalog` release without fetching a network or sibling-checkout dependency. The PostgreSQL server must have pgvector installed and the migration role must be allowed to enable it. Stop the local database with `docker compose down`; add `-v` only when the development catalog and embeddings should also be discarded.
+
+## Shared baseline catalog
+
+RockServer vendors the approved RockCatalog release under `catalog/rockcatalog/`: schema, canonical
+JSON, and manifest. This revision pins `catalogVersion` `2026.08.2` and SHA-256
+`3fa20dca94fc059bd433a47b9fba9bb6d5e5e1aa2957a5ffb58b2a7b20b1d74d`. Builds and runtime imports do
+not read `C:\repos\rockcast-station-catalog` or use the network.
+
+The adapter validates the manifest checksum, v1 structure, and semantic invariants before it writes.
+It maps `station.id` unchanged to both RockServer `id` and `source_station_id` under source
+`rockcatalog`; a stream is owned as `<station-id>:<stream-id>`. The explicit maintenance command is:
+
+```text
+DATABASE_URL=postgres://USER:PASSWORD@HOST:PORT/DATABASE cargo run --bin import_shared_catalog
+```
+
+Activation upserts only `rockcatalog` records, retires absent baseline records without deleting them,
+and never merges or mutates Radio Browser rows. Metadata changes invalidate that station's derived
+embeddings; an unchanged stream preserves its health/probe data, while a changed URL resets health
+and probe data only for that stream. The existing HTTP/OpenAPI result remains one selected primary
+`stream_url`; it exposes no new catalog or stream fields.
+
+## RockMobile extended SQLite catalog
+
+`cargo run --bin export_mobile_catalog` can create a deterministic, prebuilt SQLite catalog for a
+future RockMobile/Room bundle from an already-populated PostgreSQL catalog. It has a fixed strict
+gate of 16,000 active/playable, uniquely-primary stations: a smaller local database produces only a
+gap report and never a partial `.sqlite` release. The server makes no provider/network calls during
+this export and does not change Android. See [docs/rockmobile-extended-catalog.md](docs/rockmobile-extended-catalog.md)
+for the artifact names, schema, exclusion boundary, checksum verification, and release procedure.
 
 Check readiness and seeded search after startup:
 

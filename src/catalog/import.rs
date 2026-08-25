@@ -15,8 +15,6 @@ pub struct ImportedStation {
     pub id: String,
     /// Normalized display name.
     pub name: String,
-    /// Valid direct or resolved HTTP(S) stream URL.
-    pub stream_url: String,
     /// Valid HTTP(S) station homepage, when supplied.
     pub homepage_url: Option<String>,
     /// Sorted, deduplicated searchable tags.
@@ -25,10 +23,56 @@ pub struct ImportedStation {
     pub language: Option<String>,
     /// Normalized ISO 3166-1 alpha-2 country code, when supplied.
     pub country_code: Option<String>,
+    /// Provider-owned streams. Every imported station has at least one stream.
+    pub streams: Vec<ImportedStream>,
+}
+
+/// A provider-owned playable stream belonging to an [`ImportedStation`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ImportedStream {
+    /// Stable stream identifier inside the provider namespace.
+    pub source_stream_id: String,
+    /// Valid direct or resolved HTTP(S) stream URL.
+    pub stream_url: String,
     /// Normalized codec label, when supplied.
     pub codec: Option<String>,
     /// Plausible positive bitrate in kilobits per second, when supplied.
     pub bitrate_kbps: Option<u32>,
+    /// Whether this is the single stream selected by the public search contract.
+    pub is_primary: bool,
+}
+
+/// Lifecycle instruction retained for a canonical station that is no longer active.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ImportedTombstone {
+    /// The permanently reserved canonical station identifier that was retired.
+    pub id: String,
+    /// The contract-defined retirement meaning.
+    pub reason: TombstoneReason,
+    /// Active canonical IDs that may replace the retired identity.
+    pub replacement_ids: Vec<String>,
+}
+
+/// Contract-defined meaning of a canonical station retirement.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TombstoneReason {
+    /// The station has no successor.
+    Removed,
+    /// The station has exactly one continuity successor and may be redirected.
+    Merged,
+    /// The station has several successors and must remain ambiguous to callers.
+    Split,
+}
+
+impl TombstoneReason {
+    /// Returns the stable database value for this retirement meaning.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Removed => "removed",
+            Self::Merged => "merged",
+            Self::Split => "split",
+        }
+    }
 }
 
 /// One bounded page returned by an external catalog provider.
@@ -266,7 +310,7 @@ mod tests {
 
     use super::{
         CatalogImportError, CatalogImportProvider, CatalogImportStore, CatalogImporter,
-        ImportCounts, ImportLimits, ImportPage, ImportedStation,
+        ImportCounts, ImportLimits, ImportPage, ImportedStation, ImportedStream,
     };
 
     struct ScriptedProvider {
@@ -504,13 +548,17 @@ mod tests {
             source_station_id: id.to_owned(),
             id: format!("test-{id}"),
             name: format!("Station {id}"),
-            stream_url: format!("https://streams.example.com/{id}"),
             homepage_url: None,
             tags: vec!["rock".to_owned()],
             language: Some("en".to_owned()),
             country_code: Some("US".to_owned()),
-            codec: Some("MP3".to_owned()),
-            bitrate_kbps: Some(128),
+            streams: vec![ImportedStream {
+                source_stream_id: id.to_owned(),
+                stream_url: format!("https://streams.example.com/{id}"),
+                codec: Some("MP3".to_owned()),
+                bitrate_kbps: Some(128),
+                is_primary: true,
+            }],
         }
     }
 }

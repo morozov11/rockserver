@@ -43,7 +43,8 @@ tag_candidate_ids AS (
     SELECT s.id
     FROM stations AS s
     JOIN query_tags AS qt ON s.tags @> ARRAY[qt.tag]::text[]
-    WHERE ($3::text IS NULL OR s.language = $3)
+    WHERE s.retired_at IS NULL
+      AND ($3::text IS NULL OR s.language = $3)
       AND ($4::text IS NULL OR s.country_code = $4)
       AND NOT (s.id = ANY($5::text[]))
 ),
@@ -51,7 +52,8 @@ fts_candidate_ids AS (
     SELECT s.id
     FROM stations AS s
     CROSS JOIN search_input AS input
-    WHERE input.fts_query IS NOT NULL
+    WHERE s.retired_at IS NULL
+      AND input.fts_query IS NOT NULL
       AND s.searchable_tsv @@ input.fts_query
       AND ($3::text IS NULL OR s.language = $3)
       AND ($4::text IS NULL OR s.country_code = $4)
@@ -63,7 +65,8 @@ trigram_candidate_ids AS (
     JOIN query_terms AS qt
       ON length(qt.term) >= 3
      AND lower(s.name) % qt.term
-    WHERE ($3::text IS NULL OR s.language = $3)
+    WHERE s.retired_at IS NULL
+      AND ($3::text IS NULL OR s.language = $3)
       AND ($4::text IS NULL OR s.country_code = $4)
       AND NOT (s.id = ANY($5::text[]))
 ),
@@ -93,6 +96,7 @@ prefiltered AS MATERIALIZED (
     FROM stations AS s
     JOIN candidate_match_ids AS match_ids ON match_ids.id = s.id
     CROSS JOIN search_input AS input
+    WHERE s.retired_at IS NULL
     ORDER BY prefilter_score DESC, s.id ASC
     LIMIT GREATEST($6 * 20, 200)
 ),
@@ -166,7 +170,7 @@ candidates AS (
     JOIN LATERAL (
         SELECT stream_url, codec, bitrate_kbps, health
         FROM station_streams
-        WHERE station_id = s.id
+        WHERE station_id = s.id AND retired_at IS NULL
         ORDER BY is_primary DESC, id ASC
         LIMIT 1
     ) AS primary_stream ON true
@@ -245,6 +249,13 @@ impl PostgresStationRepository {
             pool.close().await;
             return Err(RepositoryError::new("migration", error));
         }
+
+        let catalog = crate::catalog::PinnedSharedCatalog::load()
+            .map_err(|error| RepositoryError::new("shared catalog preflight", error))?;
+        super::PostgresImportStore::from_pool(pool.clone())
+            .activate_shared_catalog(&catalog)
+            .await
+            .map_err(|error| RepositoryError::new("shared catalog activation", error))?;
 
         Ok(Self { pool })
     }

@@ -7,7 +7,7 @@ mod ranking;
 mod semantic_filters;
 pub mod taxonomy;
 
-use std::{collections::BTreeSet, error::Error, fmt, sync::Arc, time::Instant};
+use std::{collections::BTreeSet, error::Error, fmt, io, sync::Arc, time::Instant};
 
 use async_trait::async_trait;
 
@@ -190,8 +190,47 @@ pub struct InMemoryStationRepository {
 }
 
 impl InMemoryStationRepository {
-    /// Creates the fixed catalog used by the service until persistent storage is introduced.
-    pub fn with_builtin_catalog() -> Self {
+    /// Creates the validated pinned shared catalog used when PostgreSQL is unavailable.
+    ///
+    /// A malformed, checksum-invalid, or semantically invalid production pin is returned as a
+    /// startup/readiness error; it is never replaced with a development fixture.
+    pub fn with_builtin_catalog() -> Result<Self, RepositoryError> {
+        crate::catalog::PinnedSharedCatalog::load()
+            .map(Self::from_pinned_catalog)
+            .map_err(|error| RepositoryError::new("shared catalog preflight", error))
+    }
+
+    /// Builds the in-memory active view from an already preflighted immutable release.
+    pub(crate) fn from_pinned_catalog(catalog: crate::catalog::PinnedSharedCatalog) -> Self {
+        Self {
+            stations: catalog
+                .stations()
+                .iter()
+                .filter_map(|station| {
+                    station
+                        .streams
+                        .iter()
+                        .find(|stream| stream.is_primary)
+                        .map(|stream| Station {
+                            id: station.id.clone(),
+                            name: station.name.clone(),
+                            stream_url: stream.stream_url.clone(),
+                            homepage_url: station.homepage_url.clone(),
+                            tags: station.tags.clone(),
+                            language: station.language.clone(),
+                            country_code: station.country_code.clone(),
+                            codec: stream.codec.clone(),
+                            bitrate_kbps: stream.bitrate_kbps,
+                            health: StationHealth::Unknown,
+                        })
+                })
+                .collect(),
+        }
+    }
+
+    /// Provides a compact deterministic fixture for isolated unit tests.
+    #[cfg(test)]
+    fn legacy_fixture_catalog() -> Self {
         Self {
             stations: vec![
                 station(
@@ -288,6 +327,12 @@ impl InMemoryStationRepository {
             ],
         }
     }
+
+    /// Supplies the former compact fixture solely for unit tests that isolate ranking mechanics.
+    #[cfg(test)]
+    fn with_legacy_fixture_catalog() -> Self {
+        Self::legacy_fixture_catalog()
+    }
 }
 
 #[async_trait]
@@ -303,6 +348,44 @@ impl StationRepository for InMemoryStationRepository {
 
     async fn check_readiness(&self) -> Result<(), RepositoryError> {
         Ok(())
+    }
+}
+
+/// Repository used only to surface an unavailable pinned catalog through readiness and request errors.
+#[derive(Clone, Debug)]
+pub struct UnavailableStationRepository {
+    reason: String,
+}
+
+impl UnavailableStationRepository {
+    /// Preserves a sanitized catalog-preflight failure without substituting unrelated station data.
+    pub fn from_preflight_error(error: RepositoryError) -> Self {
+        Self {
+            reason: error.to_string(),
+        }
+    }
+
+    fn failure(&self) -> RepositoryError {
+        RepositoryError::new(
+            "shared catalog unavailable",
+            io::Error::other(self.reason.clone()),
+        )
+    }
+}
+
+#[async_trait]
+impl StationRepository for UnavailableStationRepository {
+    async fn search(
+        &self,
+        _query: &SearchQuery,
+        _constraints: &SearchConstraints,
+        _embedding: Option<&Embedding>,
+    ) -> Result<Vec<RankedStation>, RepositoryError> {
+        Err(self.failure())
+    }
+
+    async fn check_readiness(&self) -> Result<(), RepositoryError> {
+        Err(self.failure())
     }
 }
 
@@ -584,6 +667,7 @@ fn broaden_tags(tags: &[String]) -> Vec<String> {
     broadened.into_iter().collect()
 }
 
+#[cfg(test)]
 struct StationMetadata<'a> {
     homepage_url: Option<&'a str>,
     tags: &'a [&'a str],
@@ -593,6 +677,7 @@ struct StationMetadata<'a> {
     bitrate_kbps: Option<u32>,
 }
 
+#[cfg(test)]
 fn station(id: &str, name: &str, stream_url: &str, metadata: StationMetadata<'_>) -> Station {
     Station {
         id: id.to_owned(),
@@ -612,6 +697,7 @@ fn station(id: &str, name: &str, stream_url: &str, metadata: StationMetadata<'_>
 mod tests {
     use std::{
         collections::BTreeSet,
+        io,
         sync::{Arc, Mutex},
     };
 
@@ -621,13 +707,15 @@ mod tests {
         DeterministicQueryParser, Embedding, EmbeddingProvider, EmbeddingProviderError,
         InMemoryStationRepository, QueryIntent, QueryParser, QueryParserError, QueryParserInput,
         RankedStation, RepositoryError, SearchAction, SearchConstraints, SearchQuery,
-        SearchService, SemanticLanguageClassifier, StationRepository, normalize_query,
+        SearchService, SemanticLanguageClassifier, StationRepository, UnavailableStationRepository,
+        normalize_query,
     };
 
     #[tokio::test]
     async fn equal_scores_are_ordered_by_station_id() {
-        let service =
-            SearchService::new(Arc::new(InMemoryStationRepository::with_builtin_catalog()));
+        let service = SearchService::new(Arc::new(
+            InMemoryStationRepository::with_legacy_fixture_catalog(),
+        ));
         let query = normalize_query("rock".to_owned(), "en-US".to_owned());
         let constraints = SearchConstraints {
             limit: 10,
@@ -656,8 +744,9 @@ mod tests {
 
     #[tokio::test]
     async fn exclusions_are_applied_before_ranking() {
-        let service =
-            SearchService::new(Arc::new(InMemoryStationRepository::with_builtin_catalog()));
+        let service = SearchService::new(Arc::new(
+            InMemoryStationRepository::with_legacy_fixture_catalog(),
+        ));
         let query = normalize_query("jazz".to_owned(), "en-US".to_owned());
         let constraints = SearchConstraints {
             limit: 10,
@@ -673,6 +762,30 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(ids, ["station-jazz-002"]);
+    }
+
+    #[tokio::test]
+    async fn unavailable_catalog_is_explicitly_unready_and_never_serves_a_fixture() {
+        let repository = UnavailableStationRepository::from_preflight_error(RepositoryError::new(
+            "fixture preflight",
+            io::Error::other("invalid catalog fixture"),
+        ));
+        let constraints = SearchConstraints {
+            limit: 10,
+            excluded_station_ids: BTreeSet::new(),
+        };
+
+        assert!(repository.check_readiness().await.is_err());
+        assert!(
+            repository
+                .search(
+                    &normalize_query("rock".to_owned(), "en-US".to_owned()),
+                    &constraints,
+                    None,
+                )
+                .await
+                .is_err()
+        );
     }
 
     struct RecordingParser {
@@ -703,7 +816,7 @@ mod tests {
     async fn query_parser_receives_only_request_input_and_returns_structured_intent() {
         let input_seen = Arc::new(Mutex::new(None));
         let service = SearchService::with_providers(
-            Arc::new(InMemoryStationRepository::with_builtin_catalog()),
+            Arc::new(InMemoryStationRepository::with_legacy_fixture_catalog()),
             Arc::new(RecordingParser {
                 input: input_seen.clone(),
                 fail: false,
@@ -744,7 +857,7 @@ mod tests {
     #[tokio::test]
     async fn parser_and_embedding_failures_preserve_metadata_fallback() {
         let service = SearchService::with_providers(
-            Arc::new(InMemoryStationRepository::with_builtin_catalog()),
+            Arc::new(InMemoryStationRepository::with_legacy_fixture_catalog()),
             Arc::new(RecordingParser {
                 input: Arc::new(Mutex::new(None)),
                 fail: true,
@@ -800,7 +913,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_hard_filter_from_parser_uses_deterministic_fallback() {
         let service = SearchService::with_providers(
-            Arc::new(InMemoryStationRepository::with_builtin_catalog()),
+            Arc::new(InMemoryStationRepository::with_builtin_catalog().unwrap()),
             Arc::new(InvalidIntentParser),
             None,
         );
@@ -855,8 +968,9 @@ mod tests {
 
     #[tokio::test]
     async fn heavy_metal_query_finds_rock_stations_via_genre_hierarchy() {
-        let service =
-            SearchService::new(Arc::new(InMemoryStationRepository::with_builtin_catalog()));
+        let service = SearchService::new(Arc::new(
+            InMemoryStationRepository::with_legacy_fixture_catalog(),
+        ));
         let query = SearchQuery {
             action: SearchAction::Play,
             original: "heavy metal".to_owned(),
@@ -890,8 +1004,9 @@ mod tests {
 
     #[tokio::test]
     async fn english_heavy_query_prefers_english_stations() {
-        let service =
-            SearchService::new(Arc::new(InMemoryStationRepository::with_builtin_catalog()));
+        let service = SearchService::new(Arc::new(
+            InMemoryStationRepository::with_legacy_fixture_catalog(),
+        ));
         let query = SearchQuery {
             action: SearchAction::Play,
             original: "english heavy".to_owned(),
@@ -923,8 +1038,9 @@ mod tests {
 
     #[tokio::test]
     async fn genre_fallback_drops_filter_when_no_hierarchy_match() {
-        let service =
-            SearchService::new(Arc::new(InMemoryStationRepository::with_builtin_catalog()));
+        let service = SearchService::new(Arc::new(
+            InMemoryStationRepository::with_builtin_catalog().unwrap(),
+        ));
         let query = SearchQuery {
             action: SearchAction::Play,
             original: "reggae".to_owned(),
@@ -997,7 +1113,7 @@ mod tests {
             ),
         ]);
         let service = SearchService::with_providers_and_language_classifier(
-            Arc::new(InMemoryStationRepository::with_builtin_catalog()),
+            Arc::new(InMemoryStationRepository::with_builtin_catalog().unwrap()),
             Arc::new(DeterministicQueryParser),
             Some(Arc::new(FixedEmbeddingProvider)),
             Some(Arc::new(classifier)),

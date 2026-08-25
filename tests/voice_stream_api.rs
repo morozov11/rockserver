@@ -18,7 +18,9 @@ use tokio::{
 #[tokio::test]
 async fn websocket_stream_emits_transcript_and_station_result() {
     let app = router_with_services(
-        SearchService::new(Arc::new(InMemoryStationRepository::with_builtin_catalog())),
+        SearchService::new(Arc::new(
+            InMemoryStationRepository::with_builtin_catalog().unwrap(),
+        )),
         Arc::new(FakeRecognizer),
         DEFAULT_VOICE_COMMAND_TIMEOUT,
     );
@@ -58,12 +60,12 @@ async fn websocket_stream_emits_transcript_and_station_result() {
     write_client_frame(&mut stream, 0x1, br#"{"type":"commit"}"#).await;
     let final_transcript = read_json_frame(&mut stream).await;
     assert_eq!(final_transcript["type"], "transcript");
-    assert_eq!(final_transcript["transcript"], "jazz");
+    assert_eq!(final_transcript["transcript"], "rock");
     assert_eq!(final_transcript["is_final"], true);
     let result = read_json_frame(&mut stream).await;
     assert_eq!(result["type"], "result");
     assert_eq!(result["request_id"], "stream-test");
-    assert_eq!(result["transcript"], "jazz");
+    assert_eq!(result["transcript"], "rock");
     assert!(result["selected_station"].is_object());
 
     server.abort();
@@ -100,7 +102,7 @@ impl SpeechStreamSession for FakeSession {
 
     async fn finish(&mut self) -> Result<Vec<TranscriptUpdate>, SpeechProviderError> {
         Ok(vec![TranscriptUpdate {
-            transcript: "jazz".to_owned(),
+            transcript: "rock".to_owned(),
             is_final: true,
         }])
     }

@@ -1,6 +1,83 @@
 # Project status
 
-Last updated: 2026-08-20
+Last updated: 2026-08-25
+
+## RM-004 shared catalog
+
+### RM-004-I cutover and legacy cleanup (2026-08-25)
+
+RM-004-I designates RockCatalog `2026.08.2` as the approved immutable curated baseline:
+SHA-256 `3fa20dca94fc059bd433a47b9fba9bb6d5e5e1aa2957a5ffb58b2a7b20b1d74d`. RockServer, RockCast,
+and RockMobile pin the same JSON release; RockMobile additionally pins the separate extended
+SQLite `2026.08.2-mobile.1` (schema 1, 16,825 stations, SHA-256
+`ad469d405f177d7e476cf9b3d9985497d0e2c6132ac0f3ce14485f4eab402073`). RockCatalog is the only
+baseline authoring source. `release_sync.py` is the only supported consumer-update route; ordinary
+builds/startup neither copy nor fetch catalog data. Rollback selects retained immutable artifacts
+through the same offline sync/verify workflow.
+
+RockCast's TXT adapter remains the sole cutover legacy exception: owner RockCast maintainers,
+reason existing offline user overrides, removal date 2026-10-31. RockMobile has no TXT path. The
+service diagram reflects the verified authoring/release/baseline/extended flow. Offline release
+tool tests (12/12), `release_sync.py verify` for all consumers, RockServer fmt/Clippy/full tests,
+RockCast fmt/Clippy/full tests, and a loopback RockServer readiness smoke passed on 2026-08-25.
+RockMobile Gradle checks remain unrun because this environment cannot read the configured Android
+API-36 SDK package metadata and its SDK licenses are unaccepted; no SDK download or license change
+was performed. Device, stream-playback, live provider, and live PostgreSQL checks remain outside
+this offline cutover verification. The RM-004-I acceptance gate is therefore not fully passed:
+Android offline-client execution remains an environment handoff item.
+
+### RM-004-H High-issue remediation (2026-08-25)
+
+RockServer now preserves canonical `tombstones` through preflight, activation, PostgreSQL
+persistence, and internal lifecycle lookup. `removed` records have no successor, `merged` records
+may resolve automatically to their sole replacement, and `split` records remain explicitly
+ambiguous so no caller can silently move user state. Migration `0011_add_catalog_tombstones.sql`
+stores the active `rockcatalog` lifecycle view separately from soft-retired station rows. Shared
+catalog activation replaces that view, provider-scoped retires missing RockCatalog records, and
+commits both changes with the import run; reimporting a release is idempotent and reactivating a
+previous release removes its newer lifecycle view. Radio Browser rows remain outside these writes.
+The existing public HTTP/OpenAPI response remains unchanged.
+
+Pinned catalog failure is now fail-closed. The production in-memory path returns a preflight error
+for missing, malformed, checksum-invalid, schema-invalid, or semantically invalid pins; startup
+does not select the old six-station fixture. PostgreSQL preflights the immutable catalog before
+activation, so such a failure leaves the prior successfully activated database snapshot untouched
+and causes startup/readiness to fail when no active snapshot exists. The compact fixture is compiled
+only for isolated Rust unit tests and has no production selection path. This behavior is offline and
+does not fetch a replacement catalog.
+
+RM-004-G is complete at its release-and-synchronization acceptance gate. The local immutable
+baseline release layout is `C:\repos\rockcast-station-catalog\release\2026.08.2`, containing
+canonical JSON, schema, SHA-256 manifest, release metadata, and changelog. The explicit offline
+sync/verify tool now updates RockServer, RockMobile, and RockCast only after checksum and
+schema/version validation; ordinary builds and startup remain download-free. All three consumer
+snapshots verified against baseline `2026.08.2` SHA-256
+`3fa20dca94fc059bd433a47b9fba9bb6d5e5e1aa2957a5ffb58b2a7b20b1d74d`. RockMobile additionally
+validated its independent SQLite package `2026.08.2-mobile.1`, schema 1, count 16,825, SHA-256
+`ad469d405f177d7e476cf9b3d9985497d0e2c6132ac0f3ce14485f4eab402073`. RM-004-H/I have not started.
+
+RM-004-B and RM-004-C have passed their acceptance gates in the separate local repository
+`C:\repos\rockcast-station-catalog`. The approved 41-station release candidate is version
+`2026.08.2`, with SHA-256 `3fa20dca94fc059bd433a47b9fba9bb6d5e5e1aa2957a5ffb58b2a7b20b1d74d`.
+RockServer now vendors that immutable artifact and schema, validates it before use, selects it as
+the in-memory fallback, and activates it transactionally under provider source `rockcatalog` when
+the PostgreSQL repository initializes. Records use canonical station IDs and `<station-id>:<stream-id>`
+stream identities; missing baseline rows are provider-scoped soft-retired. Public HTTP/OpenAPI
+result fields and single selected primary stream semantics are unchanged. RM-004-E onward remain
+out of scope. RM-004-D also includes a deterministic PostgreSQL-to-SQLite exporter for a future
+RockMobile/Room bundle, documented in `docs/rockmobile-extended-catalog.md`. Its release gate
+requires at least 16,000 active/playable stations with exactly one active primary HTTP(S) stream.
+The verified local `rockserver` database contained 16,825 eligible stations on 2026-08-21 and
+produced the complete `2026.08.2-mobile.1` release SQLite, manifest, and eligibility report under
+`release/mobile-catalog/`. Its exact-file SHA-256 is
+`ad469d405f177d7e476cf9b3d9985497d0e2c6132ac0f3ce14485f4eab402073`. The report records
+provider-safe dedupe, primary selection, and server-only exclusions.
+
+Verification on 2026-08-21 passed `cargo fmt --check`, strict all-target/all-feature Clippy, the
+regular `cargo test` suite, the opt-in PostgreSQL integration test against a disposable local
+PostgreSQL/pgvector container, and the catalog repository's offline validator, formatting check,
+and nine-tool-test suite. The mobile SQLite unit fixture additionally passed `PRAGMA integrity_check`,
+schema/version, metadata/count, FTS count, search-index, and exact-byte SHA-256 checks.
 
 ## Architecture refactor review
 
@@ -224,6 +301,27 @@ RS-028 adds generic bidirectional transliteration for query terms (Russian Cyril
 
 RS-029 introduces a station-name priority path for commands that explicitly start with `включи радио` / `поставь радио` (and English equivalents). The parser derives an ordered station-name hint phrase from the tail of the command, the query carries that hint through to PostgreSQL, and SQL ranking gives a strong bonus when the normalized station name contains the same words in the same order. This helps short exact station names outrank longer related variants.
 
+## RM-004-A contract planning gate
+
+RM-004-A is complete and approved. The repository
+now contains a proposed shared-catalog contract, Draft 2020-12 JSON Schema, and matching example.
+The design was based on a read-only inventory of RockServer, RockCast, and RockMobile and records the
+41-row RockCast/RockMobile baseline, current URL-derived mobile IDs, provider ownership, multiple-
+stream database behavior, public DTO compatibility, migration, release, rollback, and tombstone
+rules. No runtime contract, code, database, client, build, CI, catalog data, or external repository
+was changed. RM-004-B and later stages have not started.
+
+Planning verification on 2026-08-21 parsed both JSON files successfully, confirmed that the schema's
+embedded example matches the standalone example, checked proposal/schema terminology and required
+fields, ran `git diff --check`, and confirmed the change scope is `docs/**`. Cargo and Gradle checks
+were intentionally not run because this task changes documentation only.
+
 ## Next step
 
-Add deterministic RockCast-to-RockServer end-to-end coverage for search and voice, then improve voice cancellation and state reporting across capture, upload, recognition, search, and playback. Follow with retention-safe logging, provider resilience, and a second recognizer behind the existing trait.
+The next RM-004 work, if separately approved, is client integration (RM-004-E/F) and later release
+automation. RockMobile can consume the verified `2026.08.2-mobile.1` package according to the
+documented checksum procedure; future catalog versions must satisfy the same fixed 16,000-station
+release gate. The previously recorded service follow-up remains to add deterministic RockCast-to-RockServer end-to-end coverage
+for search and voice, then improve voice cancellation and state reporting across capture, upload,
+recognition, search, and playback, followed by retention-safe logging, provider resilience, and a
+second recognizer behind the existing trait.
