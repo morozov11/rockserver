@@ -51,6 +51,7 @@ try {
     if ($launcherScript -notmatch 'cmd\.exe /d /c.*ssh-keygen.*-N') { throw 'Windows-safe empty-passphrase SSH key generation is missing' }
     if ($launcherScript -notmatch "DOCKER_HOST -match '\^unix://'" -or $launcherScript -notmatch 'npipe:////\./pipe/docker_engine' -or $launcherScript -notmatch 'docker info --format') { throw 'Windows Docker Engine preflight is missing' }
     if ($launcherScript -notmatch 'StdinNull=yes' -or $launcherScript -notmatch 'ServerAliveCountMax=3') { throw 'staging SSH is not protected from an unbounded stdin wait' }
+    if ($launcherScript -notmatch '\$nonInteractiveScpOptions' -or $launcherScript -match '& scp -i \$key @nonInteractiveSshOptions') { throw 'SCP incorrectly receives the SSH-only -n flag' }
 
     '{"enabled":true,"assetDirectory":"/opt/rockserver/assets/onnx","assets":[{"name":"model.onnx","url":"REQUIRED_OFFICIAL_HTTPS_URL","sha256":"REQUIRED_64_HEX_SHA256"}]}' | Set-Content "$temp/onnx.json"
     Assert-Throws { Test-Ops001DOnnxManifest "$temp/onnx.json" | Out-Null } 'incomplete ONNX lock was accepted'

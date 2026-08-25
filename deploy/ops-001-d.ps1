@@ -70,6 +70,7 @@ $stage = Join-Path ([IO.Path]::GetTempPath()) ("rockserver-ops001d-" + [Guid]::N
 $remoteId = 'rockserver-ops001d-' + [Guid]::NewGuid().ToString('N')
 $remoteStage = "/tmp/$remoteId"
 $nonInteractiveSshOptions = @('-n', '-o', 'BatchMode=yes', '-o', 'StdinNull=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=3')
+$nonInteractiveScpOptions = @('-o', 'BatchMode=yes', '-o', 'StdinNull=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=3')
 New-Item -ItemType Directory -Path $stage | Out-Null
 try {
     Copy-Item (Join-Path $PSScriptRoot 'compose.yaml'), (Join-Path $PSScriptRoot 'compose.production.yaml'), (Join-Path $PSScriptRoot 'Caddyfile.production.template'), (Join-Path $PSScriptRoot 'remote-ops-001-d.sh') -Destination $stage
@@ -102,7 +103,7 @@ try {
         (Join-Path $stage 'onnx-assets.json')
     )
     if ($Action -eq 'deploy') { $uploadFiles += (Join-Path $stage 'rockserver-image.tar') }
-    & scp -i $key @nonInteractiveSshOptions @uploadFiles "${target}:$remoteStage/"
+    & scp -i $key @nonInteractiveScpOptions @uploadFiles "${target}:$remoteStage/"
     if ($LASTEXITCODE -ne 0) { throw 'Secure copy of the deployment bundle to the VPS failed.' }
 
     if ($Action -eq 'bootstrap') {
