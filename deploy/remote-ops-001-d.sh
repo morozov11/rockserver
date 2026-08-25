@@ -102,7 +102,7 @@ download_onnx() {
   local manifest="$release_root/onnx-assets.json"
   [ -f "$manifest" ] || fail 'ONNX manifest is missing'
   python3 - "$manifest" <<'PY'
-import hashlib, json, os, pathlib, posixpath, tarfile, sys
+import hashlib, json, os, pathlib, posixpath, subprocess, tarfile, sys
 manifest = json.load(open(sys.argv[1], encoding='utf-8'))
 if not manifest.get('enabled', False):
     raise SystemExit(0)
