@@ -31,6 +31,20 @@ install_docker_if_requested() {
 ensure_host_log_dir() {
   install -d -m 0750 -o 10001 "$host_log_dir"
 }
+ensure_low_memory_swap() {
+  local memory_kib
+  memory_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+  [ "${memory_kib:-0}" -ge 1572864 ] && return
+  if swapon --noheadings --show=NAME | grep -q .; then return; fi
+  [ ! -e /swapfile ] || fail 'low-memory host has an inactive /swapfile; inspect it manually before bootstrap can continue'
+  if ! fallocate -l 2G /swapfile; then
+    dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+  fi
+  chmod 0600 /swapfile
+  mkswap /swapfile >/dev/null
+  swapon /swapfile
+  grep -qE '^/swapfile[[:space:]]' /etc/fstab || printf '/swapfile none swap sw 0 0\n' >> /etc/fstab
+}
 write_or_keep_secret() {
   local key="$1" value
   if grep -q "^${key}=" "$env_file" 2>/dev/null; then return; fi
@@ -61,6 +75,7 @@ bootstrap() {
   require_root; validate_stage "$stage"
   [[ "$deploy_user" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || fail 'unsafe deploy user'
   install_docker_if_requested
+  ensure_low_memory_swap
   install -d -m 0750 "$release_root" "$release_root/backups" "$release_root/releases" "$release_root/assets/onnx"
   ensure_host_log_dir
   install_owner_files "$stage"
