@@ -139,9 +139,17 @@ for item in assets:
         extracted = path.with_suffix(path.suffix + '.partial')
         with tarfile.open(temp, 'r:gz') as archive:
             member = archive.getmember(archive_member)
-            if member.issym() or member.islnk():
+            for _ in range(8):
+                if not (member.issym() or member.islnk()):
+                    break
+                if posixpath.isabs(member.linkname):
+                    raise SystemExit('ONNX runtime archive member has an unsafe absolute symlink')
                 target = posixpath.normpath(posixpath.join(posixpath.dirname(member.name), member.linkname))
+                if target == '..' or target.startswith('../'):
+                    raise SystemExit('ONNX runtime archive member escapes its archive directory')
                 member = archive.getmember(target)
+            else:
+                raise SystemExit('ONNX runtime archive has too many symlink levels')
             if not member.isfile():
                 raise SystemExit('ONNX runtime archive member is not a regular file')
             source = archive.extractfile(member)
