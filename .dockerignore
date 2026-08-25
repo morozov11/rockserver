@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+target
+graphify-out
+release
+docs
+deploy
+run-rockserver-local.ps1
+*.log

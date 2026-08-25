@@ -1,0 +1,4 @@
+services:
+  caddy:
+    ports:
+      - "127.0.0.1:${ROCKSERVER_LOCAL_HTTP_PORT:-18080}:80"

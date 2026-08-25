@@ -1,0 +1,4 @@
+{$ROCKSERVER_DOMAIN} {
+    encode gzip
+    reverse_proxy rockserver:3000
+}

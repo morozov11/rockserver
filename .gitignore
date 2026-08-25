@@ -9,6 +9,13 @@
 .env
 .env.*
 !.env.example
+/production.env
+
+# OPS-001-D owner-only deployment inventory and generated SSH keys.
+/deploy/private.inventory.psd1
+/deploy/private.*.psd1
+!/deploy/private.inventory.example.psd1
+/deploy/.keys/
 
 # Local logs and temporary files
 /logs/

@@ -4,14 +4,14 @@ mod embedding_postgres;
 mod import_postgres;
 mod postgres;
 
-use std::{env, sync::Arc};
+use std::{env, io, sync::Arc};
 
 pub use embedding_postgres::PostgresEmbeddingStore;
 pub use import_postgres::{OwnedCatalogReplacement, PostgresImportStore};
 pub use postgres::PostgresStationRepository;
 
+use crate::search::StationRepository;
 use crate::search::taxonomy::{GenreRow, GenreTaxonomy};
-use crate::search::{InMemoryStationRepository, StationRepository};
 
 /// Environment variable that enables the PostgreSQL catalog backend.
 pub const DATABASE_URL_ENV: &str = "DATABASE_URL";
@@ -19,19 +19,20 @@ pub const DATABASE_URL_ENV: &str = "DATABASE_URL";
 /// Selects and initializes the catalog backend from the process environment.
 ///
 /// PostgreSQL migrations and the pinned-catalog activation are applied before the backend is returned.
-/// When `DATABASE_URL` is absent, the validated pinned shared catalog is used in memory.
+/// A missing database URL is a startup configuration error; the in-memory catalog is reserved for
+/// isolated unit tests and is never selected by the service process.
 pub async fn repository_from_env()
 -> Result<Arc<dyn StationRepository + Send + Sync>, crate::search::RepositoryError> {
     match env::var(DATABASE_URL_ENV) {
-        Ok(database_url) => {
+        Ok(database_url) if !database_url.trim().is_empty() => {
             let repository = PostgresStationRepository::connect(&database_url).await?;
             tracing::info!(backend = "postgresql", "station repository selected");
             Ok(Arc::new(repository))
         }
-        Err(env::VarError::NotPresent) => {
-            tracing::info!(backend = "in_memory", "station repository selected");
-            Ok(Arc::new(InMemoryStationRepository::with_builtin_catalog()?))
-        }
+        Ok(_) | Err(env::VarError::NotPresent) => Err(crate::search::RepositoryError::new(
+            "configuration",
+            io::Error::other("DATABASE_URL is required"),
+        )),
         Err(error) => Err(crate::search::RepositoryError::new("configuration", error)),
     }
 }

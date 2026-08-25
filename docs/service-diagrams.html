@@ -70,7 +70,7 @@
         <article class="node future"><span class="badge future">FUTURE</span><h3>Пользователь / голос</h3><p>Голосовой ввод, production STT и ESP32-клиент.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>RockCast Windows</h3><p>Отправляет Bearer-токен для RockServer voice WebSocket; локальный каталог остаётся fallback.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>RockServer</h3><p>Health routes и защищённые Bearer application API: поиск и voice.</p></article>
-        <article class="node current"><span class="badge current">CURRENT</span><h3>Каталог / поиск</h3><p>PostgreSQL при <code>DATABASE_URL</code>; иначе встроенный in-memory fallback. Проверенный full-catalog export создаёт SQLite для RockMobile.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>Каталог / поиск</h3><p>PostgreSQL обязателен для запущенного сервиса; in-memory repository остаётся только для deterministic tests. Проверенный full-catalog export создаёт SQLite для RockMobile.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>StationResult</h3><p>Voice result передаётся RockCast; remote text-search UI остаётся NEXT.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>PlaybackController</h3><p>RockCast воспроизводит принятый voice result и сохраняет fallback кандидатов.</p></article>
       </div>
@@ -99,13 +99,13 @@
       <h2>3. Внутренняя схема RockServer</h2>
       <div class="grid">
         <article class="card current"><span class="badge current">CURRENT</span><h3>Axum API</h3><p>Public <code>GET /health/live</code> and DB-aware <code>GET /health/ready</code>; Bearer-protected <code>POST /v1/search</code>, canonical JSON <code>POST /api/v1/voice/command</code>, and WebSocket <code>GET /api/v1/voice/stream</code>.</p></article>
-        <article class="card current"><span class="badge current">CURRENT</span><h3>API access gate</h3><p>The fixed local bootstrap credential is shared with RockMobile until persisted client credentials are implemented. Invalid application credentials receive structured <code>401 authentication_required</code>; no credential is logged.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>API access gate</h3><p>The application Bearer credential is required through deployment configuration until persisted client credentials are implemented. Invalid application credentials receive structured <code>401 authentication_required</code>; no credential is logged.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>tracing / config</h3><p>JSON tracing, HTTP и import config, run/page/count logs, graceful shutdown.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>DTO / validation</h3><p>Transport DTO, request_id и contract-compliant ошибки.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>SearchService</h3><p>Нормализованный запрос и стабильное repository-neutral ранжирование.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>QueryParser / LlmProvider</h3><p>Yandex JSON intent при явной env-конфигурации; deterministic fallback; каталог не передаётся provider.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>EmbeddingProvider trait</h3><p>Optional query vector; deterministic-dev fixture, без production model.</p></article>
-        <article class="card current"><span class="badge current">CURRENT</span><h3>StationRepository</h3><p>PostgreSQL + migrations/seed или встроенный in-memory fallback.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>StationRepository</h3><p>Запущенный сервис использует PostgreSQL + migrations/seed; in-memory repository ограничен deterministic tests.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>CatalogImporter</h3><p>Ограниченный Radio Browser client + import store; отдельный CLI, не request path и не HTTP startup.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>Mobile catalog exporter</h3><p>Отдельный PostgreSQL→SQLite CLI. Выпускает только полный active/playable каталог после строгой проверки; health, embeddings и import runs не экспортирует.</p></article>
         <article class="card next"><span class="badge next">NEXT</span><h3>Admin / client identity</h3><p>Persisted revocable RockCast clients, Bearer admin sessions, login throttling, audit records and HTMX console.</p></article>

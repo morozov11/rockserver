@@ -1,0 +1,12 @@
+services:
+  rockserver:
+    image: ${ROCKSERVER_IMAGE:?ROCKSERVER_IMAGE must point to an approved immutable image}
+
+  caddy:
+    environment:
+      ROCKSERVER_DOMAIN: ${ROCKSERVER_DOMAIN:?ROCKSERVER_DOMAIN must be the real owned domain}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.production.template:/etc/caddy/Caddyfile:ro

@@ -102,14 +102,20 @@
   а release не зависит от ручной правки контейнера на VPS.
 - **Зависимости:** OPS-001-B.
 
-### OPS-001-D — Staging launch checklist
+### OPS-001-D — Automated single-VPS bootstrap and staging launcher
 
-- **Репозиторий:** RockServer; docs/runbook.
+- **Репозиторий:** RockServer; `deploy/`, tests и docs/runbook.
 - **Модель:** `gpt-5.6-terra`, `medium`.
-- **Работа:** подготовить checklist для покупки VPS, DNS, SSH keys, secret injection, firewall,
-  HTTPS, uptime monitor, backup target, privacy notice и incident contacts.
-- **Готово, когда:** пользователь может выполнить checklist по шагам; публичный запуск остаётся
-  отдельным ручным действием пользователя.
+- **Работа:** добавить owner-only ignored inventory, interactive one-time SSH-key bootstrap,
+  provisioning Docker/Compose/directories/protected env-file, selective Yandex secret transfer,
+  checksum-gated ONNX assets, pinned RM-004 catalog seed and one-command registry-free staging
+  deploy. Команда сама получает полный SHA текущего чистого Git commit, локально строит и проверяет
+  image, передаёт checksummed `docker save` artifact по SSH и сверяет ID/label после `docker load`.
+  Проверить всё локально через dry-run/mocks без VPS или сети.
+- **Готово, когда:** владелец заполняет один ignored inventory и запускает documented bootstrap
+  либо staging deploy; rollout использует backup, migration/seed и HTTPS readiness, а secrets не
+  попадают в Git, argv, logs или release metadata. Реальный публичный запуск остаётся явным
+  действием владельца.
 - **Зависимости:** OPS-001-C.
 
 ## RM-011 — Регистрация, вход и устройства

@@ -1,0 +1,93 @@
+name: rockserver
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17@sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set outside the Compose file}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set outside the Compose file}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be injected outside Git}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    volumes:
+      - rockserver-postgres-data:/var/lib/postgresql/data
+    networks:
+      - database
+
+  rockserver:
+    image: ${ROCKSERVER_IMAGE:-rockserver:local}
+    restart: unless-stopped
+    environment:
+      ROCKSERVER_BIND_ADDR: ${ROCKSERVER_BIND_ADDR:-0.0.0.0:3000}
+      ROCKSERVER_LOG_DIR: /var/log/rockserver
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be injected outside Git}
+      ROCKSERVER_API_BEARER_TOKEN: ${ROCKSERVER_API_BEARER_TOKEN:?ROCKSERVER_API_BEARER_TOKEN must be injected outside Git}
+      RUST_LOG: ${RUST_LOG:-info}
+      YANDEX_AI_API_KEY: ${YANDEX_AI_API_KEY:-}
+      YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:-}
+      ROCKSERVER_SEMANTIC_PROVIDER: ${ROCKSERVER_SEMANTIC_PROVIDER:-}
+      ROCKSERVER_ONNX_MODEL_PATH: ${ROCKSERVER_ONNX_MODEL_PATH:-}
+      ROCKSERVER_ONNX_TOKENIZER_PATH: ${ROCKSERVER_ONNX_TOKENIZER_PATH:-}
+      ROCKSERVER_ONNX_INTRA_THREADS: ${ROCKSERVER_ONNX_INTRA_THREADS:-}
+      ORT_DYLIB_PATH: ${ORT_DYLIB_PATH:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ${ROCKSERVER_ONNX_ASSET_DIR:-/opt/rockserver/assets/onnx}:/opt/rockserver/assets/onnx:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:3000/health/live > /dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    networks:
+      - edge
+      - database
+
+  catalog_seed:
+    image: ${ROCKSERVER_IMAGE:-rockserver:local}
+    restart: "no"
+    entrypoint: ["/usr/local/bin/import_shared_catalog"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be injected outside Git}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - database
+
+  caddy:
+    image: caddy:2.10.0-alpine@sha256:ae4458638da8e1a91aafffb231c5f8778e964bca650c8a8cb23a7e8ac557aa3c
+    restart: unless-stopped
+    environment:
+      ROCKSERVER_DOMAIN: ${ROCKSERVER_DOMAIN:-localhost}
+    depends_on:
+      rockserver:
+        condition: service_healthy
+    volumes:
+      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks:
+      - edge
+
+volumes:
+  rockserver-postgres-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  edge:
+  database:
+    internal: true

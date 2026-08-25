@@ -2,6 +2,28 @@
 
 Last updated: 2026-08-25
 
+## OPS-001-D automated VPS bootstrap and staging rollout (2026-08-25)
+
+`deploy/ops-001-d.ps1` now provides a registry-free owner-facing bootstrap and staging launcher.
+The ignored inventory contains only SSH user/host/domain; no password field exists. First access is
+an explicit OpenSSH password prompt used only to install an ignored generated key, and bootstrap
+allocates a TTY for a possible one-time interactive `sudo` prompt. It installs a command-scoped
+non-interactive deploy rule; normal updates use `sudo -n` and fail with a repair instruction when
+that privilege is unavailable.
+
+One subsequent `-Action deploy` command requires a clean worktree, resolves current `HEAD`, builds
+`rockserver:sha-<full SHA>` locally, verifies its OCI revision label and immutable image ID, transfers
+a checksummed `docker save` artifact, and revalidates ID/label after remote `docker load`. Staging
+does not require GitHub, GHCR, another registry, remote Git pull, or mutable `latest`. Protected
+runtime env updates are newline-correct and preserve generated DB/API secrets; only the four
+documented Yandex names can transfer from ignored root `.env`. Backup precedes the importer, whose
+embedded migrations and checksum-pinned idempotent full-catalog activation precede HTTPS readiness.
+ONNX remains opt-in and refuses absent/placeholder HTTPS URL or SHA-256 data. Focused local tests
+and dry-run, production Compose rendering, PowerShell parsing, Rust fmt/strict Clippy/full tests,
+and diff checks passed. The final all-features Docker build downloaded dependencies and reached Rust
+compilation but was stopped at the owner's request before completion; it is not recorded as passed.
+No VPS, DNS, registry, credential, ONNX download, or public readiness operation was run.
+
 ## RM-007 local personal-data contract
 
 ### RM-007-A common model and station-ID migration (2026-08-25)
@@ -135,8 +157,8 @@ Latest verification for this change: `cargo fmt --check`, `cargo clippy --all-ta
 
 ## Current state
 
-The first API-access security slice is implemented. Startup always uses the fixed development
-bootstrap credential shared with RockMobile; `POST /v1/search`, both voice-command
+The first API-access security slice is implemented. Startup requires the configured application
+Bearer credential; `POST /v1/search`, both voice-command
 routes, and both WebSocket voice-stream handshakes reject malformed or invalid
 `Authorization: Bearer` credentials with structured `401 authentication_required` responses.
 `/health/live` and `/health/ready` remain unauthenticated for process supervision. The initial
@@ -147,13 +169,10 @@ remain the next deliveries described in `docs/admin-security-plan.md`.
 enters the existing application Bearer token, which stays only in the current tab's memory, then
 can inspect readiness and search catalog stations. It is not an administrator-account, session,
 audit, or catalog-management implementation.
-`run-rockserver-local.ps1` always injects the stable bootstrap token
-`rockserver-dev-bootstrap-7f4b9a2c1e6d8a40`, ignoring stale custom token values from parameters,
-`.env`, or the parent environment. Its startup
-output now reports the configured bind address and derives localhost plus active LAN admin-preview
-URLs from the actual port and network interfaces instead of printing a fixed `127.0.0.1` address.
-This shared value is a temporary local compatibility mechanism, not a per-user secret; deployments
-should set `ROCKSERVER_API_BEARER_TOKEN`.
+`run-rockserver-local.ps1` loads `ROCKSERVER_API_BEARER_TOKEN` and `DATABASE_URL` from the ignored
+local `.env`, rejects missing/short credentials, and never prints the token. Its startup output
+reports the configured bind address and derives localhost plus active LAN admin-preview URLs from
+the actual port and network interfaces instead of printing a fixed `127.0.0.1` address.
 `docs/service-diagrams.html` now distinguishes this deployed single deployment credential from
 the planned persisted RockCast clients and Bearer-based administrator sessions, and records the
 current RockCast Bearer voice-handshake integration.
@@ -186,11 +205,12 @@ Station embedding generation is a separate `backfill_embeddings` command. It is 
 
 - HTTP listener: `ROCKSERVER_BIND_ADDR`, default `0.0.0.0:3000`.
 - Verification on 2026-08-20: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test` passed; `graphify update .` refreshed the local code graph.
-- Application access gate: clients send `Authorization: Bearer <token>`. The fixed development
-  bootstrap token is used until persisted users and revocable client tokens exist. Do not use it
-  for a public deployment.
+- Application access gate: clients send `Authorization: Bearer <token>`; the process requires
+  `ROCKSERVER_API_BEARER_TOKEN` and rejects missing/blank values at startup. Persisted users and
+  revocable client tokens remain future work.
 - Logging filter: `RUST_LOG`, default `info` when unset or invalid.
-- HTTP catalog backend: `DATABASE_URL` selects PostgreSQL; absence selects the six-station in-memory metadata fallback.
+- HTTP catalog backend: `DATABASE_URL` is required and selects PostgreSQL; the in-memory repository
+  is limited to deterministic tests and is not selected by the service process.
 - Optional query embeddings: `ROCKSERVER_SEMANTIC_PROVIDER=deterministic-dev` for tests/development or `onnx-e5-local` with the `onnx-local` Cargo feature and local model/tokenizer/runtime paths; absence means metadata-only search.
 - Optional LLM parser: `YANDEX_AI_API_KEY` and `YANDEX_FOLDER_ID` together enable Yandex AI Studio; absence of both selects deterministic parsing, and a partial configuration is a safe startup error.
 - Yandex parser tuning: `YANDEX_LLM_MODEL=yandexgpt` by default and `YANDEX_LLM_TIMEOUT_MS=3000`, bounded to 100–10,000 ms.
@@ -384,6 +404,52 @@ live database, device test, product code or catalog data was changed.
 OPS-001-A remains independently available as design-only work. RM-011-A remains blocked on a
 passed RM-007-D and must not treat the current client stores as a compatible sync basis.
 
+## OPS-001-A production deployment design
+
+`deploy/README.md` now records the proposed single-VPS boundary: Caddy alone exposes 80/443;
+RockServer (3000) and PostgreSQL (5432) remain Compose-internal, with named data/certificate
+volumes, off-VPS encrypted logical backups, readiness-based rollout, and a compatibility-aware
+application/database rollback procedure. It defines the safe exact placeholder
+`api.rockserver.example.invalid`, an environment-variable contract with no values, owners and the
+required restore rehearsal. OPS-001-B is the implementation that closes the former production gaps:
+the service now requires both its Bearer credential and `DATABASE_URL`. No VPS, DNS, production
+credential, registry image, firewall or deployment was created.
+
+OPS-001-A design review was explicitly confirmed by the user on 2026-08-25. The approved design
+uses the documented non-routable placeholder until a real owned domain/DNS and deployment owners
+are supplied as a separate manual launch step; it does not authorize publication, credentials or
+VPS changes. Secret injection, backup encryption/retention/key custody/RPO/RTO, SSH allowlist,
+Caddy ACME policy and restore authority remain pre-launch operational inputs, not repository
+secrets.
+`git diff --check`, `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`
+passed locally (81 regular Rust unit tests plus HTTP/contract suites; two disposable-PostgreSQL,
+four billable Yandex LLM, and one credential/audio SpeechKit integration tests remained explicitly
+ignored). No Docker or external-infrastructure check applied to that design-only task.
+
+## OPS-001-B reproducible container and Compose stack
+
+OPS-001-B adds the root `Dockerfile`, `.dockerignore`, `deploy/compose.yaml`, local and production
+overrides, Caddy templates, a safe `.env.example`, and `deploy/verify-compose.ps1`. The base topology
+contains `caddy`, `rockserver`, and `postgres`; only Caddy receives host ports in either local or
+production launch, while PostgreSQL stays on the internal `database` network. The application and
+PostgreSQL have healthchecks, Caddy waits for application readiness, and the local check reaches
+`/health/ready` through loopback Caddy.
+
+Docker image build passed with the pinned Rust 1.95/bookworm builder and non-root runtime. Local
+Compose configuration and production rendering passed without printing environment values. The
+disposable local stack reached healthy PostgreSQL, RockServer and Caddy states, and the loopback
+Caddy request to `GET /health/ready` returned HTTP 200; the script removed its containers, network
+and volumes afterward. Production launch remains a manual step requiring a real owned domain,
+secret injection, immutable image, VPS, DNS, firewall and backup owners. No production external
+action or secret was performed.
+
+OPS-001-B verification: `cargo fmt --check` and strict all-target/all-feature Clippy passed;
+`cargo test` passed with 82 regular tests plus HTTP/OpenAPI/WebSocket suites using the serial
+`target/ops001b-test-serial` target to fit this host's pagefile. Two disposable-PostgreSQL, four
+billable Yandex LLM, one credential/audio SpeechKit and one ONNX asset test remained explicitly
+ignored. `graphify update .` refreshed the local graph to 1,673 nodes, 3,192 edges and 98
+communities. OPS-001-B is **passed locally**; public deployment remains outside this task.
+
 ### RM-007-D remediation
 
 The four original High findings were remediated in client source: RockMobile now uses the portable
@@ -393,3 +459,40 @@ IDs for search/voice personal records and completes dedup/journal/rollback behav
 strict Clippy and full tests pass after remediation. Android targeted unit and lint commands remain
 blocked before compilation by the inaccessible Gradle wrapper lock, so RM-007-D remains not passed
 as a verification gate and RM-011-A remains blocked.
+
+## OPS-001-C CI image, release, backup and rollback runbook
+
+OPS-001-C is implemented locally. `.github/workflows/ci-release.yml` runs the required Rust
+format/Clippy/test checks, builds a container labelled with the source commit SHA, and runs a
+loopback Compose readiness smoke using credentials generated only inside the CI job. Publishing to
+GHCR is behind `workflow_dispatch`, `publish_image=true`, and the repository `release-gate`
+environment approval. No registry credential or application secret is stored in the workflow.
+
+`deploy/release.ps1` is the documented release entry point. It accepts only an image reference with
+an SHA-256 digest, renders production Compose without printing its environment, rejects host ports
+on PostgreSQL/RockServer, and requires an environment file outside the repository for deploy or
+rollback. Deploy backs up PostgreSQL in custom `pg_dump` format before starting the immutable image,
+records the backup SHA-256 beside a release record, waits for Docker health and then requires an
+approved readiness URL to return HTTP 200. Rollback reuses the same path with a previous verified
+image digest; incompatible migrations still require the documented backup restore procedure.
+
+`deploy/restore-rehearsal.ps1` performs a non-production `pg_restore` into a disposable PostgreSQL
+container/network, validates restored RockServer tables, runs the local RockServer image against
+the restored database and checks readiness inside that network. Temporary credentials are generated
+at runtime and are not printed. Disposable cleanup completed successfully in the verified rehearsal.
+
+OPS-001-C local verification on 2026-08-25: PowerShell syntax checks passed for all deployment
+scripts; production Compose rendering and port isolation passed; the pinned Docker image built;
+the local Compose stack reached healthy PostgreSQL/RockServer/Caddy and loopback readiness HTTP 200;
+release preflight dry-runs passed for both `preflight` and `rollback`; and the full disposable
+`pg_dump`/`pg_restore` rehearsal passed with restored application readiness. The first rehearsal
+attempt exposed and fixed a binary stdout redirection issue and a missing explicit restore username;
+the corrected run passed. Final local checks also passed: `git diff --check`, `cargo fmt --check`,
+`cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` (82 passed; 2 PostgreSQL,
+4 Yandex LLM, 1 SpeechKit and 1 ONNX integration cases ignored by their explicit gates), and
+`graphify update .` (1,683 nodes, 3,204 edges, 103 communities; the existing zero-node JSON
+warnings remain non-fatal).
+
+The actual GHCR publication, production backup/deploy, public HTTPS readiness, and live rollback
+remain manual actions requiring an approved registry/release environment, owned domain/VPS,
+external backup target and injected secrets. They were not performed or claimed here.

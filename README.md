@@ -64,24 +64,25 @@ By default, RockServer listens on all interfaces at `0.0.0.0:3000`. Override the
 ROCKSERVER_BIND_ADDR=127.0.0.1:8080 cargo run
 ```
 
-Application routes use `Authorization: Bearer <token>`. Until user accounts and revocable client
-tokens are implemented, RockServer always uses the fixed bootstrap token
-`rockserver-dev-bootstrap-7f4b9a2c1e6d8a40`; RockMobile uses the same value by default. The
-environment variable `ROCKSERVER_API_BEARER_TOKEN` is retained only as a legacy configuration name
-and cannot replace this temporary token.
+Application routes use `Authorization: Bearer <token>`. The service requires
+`ROCKSERVER_API_BEARER_TOKEN` at startup and never logs its value. Use a process-local value in
+`.env` for local development; do not put a production value in Git or pass it on a command line.
 
 Use `RUST_LOG` to adjust the tracing filter. If it is unset or invalid, the service uses `info`.
 
-With no `DATABASE_URL`, startup logs `backend=in_memory` and searches the vendored, checksum-verified
-RockCatalog release `2026.08.2`. To run the local pgvector-capable PostgreSQL backend with documented
-development-only defaults:
+`DATABASE_URL` is required at startup; the in-memory repository remains test-only. To run the local
+pgvector-capable PostgreSQL backend with documented development-only values, copy `.env.example` to
+an ignored `.env`, review the local-only markers, and use the deployment verification workflow:
 
 ```text
-docker compose up -d --wait
-DATABASE_URL=postgres://rockserver:rockserver_dev@127.0.0.1:5432/rockserver cargo run
+docker build --tag rockserver:local .
+powershell -ExecutionPolicy Bypass -File deploy/verify-compose.ps1 -Mode local -Start
 ```
 
-On PowerShell, set the variable with `$env:DATABASE_URL='postgres://rockserver:rockserver_dev@127.0.0.1:5432/rockserver'` before `cargo run`. Startup applies pending files from `migrations/`, including `CREATE EXTENSION vector`, then atomically activates the vendored `rockcatalog` release without fetching a network or sibling-checkout dependency. The PostgreSQL server must have pgvector installed and the migration role must be allowed to enable it. Stop the local database with `docker compose down`; add `-v` only when the development catalog and embeddings should also be discarded.
+The check starts only the disposable Compose project, verifies `GET /health/ready` through the local
+Caddy reverse proxy, and removes that project's containers, network, and volumes unless `-Keep` is
+provided. Production uses `deploy/compose.production.yaml` only after a human supplies a real owned
+domain, secret injection, immutable image, VPS and firewall; those actions are not performed here.
 
 ## Shared baseline catalog
 

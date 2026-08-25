@@ -1,5 +1,30 @@
 # Task log
 
+## OPS-001-A — 2026-08-25 — Production deployment design
+
+- Goal: define the safe single-VPS deployment boundary without creating infrastructure or a runnable
+  deployment stack.
+- Scope: `deploy/README.md` and current-state documentation only. The design fixes a safe
+  non-routable placeholder domain, 80/443 Caddy ingress, Compose-internal RockServer/PostgreSQL
+  ports, volumes, environment contract, ownership, health/readiness, firewall matrix, backup/
+  restore rehearsal and rollback. Dockerfile, Compose production files, Caddyfile, real secrets,
+  registry publishing and deployment are explicitly deferred to OPS-001-B/C/D.
+- Result: the design records a private `database` network, Caddy-to-RockServer `edge` network,
+  immutable-image release/rollback sequence, and a recovery path that restores a verified encrypted
+  logical backup before an incompatible-schema application rollback. It also identifies two verified
+  preconditions for OPS-001-B: production must reject the current hard-coded development bearer
+  token and must require PostgreSQL rather than falling back to six in-memory stations.
+- Checks: documentation/source consistency review against `src/config.rs`, `src/main.rs`, health
+  routes and existing development `compose.yaml`; `git diff --check`, `cargo fmt --check`,
+  `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed. The regular
+  suite passed 81 Rust unit tests plus HTTP/contract suites; two disposable-PostgreSQL, four
+  billable Yandex LLM, and one credential/audio SpeechKit integration tests remained explicitly
+  ignored. No Docker/VPS/network/secret operation was performed.
+- Status: **complete / passed**. The user confirmed the design on 2026-08-25. The placeholder
+  domain remains intentionally non-routable; real domain/DNS, deployment ownership, secret
+  injection, backup policy, SSH allowlist, Caddy ACME policy and restore authority are manual
+  pre-launch inputs and were not changed or committed.
+
 ## RM-007-A — 2026-08-25 — Common local personal-data model and ID migration contract
 
 - Goal: define one portable offline-first personal-data contract for future RockMobile and RockCast
@@ -640,3 +665,82 @@
   inaccessible Gradle wrapper lock.
 - Status: implementation findings remediated; cross-client gate remains **not passed** until
   RockMobile compile/unit/lint verification can execute successfully.
+
+## OPS-001-B — 2026-08-25 — Reproducible container and Compose stack
+
+- Goal: provide a reproducible local container/runtime foundation for the approved single-VPS
+  Caddy, RockServer and private PostgreSQL design.
+- Scope: root Dockerfile and ignore rules; Compose base plus local/production overrides; local and
+  production Caddy templates; safe environment example; local preflight/startup script; fail-closed
+  startup configuration requiring `ROCKSERVER_API_BEARER_TOKEN` and `DATABASE_URL`; deployment
+  documentation. No VPS, DNS, registry, production secret, public port, database or deployment was
+  changed.
+- Result: the service now accepts the configured Bearer credential instead of a source-embedded
+  bootstrap value and refuses to select the in-memory catalog when `DATABASE_URL` is absent. The
+  Compose base keeps RockServer and PostgreSQL un-published; local Caddy is loopback-only and the
+  production override publishes only Caddy 80/443. Healthchecks cover PostgreSQL, RockServer and
+  Caddy; the verification script validates Compose without printing environment values and can run
+  a disposable local readiness smoke.
+- Checks: Docker image build passed. `deploy/verify-compose.ps1 -Mode local -Start` passed with
+  healthy PostgreSQL, RockServer and Caddy and loopback Caddy `GET /health/ready` HTTP 200; it
+  removed only its disposable project. Production rendering passed and exposed only Caddy `80` and
+  `443`; PostgreSQL and RockServer had no host ports. `cargo fmt --check`, strict all-target/all-
+  feature Clippy, and serial-target `cargo test` passed (82 regular tests plus HTTP/OpenAPI/
+  WebSocket suites; external/credential/asset tests remained ignored). `graphify update .` passed.
+- Status: **passed locally**; public domain/DNS/VPS/registry/secrets/firewall/deployment remain
+  manual OPS-001-D/production actions and were not performed.
+
+## OPS-001-C — 2026-08-25 — CI image, release, backup and rollback runbook
+
+- Goal: make commit-SHA image verification, manual release approval, backup-before-deploy,
+  readiness-gated rollout, previous-image rollback and non-production restore rehearsal explicit
+  and reproducible without using production infrastructure.
+- Scope: `.github/workflows/ci-release.yml`, `deploy/release.ps1`,
+  `deploy/restore-rehearsal.ps1`, and the OPS-001-C sections of `deploy/README.md` plus current
+  status/task records. No VPS, DNS, public endpoint, registry publication, production database,
+  secret, client/catalog change or commit was made.
+- Result: CI now runs format/Clippy/tests, labels a built image with the source commit SHA and
+  executes a loopback Compose readiness smoke. GHCR publication is manual and protected by the
+  `release-gate` environment. The release script enforces digest-pinned images and production port
+  isolation, creates a custom-format PostgreSQL backup before deploy, records its checksum, waits
+  for health/readiness, and supports previous-digest rollback without editing a running container.
+  The restore script uses a disposable PostgreSQL network, `pg_restore`, restored-table validation,
+  and an in-network RockServer readiness check; all temporary resources are cleaned by default.
+- Checks: PowerShell parser checks passed for `deploy/release.ps1`,
+  `deploy/restore-rehearsal.ps1`, and `deploy/verify-compose.ps1`. Production Compose rendering
+  passed with only Caddy ports 80/443. The pinned Docker image built successfully. The local
+  Compose stack reached healthy PostgreSQL, RockServer and Caddy states and loopback readiness
+  returned HTTP 200. Release `preflight -DryRun` and `rollback -DryRun` passed without starting
+  containers or contacting a deployment target. A corrected disposable `pg_dump`/`pg_restore`
+  rehearsal restored the database and returned application readiness; the disposable network and
+  containers were removed. The initial rehearsal findings (PowerShell binary redirect and omitted
+  restore username) were fixed before the passing run. Final `git diff --check`,
+  `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test` passed; the ordinary
+  suite reported 82 passed tests with only explicitly ignored PostgreSQL/provider/asset cases.
+  `graphify update .` passed and refreshed the local graph to 1,683 nodes, 3,204 edges and 103
+  communities; its existing zero-node JSON warnings were non-fatal.
+- Status: **passed locally**, pending only manual external release/deployment actions. GHCR
+  publication, production backup/deploy, public HTTPS readiness and live rollback were not run.
+
+## OPS-001-D — 2026-08-25 — Registry-free single-VPS bootstrap and staging update
+
+- Goal: make the approved single-VPS staging path owner-operated from one ignored inventory and one
+  local update command, without GitHub/GHCR, a registry, or unsafe password handling.
+- Scope: deployment launcher/module/remote script, Docker seed binary, Compose seed/ONNX wiring,
+  examples, local script tests and current deployment documentation. No VPS, DNS, registry, GitHub
+  secret, live credential, ONNX asset download, commit or push was used.
+- Result: the inventory accepts exactly SSH user/host/domain and no password. First SSH access is an
+  explicit OpenSSH prompt followed by generated-key use; bootstrap provides TTY-backed sudo and a
+  validated command-scoped rule, while normal deploy is non-interactive. A clean current commit is
+  locally built/tagged/labeled, saved and checksummed, then loaded and identity-checked on the VPS.
+  Protected env merging preserves generated DB/API secrets, writes distinct lines, and transfers
+  only the four allowlisted Yandex names. Backup → embedded migrations → pinned idempotent full
+  catalog activation → HTTPS readiness and opt-in checksum-gated ONNX remain fail closed.
+- Checks: focused PowerShell tests passed for registry independence, commit/image identity,
+  password-free inventory, secret-safe output/env serialization, TTY/sudo construction, and current
+  catalog/ONNX safeguards. Dry-run, production Compose rendering, PowerShell parsing, Rust fmt,
+  strict Clippy, full tests, and diff checks passed. An all-features Docker build downloaded locked
+  dependencies and entered compilation, then was stopped at the owner's request before completion;
+  Docker image build is therefore not claimed as passed. External actions remain unverified.
+- Status: **passed locally** pending the owner’s real VPS/DNS/firewall/backup-monitoring setup and a
+  deliberate staging launch. A registry is not a staging prerequisite.

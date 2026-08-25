@@ -1,9 +1,3 @@
-param(
-    [string]$ApiBearerToken
-)
-
-$defaultApiBearerToken = 'rockserver-dev-bootstrap-7f4b9a2c1e6d8a40'
-
 $ErrorActionPreference = 'Stop'
 $projectRoot = 'C:\repos\rockserver'
 $assetsRoot = 'C:\Users\alex\Documents\Codex\2026-08-17\referenced-chatgpt-conversation-this-is-an\work\e5-assets'
@@ -16,13 +10,9 @@ Get-Content -LiteralPath $envFile | ForEach-Object {
     }
 }
 
-if (-not [string]::IsNullOrWhiteSpace($ApiBearerToken) -and $ApiBearerToken -ne $defaultApiBearerToken) {
-    Write-Host 'The local launcher ignores a custom token and uses the fixed RockMobile bootstrap token.' -ForegroundColor Yellow
-}
-$ApiBearerToken = $defaultApiBearerToken
-$env:ROCKSERVER_API_BEARER_TOKEN = $ApiBearerToken
-
 if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) { throw 'DATABASE_URL is missing from the local .env file.' }
+if ([string]::IsNullOrWhiteSpace($env:ROCKSERVER_API_BEARER_TOKEN)) { throw 'ROCKSERVER_API_BEARER_TOKEN is missing from the local .env file.' }
+if ($env:ROCKSERVER_API_BEARER_TOKEN.Trim().Length -lt 32) { throw 'ROCKSERVER_API_BEARER_TOKEN must contain at least 32 characters.' }
 $model = Join-Path $assetsRoot 'model.onnx'
 $tokenizer = Join-Path $assetsRoot 'tokenizer.json'
 $runtime = Get-ChildItem -LiteralPath (Join-Path $assetsRoot 'ort') -Recurse -Filter 'onnxruntime.dll' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
@@ -86,19 +76,19 @@ $port = [int]$Matches.port
 Set-Location -LiteralPath $projectRoot
 Write-Host "Starting RockServer listener at $bindAddress ..."
 if ($bindAddress -match '^0\.0\.0\.0:') {
-    Write-Host ("Admin preview (localhost): http://127.0.0.1:{0}/admin (token: {1})" -f $port, $ApiBearerToken)
+    Write-Host ("Admin preview (localhost): http://127.0.0.1:{0}/admin (token loaded from .env)" -f $port)
     $lanAddresses = @(Get-LanIPv4Addresses)
     if ($lanAddresses.Count -eq 0) {
         Write-Host 'Admin preview (LAN): no active LAN IPv4 address detected.' -ForegroundColor Yellow
     }
     else {
         foreach ($address in $lanAddresses) {
-            Write-Host ("Admin preview (LAN): http://{0}:{1}/admin (token: {2})" -f $address, $port, $ApiBearerToken)
+            Write-Host ("Admin preview (LAN): http://{0}:{1}/admin (token loaded from .env)" -f $address, $port)
         }
     }
 }
 else {
     $displayAddress = $bindAddress -replace ':\d+$', ''
-    Write-Host ("Admin preview: http://{0}:{1}/admin (token: {2})" -f $displayAddress, $port, $ApiBearerToken)
+    Write-Host ("Admin preview: http://{0}:{1}/admin (token loaded from .env)" -f $displayAddress, $port)
 }
 cargo run --features onnx-local --bin rockserver
