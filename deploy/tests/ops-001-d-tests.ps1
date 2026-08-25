@@ -36,6 +36,11 @@ try {
     $ownerLines = [IO.File]::ReadAllLines($ownerPath)
     if ($ownerLines.Count -ne 6 -or $ownerLines[0] -ne 'ROCKSERVER_DOMAIN=api.example.test' -or $ownerLines[1] -ne 'OPS001D_CATALOG_VERSION=v1-test' -or $ownerLines[2] -ne 'OPS001D_CATALOG_COUNT=41') { throw 'owner.env entries were not serialized as distinct correct lines' }
     if (($ownerLines -join "`n") -match 'UNRELATED_SECRET|nope') { throw 'owner.env included a non-allowlisted value' }
+    $ownerBytes = [IO.File]::ReadAllBytes($ownerPath)
+    if ($ownerBytes -contains [byte]13) { throw 'owner.env must use Linux LF line endings for remote shell parsing' }
+    Write-Ops001DOwnerEnvironmentFile -Path $ownerPath -Domain 'api.example.test' -Catalog $catalog -Yandex $env -OnnxEnabled $true
+    $ownerText = [IO.File]::ReadAllText($ownerPath)
+    if ($ownerText -notmatch 'ROCKSERVER_ONNX_ASSET_DIR=/opt/rockserver/assets/onnx' -or $ownerText -match "[`r`0]") { throw 'ONNX owner.env entries are not safe for remote parsing' }
 
     $commit = '0123456789012345678901234567890123456789'
     $imageId = 'sha256:' + ('a' * 64)
@@ -72,6 +77,7 @@ try {
     $readyAt = $remote.IndexOf('/health/ready')
     if ($backupAt -lt 0 -or $seedAt -le $backupAt -or $readyAt -le $seedAt -or $remote -match 'fixture') { throw 'backup/seed/readiness fail-closed ordering changed' }
     if ($remote -notmatch 'applies embedded migrations' -or $remote -notmatch 'exact HTTPS URLs and SHA-256' -or $launcher -notmatch 'onnx-assets.lock.json') { throw 'migration or automatic ONNX safeguards are missing' }
+    if ($remote -notmatch '\[\^\[:cntrl:\]\]\*\$') { throw 'owner.env control-character validation is missing' }
     if ($compose -notmatch 'import_full_catalog.*backfill_embeddings' -or $compose -notmatch 'ROCKSERVER_SEMANTIC_PROVIDER: onnx-e5-local' -or $compose -notmatch 'ORT_DYLIB_PATH') { throw 'first-deploy ONNX backfill is not wired after the full catalog import' }
     if ($compose -notmatch 'ROCKSERVER_LOG_RETENTION_DAYS: \$\{ROCKSERVER_LOG_RETENTION_DAYS:-14\}') { throw 'RockServer log retention is not configured for production' }
     if ($productionCompose -notmatch '/home/rockserver/logs:/var/log/rockserver' -or $remote -notmatch 'host_log_dir="/home/rockserver/logs"' -or $remote -notmatch 'ensure_host_log_dir') { throw 'persistent host log directory is not wired for production' }

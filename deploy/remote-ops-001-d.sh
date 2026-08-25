@@ -42,7 +42,7 @@ install_owner_files() {
   for file in compose.yaml compose.production.yaml Caddyfile.production.template owner.env onnx-assets.json; do
     [ -f "$stage/$file" ] && [ ! -L "$stage/$file" ] || fail "deployment bundle is missing $file"
   done
-  if grep -Ev '^(ROCKSERVER_DOMAIN|OPS001D_CATALOG_VERSION|OPS001D_CATALOG_COUNT|ROCKSERVER_SEMANTIC_PROVIDER|ROCKSERVER_ONNX_ASSET_DIR|ROCKSERVER_ONNX_MODEL_PATH|ROCKSERVER_ONNX_TOKENIZER_PATH|ORT_DYLIB_PATH|YANDEX_AI_API_KEY|YANDEX_FOLDER_ID|YANDEX_SPEECHKIT_API_KEY|YANDEX_SPEECHKIT_FOLDER_ID)=[^\r\n]*$' "$stage/owner.env" | grep -q .; then
+  if grep -Ev '^(ROCKSERVER_DOMAIN|OPS001D_CATALOG_VERSION|OPS001D_CATALOG_COUNT|ROCKSERVER_SEMANTIC_PROVIDER|ROCKSERVER_ONNX_ASSET_DIR|ROCKSERVER_ONNX_MODEL_PATH|ROCKSERVER_ONNX_TOKENIZER_PATH|ORT_DYLIB_PATH|YANDEX_AI_API_KEY|YANDEX_FOLDER_ID|YANDEX_SPEECHKIT_API_KEY|YANDEX_SPEECHKIT_FOLDER_ID)=[^[:cntrl:]]*$' "$stage/owner.env" | grep -q .; then
     fail 'owner.env contains a non-allowlisted or malformed entry'
   fi
   [ "$(wc -l < "$stage/owner.env")" -ge 3 ] || fail 'owner.env entries are not newline-separated'

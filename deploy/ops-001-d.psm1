@@ -75,7 +75,10 @@ function Write-Ops001DOwnerEnvironmentFile {
         $lines.Add('ORT_DYLIB_PATH=/opt/rockserver/assets/onnx/libonnxruntime.so')
     }
     foreach ($key in $Yandex.Keys) { $lines.Add("$key=$($Yandex[$key])") }
-    [IO.File]::WriteAllLines($Path, $lines, [Text.UTF8Encoding]::new($false))
+    # This file is consumed by a Linux shell over SCP.  Write LF explicitly:
+    # WriteAllLines uses the Windows CRLF convention on the deployment host,
+    # which must not become part of a container environment value.
+    [IO.File]::WriteAllText($Path, (($lines -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
 }
 
 function Get-Ops001DCurrentCommit {
