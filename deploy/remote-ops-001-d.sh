@@ -140,7 +140,17 @@ for item in assets:
 PY
 }
 deploy() {
-  local stage="${1:?stage required}" image="${2:?image required}" commit="${3:?commit required}" archive_hash="${4:?archive hash required}"
+  local stage="${1:?stage required}" image="${2:?image required}" commit="${3:?commit required}" archive_hash
+  # Accept the former five-argument form while an older root-owned operator
+  # script may still be installed on the VPS. The fourth value was its local
+  # image ID; current verification uses the archive checksum and revision label.
+  if [ "$#" -eq 5 ]; then
+    archive_hash="${5:?archive hash required}"
+  elif [ "$#" -eq 4 ]; then
+    archive_hash="${4:?archive hash required}"
+  else
+    fail 'deploy requires stage, image, commit, and artifact hash'
+  fi
   local backup container backup_hash domain catalog_version catalog_count compose loaded_id
   require_root; validate_stage "$stage"
   [ -f "$env_file" ] || fail 'bootstrap has not provisioned the protected runtime env-file'

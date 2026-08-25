@@ -56,6 +56,7 @@ try {
     if ($launcherScript -notmatch 'cmd\.exe /d /c.*ssh-keygen.*-N') { throw 'Windows-safe empty-passphrase SSH key generation is missing' }
     if ($launcherScript -notmatch "DOCKER_HOST -match '\^unix://'" -or $launcherScript -notmatch 'npipe:////\./pipe/docker_engine' -or $launcherScript -notmatch 'docker info --format') { throw 'Windows Docker Engine preflight is missing' }
     if ($launcherScript -notmatch "docker image inspect --format '\{\{json \.Config\.Labels\}\}'" -or $launcherScript -match 'index \.Config\.Labels') { throw 'Windows-safe Docker image revision inspection is missing' }
+    if ($launcherScript -notmatch 'tar\.exe -xOf' -or $launcherScript -notmatch 'blobs/sha256' -or $launcherScript -notmatch 'portableImageId') { throw 'portable image config ID extraction is missing' }
     if ($launcherScript -notmatch 'StdinNull=yes' -or $launcherScript -notmatch 'ServerAliveCountMax=3') { throw 'staging SSH is not protected from an unbounded stdin wait' }
     if ($launcherScript -notmatch '\$nonInteractiveScpOptions' -or $launcherScript -match '& scp -i \$key @nonInteractiveSshOptions' -or $launcherScript -match '\$nonInteractiveScpOptions = @\([^\r\n]*StdinNull=yes') { throw 'SCP has incompatible SSH stdin options' }
 
@@ -74,6 +75,7 @@ try {
     if ($launcher -match 'ghcr|docker push|docker pull|SshPassword') { throw 'launcher still has a registry or password dependency' }
     if ($launcher -notmatch 'docker image save' -or $remote -notmatch 'docker image load') { throw 'registry-free artifact transfer is missing' }
     if ($remote -notmatch 'transferred image artifact checksum mismatch' -or $remote -notmatch 'revision label binds that verified artifact to commit' -or $remote -match 'loaded image ID does not match') { throw 'cross-engine image artifact verification is not portable' }
+    if ($remote -notmatch 'Accept the former five-argument form' -or $remote -notmatch 'deploy requires stage, image, commit, and artifact hash') { throw 'operator-script upgrade compatibility is missing' }
     $backupAt = $remote.IndexOf('pg_dump --format=custom')
     $seedAt = $remote.IndexOf('run --rm catalog_seed')
     $readyAt = $remote.IndexOf('/health/ready')

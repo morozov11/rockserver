@@ -95,6 +95,15 @@ try {
         & docker image save --output $archive $image
         if ($LASTEXITCODE -ne 0) { throw 'Could not create the local image artifact.' }
         $archiveHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+        # Docker Desktop tags the local OCI manifest list, whereas `docker load`
+        # on the Linux VPS exposes the platform config digest. Obtain that digest
+        # from this exact tarball for compatibility with hosts bootstrapped by
+        # an earlier launcher version.
+        $archiveManifestJson = (& tar.exe -xOf $archive 'manifest.json' | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Could not read manifest.json from the local image artifact.' }
+        $archiveManifest = @(ConvertFrom-Json -InputObject $archiveManifestJson)
+        if ($archiveManifest.Count -ne 1 -or [string]$archiveManifest[0].Config -notmatch '^(?:blobs/sha256/)?(?<id>[0-9a-f]{64})(?:\.json)?$') { throw 'Local image artifact has an invalid manifest config reference.' }
+        $portableImageId = "sha256:$($Matches.id)"
     }
 
     & ssh -i $key @nonInteractiveSshOptions $target "umask 077; mkdir '$remoteStage'"
@@ -116,7 +125,7 @@ try {
         $remoteCommand = "sudo env OPS001D_INSTALL_DOCKER=$([int][bool]$InstallDocker) bash '$remoteStage/remote-ops-001-d.sh' bootstrap '$remoteStage' '$($inventory.SshUser)'"
         $sshArgs = Get-Ops001DSshCommand -Action bootstrap -KeyPath $key -Target $target -RemoteCommand $remoteCommand
     } else {
-        $remoteCommand = "sudo -n /opt/rockserver/remote-ops-001-d.sh deploy '$remoteStage' '$image' '$commit' '$archiveHash'"
+        $remoteCommand = "sudo -n /opt/rockserver/remote-ops-001-d.sh deploy '$remoteStage' '$image' '$commit' '$portableImageId' '$archiveHash'"
         $sshArgs = Get-Ops001DSshCommand -Action deploy -KeyPath $key -Target $target -RemoteCommand $remoteCommand
     }
     & ssh @sshArgs
