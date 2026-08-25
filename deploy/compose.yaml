@@ -58,6 +58,7 @@ services:
     entrypoint: ["/bin/sh", "-c", "/usr/local/bin/import_full_catalog && /usr/local/bin/backfill_embeddings"]
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be injected outside Git}
+      ROCKSERVER_LOG_DIR: /var/log/rockserver
       ROCKSERVER_FULL_CATALOG_PATH: /opt/rockserver/release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.sqlite
       ROCKSERVER_SEMANTIC_PROVIDER: onnx-e5-local
       ROCKSERVER_ONNX_MODEL_PATH: /opt/rockserver/assets/onnx/model.onnx
