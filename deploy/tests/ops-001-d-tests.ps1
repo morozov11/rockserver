@@ -55,6 +55,7 @@ try {
     $launcherScript = Get-Content -Raw (Join-Path $root 'deploy/ops-001-d.ps1')
     if ($launcherScript -notmatch 'cmd\.exe /d /c.*ssh-keygen.*-N') { throw 'Windows-safe empty-passphrase SSH key generation is missing' }
     if ($launcherScript -notmatch "DOCKER_HOST -match '\^unix://'" -or $launcherScript -notmatch 'npipe:////\./pipe/docker_engine' -or $launcherScript -notmatch 'docker info --format') { throw 'Windows Docker Engine preflight is missing' }
+    if ($launcherScript -notmatch 'docker image inspect \$image \| ConvertFrom-Json' -or $launcherScript -match 'docker image inspect --format.*org\.opencontainers\.image\.revision') { throw 'Windows-safe Docker image revision inspection is missing' }
     if ($launcherScript -notmatch 'StdinNull=yes' -or $launcherScript -notmatch 'ServerAliveCountMax=3') { throw 'staging SSH is not protected from an unbounded stdin wait' }
     if ($launcherScript -notmatch '\$nonInteractiveScpOptions' -or $launcherScript -match '& scp -i \$key @nonInteractiveSshOptions' -or $launcherScript -match '\$nonInteractiveScpOptions = @\([^\r\n]*StdinNull=yes') { throw 'SCP has incompatible SSH stdin options' }
 

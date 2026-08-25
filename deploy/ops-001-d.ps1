@@ -82,9 +82,14 @@ try {
     if ($Action -eq 'deploy') {
         & docker build --label "org.opencontainers.image.revision=$commit" --tag $image $repoRoot
         if ($LASTEXITCODE -ne 0) { throw 'Local Docker build failed.' }
-        $imageId = (& docker image inspect --format '{{.Id}}' $image).Trim()
-        $labelCommit = (& docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' $image).Trim()
+        # PowerShell's native argument handling removes the inner quotes from a
+        # Docker Go-template map lookup on Windows. Read JSON instead so the
+        # revision label is checked identically on Windows and Linux.
+        $imageMetadata = @(& docker image inspect $image | ConvertFrom-Json)
         if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the local deployment image.' }
+        if ($imageMetadata.Count -ne 1) { throw 'Could not read exactly one local deployment image.' }
+        $imageId = [string]$imageMetadata[0].Id
+        $labelCommit = [string]$imageMetadata[0].Config.Labels.'org.opencontainers.image.revision'
         Test-Ops001DArtifactIdentity -Image $image -Commit $commit -ImageId $imageId -LabelCommit $labelCommit | Out-Null
         $archive = Join-Path $stage 'rockserver-image.tar'
         & docker image save --output $archive $image
