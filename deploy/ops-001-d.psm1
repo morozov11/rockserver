@@ -107,7 +107,13 @@ function Get-Ops001DSshCommand {
     $args = [System.Collections.Generic.List[string]]::new()
     if ($Action -eq 'bootstrap') { $args.Add('-tt') }
     $args.Add('-i'); $args.Add($KeyPath)
-    if ($Action -eq 'deploy') { $args.Add('-o'); $args.Add('BatchMode=yes') }
+    $args.Add('-o'); $args.Add('ConnectTimeout=15')
+    $args.Add('-o'); $args.Add('ServerAliveInterval=10')
+    $args.Add('-o'); $args.Add('ServerAliveCountMax=3')
+    if ($Action -eq 'deploy') {
+        $args.Add('-n')
+        $args.Add('-o'); $args.Add('BatchMode=yes')
+    }
     $args.Add($Target); $args.Add($RemoteCommand)
     return ,$args.ToArray()
 }
