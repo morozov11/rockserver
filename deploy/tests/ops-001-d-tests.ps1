@@ -52,9 +52,9 @@ try {
     Assert-Throws { Test-Ops001DOnnxManifest "$temp/onnx.json" | Out-Null } 'incomplete ONNX lock was accepted'
     $onnxLock = Test-Ops001DOnnxManifest "$root/deploy/onnx-assets.lock.json"
     if (-not $onnxLock.enabled -or @($onnxLock.assets).Count -ne 3) { throw 'committed automatic ONNX lock is invalid' }
-    $catalogActual = Get-Ops001DCatalogMetadata "$root/catalog/rockcatalog/manifest.json" "$root/catalog/rockcatalog/stations.v1.json"
-    $catalogAgain = Get-Ops001DCatalogMetadata "$root/catalog/rockcatalog/manifest.json" "$root/catalog/rockcatalog/stations.v1.json"
-    if ($catalogActual.Count -lt 1 -or $catalogActual.Version -ne $catalogAgain.Version -or $catalogActual.Sha256 -ne $catalogAgain.Sha256) { throw 'pinned catalog seed input is not stable' }
+    $catalogActual = Get-Ops001DFullCatalogMetadata "$root/release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.manifest.json" "$root/release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.sqlite"
+    $catalogAgain = Get-Ops001DFullCatalogMetadata "$root/release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.manifest.json" "$root/release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.sqlite"
+    if ($catalogActual.Count -lt 16000 -or $catalogActual.Version -ne $catalogAgain.Version -or $catalogActual.Sha256 -ne $catalogAgain.Sha256) { throw 'pinned complete catalog seed input is not stable' }
 
     $launcher = Get-Content -Raw (Join-Path $root 'deploy/ops-001-d.ps1')
     $remote = Get-Content -Raw (Join-Path $root 'deploy/remote-ops-001-d.sh')

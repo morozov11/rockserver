@@ -199,11 +199,13 @@ optional values are omitted. It writes one UTF-8 env entry per line; the remote 
 `/opt/rockserver/release.env` is mode `0600`. Repeated runs replace only owner-controlled settings
 and those four optional Yandex entries while preserving generated `POSTGRES_PASSWORD`,
 `ROCKSERVER_API_BEARER_TOKEN`, and database settings. No secret value appears in summaries or
-release metadata. The VPS creates a custom-format backup, runs embedded migrations and the bundled,
-checksum-pinned RM-004 catalog importer after PostgreSQL is healthy, then waits for public HTTPS
-readiness. Repeating the importer is transactional/idempotent by its existing catalog lifecycle
-metadata and cannot substitute a fixture. The only release output/record fields are commit, image ID,
-artifact checksum, catalog version/count, backup checksum and readiness.
+release metadata. The VPS creates a custom-format backup, runs embedded migrations and then imports
+the bundled checksum-pinned complete SQLite catalog after PostgreSQL is healthy, before the service
+starts. The current pinned release contains 16,825 active playable stations and deployment refuses
+a release below the 16,000-station gate. Repeating the importer is idempotent by stable station and
+stream identities and cannot substitute the 41-station development fixture. The only release
+output/record fields are commit, image ID, artifact checksum, catalog version/count, backup checksum
+and readiness.
 
 ONNX semantic search is enabled automatically. The committed
 `deploy/onnx-assets.lock.json` pins the exact `intfloat/multilingual-e5-small` ONNX graph,

@@ -14,7 +14,7 @@ if ([string]::IsNullOrWhiteSpace($InventoryPath)) { $InventoryPath = Join-Path $
 $inventoryFile = Test-Ops001DPrivateInventory -Path $InventoryPath -RepositoryRoot $repoRoot
 $inventory = Import-PowerShellDataFile -LiteralPath $inventoryFile
 Test-Ops001DInventoryValues -Inventory $inventory | Out-Null
-$catalog = Get-Ops001DCatalogMetadata -ManifestPath (Join-Path $repoRoot 'catalog/rockcatalog/manifest.json') -CatalogPath (Join-Path $repoRoot 'catalog/rockcatalog/stations.v1.json')
+$catalog = Get-Ops001DFullCatalogMetadata -ManifestPath (Join-Path $repoRoot 'release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.manifest.json') -CatalogPath (Join-Path $repoRoot 'release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.sqlite')
 $yandex = Get-Ops001DAllowedYandexEnvironment -Path (Join-Path $repoRoot '.env')
 $onnxLock = Join-Path $PSScriptRoot 'onnx-assets.lock.json'
 $onnx = Test-Ops001DOnnxManifest -Path $onnxLock

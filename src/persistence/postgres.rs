@@ -250,12 +250,20 @@ impl PostgresStationRepository {
             return Err(RepositoryError::new("migration", error));
         }
 
-        let catalog = crate::catalog::PinnedSharedCatalog::load()
-            .map_err(|error| RepositoryError::new("shared catalog preflight", error))?;
-        super::PostgresImportStore::from_pool(pool.clone())
-            .activate_shared_catalog(&catalog)
-            .await
-            .map_err(|error| RepositoryError::new("shared catalog activation", error))?;
+        let has_active_stations = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM stations WHERE retired_at IS NULL)",
+        )
+        .fetch_one(&pool)
+        .await
+        .map_err(|error| RepositoryError::new("catalog presence check", error))?;
+        if !has_active_stations {
+            let catalog = crate::catalog::PinnedSharedCatalog::load()
+                .map_err(|error| RepositoryError::new("shared catalog preflight", error))?;
+            super::PostgresImportStore::from_pool(pool.clone())
+                .activate_shared_catalog(&catalog)
+                .await
+                .map_err(|error| RepositoryError::new("shared catalog activation", error))?;
+        }
 
         Ok(Self { pool })
     }

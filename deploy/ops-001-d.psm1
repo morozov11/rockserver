@@ -147,10 +147,20 @@ function Get-Ops001DCatalogMetadata {
     return [pscustomobject]@{ Version = $manifest.catalogVersion; Count = @($catalog.stations).Count; Sha256 = $hash }
 }
 
+function Get-Ops001DFullCatalogMetadata {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$ManifestPath, [Parameter(Mandatory)][string]$CatalogPath)
+    $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+    $hash = (Get-FileHash -LiteralPath $CatalogPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($manifest.manifest_schema_version -ne 1 -or $manifest.database_schema_version -ne 1 -or $manifest.file -ne (Split-Path -Leaf $CatalogPath) -or $hash -ne $manifest.sha256.ToLowerInvariant()) { Stop-Ops001D 'Full catalog checksum or manifest verification failed.' }
+    if ([int64]$manifest.station_count -lt 16000 -or [string]::IsNullOrWhiteSpace([string]$manifest.catalog_version)) { Stop-Ops001D 'Full catalog does not meet the complete-catalog station gate.' }
+    return [pscustomobject]@{ Version = $manifest.catalog_version; Count = [int64]$manifest.station_count; Sha256 = $hash }
+}
+
 function Format-Ops001DSafeSummary {
     [CmdletBinding()]
     param([System.Collections.IDictionary]$Environment = @{}, [string]$Commit = '', [string]$ImageId = '', [string]$Readiness = '')
     return "commit=$Commit image_id=$ImageId yandex_keys=$($Environment.Keys.Count) readiness=$Readiness"
 }
 
-Export-ModuleMember -Function Test-Ops001DPrivateInventory, Test-Ops001DInventoryValues, Get-Ops001DAllowedYandexEnvironment, Write-Ops001DOwnerEnvironmentFile, Get-Ops001DCurrentCommit, Test-Ops001DArtifactIdentity, Get-Ops001DSshCommand, Test-Ops001DOnnxManifest, Get-Ops001DCatalogMetadata, Format-Ops001DSafeSummary
+Export-ModuleMember -Function Test-Ops001DPrivateInventory, Test-Ops001DInventoryValues, Get-Ops001DAllowedYandexEnvironment, Write-Ops001DOwnerEnvironmentFile, Get-Ops001DCurrentCommit, Test-Ops001DArtifactIdentity, Get-Ops001DSshCommand, Test-Ops001DOnnxManifest, Get-Ops001DCatalogMetadata, Get-Ops001DFullCatalogMetadata, Format-Ops001DSafeSummary
