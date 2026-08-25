@@ -79,6 +79,7 @@ try {
     if ($remote -notmatch 'ROCKSERVER_IMAGE="\$image" \$compose exec' -or $remote -notmatch 'ROCKSERVER_IMAGE="\$image" \$compose ps') { throw 'Compose interpolation environment is not preserved for database commands' }
     if ($remote -notmatch 'os\.chmod\(path, 0o755 if name == .libonnxruntime\.so. else 0o644\)') { throw 'ONNX runtime executable permissions are not repaired after download' }
     if ($remote -notmatch 'os\.chmod\(root, 0o755\)') { throw 'ONNX asset directory is not traversable by the container user' }
+    if (($remote -notmatch 'tarfile\.open') -or ($remote -notmatch 'member\.issym\(\)') -or ($remote -notmatch 'member\.islnk\(\)')) { throw 'ONNX runtime symlink archive extraction is not safe' }
     $backupAt = $remote.IndexOf('pg_dump --format=custom')
     $seedAt = $remote.IndexOf('run --rm catalog_seed')
     $readyAt = $remote.IndexOf('/health/ready')

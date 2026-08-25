@@ -102,7 +102,7 @@ download_onnx() {
   local manifest="$release_root/onnx-assets.json"
   [ -f "$manifest" ] || fail 'ONNX manifest is missing'
   python3 - "$manifest" <<'PY'
-import hashlib, json, os, pathlib, subprocess, sys
+import hashlib, json, os, pathlib, posixpath, tarfile, sys
 manifest = json.load(open(sys.argv[1], encoding='utf-8'))
 if not manifest.get('enabled', False):
     raise SystemExit(0)
@@ -137,8 +137,21 @@ for item in assets:
             temp.unlink(missing_ok=True)
             raise SystemExit('ONNX runtime archive member is invalid')
         extracted = path.with_suffix(path.suffix + '.partial')
-        with open(extracted, 'wb') as output:
-            subprocess.run(['tar', '-xOzf', str(temp), archive_member], check=True, stdout=output)
+        with tarfile.open(temp, 'r:gz') as archive:
+            member = archive.getmember(archive_member)
+            if member.issym() or member.islnk():
+                target = posixpath.normpath(posixpath.join(posixpath.dirname(member.name), member.linkname))
+                member = archive.getmember(target)
+            if not member.isfile():
+                raise SystemExit('ONNX runtime archive member is not a regular file')
+            source = archive.extractfile(member)
+            if source is None:
+                raise SystemExit('ONNX runtime archive member could not be read')
+            with source, open(extracted, 'wb') as output:
+                output.write(source.read())
+        if extracted.stat().st_size == 0:
+            extracted.unlink(missing_ok=True)
+            raise SystemExit('ONNX runtime archive member is empty')
         temp.unlink(missing_ok=True)
         os.replace(extracted, path)
     else:
