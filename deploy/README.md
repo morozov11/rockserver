@@ -202,8 +202,10 @@ and those four optional Yandex entries while preserving generated `POSTGRES_PASS
 release metadata. The VPS creates a custom-format backup, runs embedded migrations and then imports
 the bundled checksum-pinned complete SQLite catalog after PostgreSQL is healthy, before the service
 starts. The current pinned release contains 16,825 active playable stations and deployment refuses
-a release below the 16,000-station gate. Repeating the importer is idempotent by stable station and
-stream identities and cannot substitute the 41-station development fixture. The only release
+a release below the 16,000-station gate. The same one-shot seed job then runs the checksum-pinned
+ONNX E5 backfill for every imported station; the service starts only after both catalog and vector
+steps succeed. Repeating the importer and backfill is idempotent by stable station and stream
+identities and cannot substitute the 41-station development fixture. The only release
 output/record fields are commit, image ID, artifact checksum, catalog version/count, backup checksum
 and readiness.
 

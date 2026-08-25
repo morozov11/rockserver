@@ -58,6 +58,7 @@ try {
 
     $launcher = Get-Content -Raw (Join-Path $root 'deploy/ops-001-d.ps1')
     $remote = Get-Content -Raw (Join-Path $root 'deploy/remote-ops-001-d.sh')
+    $compose = Get-Content -Raw (Join-Path $root 'deploy/compose.yaml')
     if ($launcher -match 'ghcr|docker push|docker pull|SshPassword') { throw 'launcher still has a registry or password dependency' }
     if ($launcher -notmatch 'docker image save' -or $remote -notmatch 'docker image load') { throw 'registry-free artifact transfer is missing' }
     $backupAt = $remote.IndexOf('pg_dump --format=custom')
@@ -65,6 +66,7 @@ try {
     $readyAt = $remote.IndexOf('/health/ready')
     if ($backupAt -lt 0 -or $seedAt -le $backupAt -or $readyAt -le $seedAt -or $remote -match 'fixture') { throw 'backup/seed/readiness fail-closed ordering changed' }
     if ($remote -notmatch 'applies embedded migrations' -or $remote -notmatch 'exact HTTPS URLs and SHA-256' -or $launcher -notmatch 'onnx-assets.lock.json') { throw 'migration or automatic ONNX safeguards are missing' }
+    if ($compose -notmatch 'import_full_catalog.*backfill_embeddings' -or $compose -notmatch 'ROCKSERVER_SEMANTIC_PROVIDER: onnx-e5-local' -or $compose -notmatch 'ORT_DYLIB_PATH') { throw 'first-deploy ONNX backfill is not wired after the full catalog import' }
 
     Write-Host 'OPS-001-D local tests passed: registry-free artifact identity, password-free inventory, secret-safe env/summary, TTY/sudo construction, seed, and automatic pinned ONNX safeguards.'
 } finally {
