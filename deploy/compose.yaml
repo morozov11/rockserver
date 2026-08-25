@@ -34,7 +34,11 @@ services:
       ROCKSERVER_SEMANTIC_PROVIDER: ${ROCKSERVER_SEMANTIC_PROVIDER:-}
       ROCKSERVER_ONNX_MODEL_PATH: ${ROCKSERVER_ONNX_MODEL_PATH:-}
       ROCKSERVER_ONNX_TOKENIZER_PATH: ${ROCKSERVER_ONNX_TOKENIZER_PATH:-}
-      ROCKSERVER_ONNX_INTRA_THREADS: ${ROCKSERVER_ONNX_INTRA_THREADS:-}
+      # Compose must not pass an empty value here: the Rust configuration
+      # correctly rejects an explicitly empty thread count.  Keep this a
+      # positive default on low-memory VPS hosts while allowing an operator to
+      # override it through the protected runtime environment file.
+      ROCKSERVER_ONNX_INTRA_THREADS: ${ROCKSERVER_ONNX_INTRA_THREADS:-2}
       ORT_DYLIB_PATH: ${ORT_DYLIB_PATH:-}
       ROCKSERVER_FULL_CATALOG_PATH: /opt/rockserver/release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.sqlite
     depends_on:

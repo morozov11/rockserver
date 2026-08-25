@@ -89,6 +89,7 @@ try {
     if ($remote -notmatch '\[\^\[:cntrl:\]\]\*\$') { throw 'owner.env control-character validation is missing' }
     if ($compose -notmatch 'import_full_catalog.*backfill_embeddings' -or $compose -notmatch 'ROCKSERVER_LOG_DIR: /var/log/rockserver' -or $compose -notmatch 'ROCKSERVER_SEMANTIC_PROVIDER: onnx-e5-local' -or $compose -notmatch 'ORT_DYLIB_PATH') { throw 'first-deploy ONNX backfill or seed logging is not wired' }
     if ($compose -notmatch 'ROCKSERVER_LOG_RETENTION_DAYS: \$\{ROCKSERVER_LOG_RETENTION_DAYS:-14\}') { throw 'RockServer log retention is not configured for production' }
+    if ($compose -notmatch 'ROCKSERVER_ONNX_INTRA_THREADS: \$\{ROCKSERVER_ONNX_INTRA_THREADS:-2\}') { throw 'ONNX CPU thread default must be a positive integer' }
     if ($productionCompose -notmatch '/home/rockserver/logs:/var/log/rockserver' -or $remote -notmatch 'host_log_dir="/home/rockserver/logs"' -or $remote -notmatch 'ensure_host_log_dir') { throw 'persistent host log directory is not wired for production' }
 
     Write-Host 'OPS-001-D local tests passed: registry-free artifact identity, password-free inventory, secret-safe env/summary, TTY/sudo construction, seed, and automatic pinned ONNX safeguards.'
