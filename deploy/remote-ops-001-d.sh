@@ -19,7 +19,14 @@ install_docker_if_requested() {
   [ "${OPS001D_INSTALL_DOCKER:-0}" = 1 ] || fail 'Docker Engine with Compose is required. Re-run bootstrap with -InstallDocker after reviewing the documented Ubuntu/Debian path.'
   command -v apt-get >/dev/null 2>&1 || fail 'Automatic Docker installation is implemented only for apt-based Ubuntu/Debian hosts.'
   apt-get update
-  apt-get install -y ca-certificates curl docker.io docker-compose-plugin || fail 'Docker prerequisite installation failed.'
+  # Ubuntu 20.04 packages Compose v2 as docker-compose-v2; newer Debian/Ubuntu
+  # releases may instead expose docker-compose-plugin. Try the native v2 package
+  # first, then the newer package name, while keeping Docker Engine installation
+  # in the same explicit bootstrap step.
+  if ! apt-get install -y ca-certificates curl docker.io docker-compose-v2; then
+    apt-get install -y ca-certificates curl docker.io docker-compose-plugin || fail 'Docker prerequisite installation failed.'
+  fi
+  command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 || fail 'Docker Engine with Compose is still unavailable after installation.'
 }
 ensure_host_log_dir() {
   install -d -m 0750 -o 10001 "$host_log_dir"
