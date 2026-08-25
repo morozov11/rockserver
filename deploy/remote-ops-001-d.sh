@@ -99,17 +99,29 @@ if not assets:
 root = pathlib.Path(manifest['assetDirectory'])
 for item in assets:
     name, url, expected = item.get('name',''), item.get('url',''), item.get('sha256','').lower()
+    archive_member = item.get('archiveMember')
     if '/' in name or '\\' in name or not url.startswith('https://') or len(expected) != 64 or any(c not in '0123456789abcdef' for c in expected):
         raise SystemExit('ONNX manifest requires exact HTTPS URLs and SHA-256 values')
     path = root / name
     if path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() == expected:
         continue
-    temp = path.with_suffix(path.suffix + '.partial')
+    temp = path.with_suffix(path.suffix + '.download')
     subprocess.run(['curl', '--fail', '--location', '--proto', '=https', '--silent', '--show-error', '--output', str(temp), url], check=True)
     if hashlib.sha256(temp.read_bytes()).hexdigest() != expected:
         temp.unlink(missing_ok=True)
         raise SystemExit('ONNX SHA-256 mismatch; refusing asset')
-    os.replace(temp, path)
+    if archive_member:
+        expected_member = 'onnxruntime-linux-x64-1.23.2/lib/libonnxruntime.so'
+        if name != 'libonnxruntime.so' or archive_member != expected_member:
+            temp.unlink(missing_ok=True)
+            raise SystemExit('ONNX runtime archive member is invalid')
+        extracted = path.with_suffix(path.suffix + '.partial')
+        with open(extracted, 'wb') as output:
+            subprocess.run(['tar', '-xOzf', str(temp), archive_member], check=True, stdout=output)
+        temp.unlink(missing_ok=True)
+        os.replace(extracted, path)
+    else:
+        os.replace(temp, path)
 PY
 }
 deploy() {

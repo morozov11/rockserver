@@ -116,14 +116,22 @@ function Test-Ops001DOnnxManifest {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
     $manifest = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    if (-not $manifest.enabled) { return $manifest }
+    if (-not $manifest.enabled) { Stop-Ops001D 'The committed ONNX lock must enable the required production assets.' }
     if ($manifest.assetDirectory -ne '/opt/rockserver/assets/onnx') { Stop-Ops001D 'Enabled ONNX manifest requires the protected /opt/rockserver/assets/onnx directory.' }
     $assets = @($manifest.assets)
-    if ($assets.Count -lt 1) { Stop-Ops001D 'Enabled ONNX manifest requires at least one asset.' }
+    if ($assets.Count -ne 3) { Stop-Ops001D 'The committed ONNX lock requires exactly model, tokenizer, and runtime assets.' }
+    $expectedNames = @('model.onnx', 'tokenizer.json', 'libonnxruntime.so')
+    $seen = @{}
     foreach ($asset in $assets) {
+        $archiveMember = if ($null -ne $asset.PSObject.Properties['archiveMember']) { [string]$asset.archiveMember } else { '' }
         if ([string]::IsNullOrWhiteSpace($asset.name) -or $asset.name -match '[\\/]') { Stop-Ops001D 'ONNX asset name is unsafe.' }
         if ($asset.url -notmatch '^https://') { Stop-Ops001D "ONNX asset $($asset.name) requires an exact HTTPS URL." }
         if ($asset.sha256 -notmatch '^[0-9a-fA-F]{64}$') { Stop-Ops001D "ONNX asset $($asset.name) requires a verified SHA-256." }
+        if ($expectedNames -notcontains [string]$asset.name -or $seen.ContainsKey([string]$asset.name)) { Stop-Ops001D 'ONNX lock contains an unexpected or duplicate asset name.' }
+        $seen[[string]$asset.name] = $true
+        if ($asset.name -eq 'libonnxruntime.so') {
+            if ($archiveMember -ne 'onnxruntime-linux-x64-1.23.2/lib/libonnxruntime.so') { Stop-Ops001D 'ONNX runtime archive member is not the pinned Linux x64 library.' }
+        } elseif (-not [string]::IsNullOrWhiteSpace($archiveMember)) { Stop-Ops001D "ONNX asset $($asset.name) must not use archive extraction." }
     }
     return $manifest
 }

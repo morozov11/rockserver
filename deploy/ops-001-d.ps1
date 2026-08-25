@@ -2,7 +2,6 @@
 param(
     [ValidateSet('bootstrap', 'deploy')][string]$Action = 'deploy',
     [string]$InventoryPath = '',
-    [string]$OnnxManifest = '',
     [switch]$InstallDocker,
     [switch]$DryRun
 )
@@ -11,14 +10,14 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'ops-001-d.psm1') -Force
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($InventoryPath)) { $InventoryPath = Join-Path $PSScriptRoot 'private.inventory.psd1' }
-if ([string]::IsNullOrWhiteSpace($OnnxManifest)) { $OnnxManifest = Join-Path $PSScriptRoot 'onnx-assets.production.json' }
 
 $inventoryFile = Test-Ops001DPrivateInventory -Path $InventoryPath -RepositoryRoot $repoRoot
 $inventory = Import-PowerShellDataFile -LiteralPath $inventoryFile
 Test-Ops001DInventoryValues -Inventory $inventory | Out-Null
 $catalog = Get-Ops001DCatalogMetadata -ManifestPath (Join-Path $repoRoot 'catalog/rockcatalog/manifest.json') -CatalogPath (Join-Path $repoRoot 'catalog/rockcatalog/stations.v1.json')
 $yandex = Get-Ops001DAllowedYandexEnvironment -Path (Join-Path $repoRoot '.env')
-if (Test-Path -LiteralPath $OnnxManifest) { $onnx = Test-Ops001DOnnxManifest -Path $OnnxManifest } else { $onnx = [pscustomobject]@{ enabled = $false } }
+$onnxLock = Join-Path $PSScriptRoot 'onnx-assets.lock.json'
+$onnx = Test-Ops001DOnnxManifest -Path $onnxLock
 $commit = Get-Ops001DCurrentCommit -RepositoryRoot $repoRoot -AllowDirty:$DryRun
 $image = "rockserver:sha-$commit"
 
@@ -47,7 +46,7 @@ New-Item -ItemType Directory -Path $stage | Out-Null
 try {
     Copy-Item (Join-Path $PSScriptRoot 'compose.yaml'), (Join-Path $PSScriptRoot 'compose.production.yaml'), (Join-Path $PSScriptRoot 'Caddyfile.production.template'), (Join-Path $PSScriptRoot 'remote-ops-001-d.sh') -Destination $stage
     Write-Ops001DOwnerEnvironmentFile -Path (Join-Path $stage 'owner.env') -Domain $inventory.Domain -Catalog $catalog -Yandex $yandex -OnnxEnabled ([bool]$onnx.enabled)
-    if ($onnx.enabled) { Copy-Item $OnnxManifest (Join-Path $stage 'onnx-assets.json') } else { [IO.File]::WriteAllText((Join-Path $stage 'onnx-assets.json'), "{`"enabled`":false}`n", [Text.UTF8Encoding]::new($false)) }
+    Copy-Item $onnxLock (Join-Path $stage 'onnx-assets.json')
 
     $imageId = ''
     $archiveHash = ''

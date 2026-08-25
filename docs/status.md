@@ -18,7 +18,7 @@ does not require GitHub, GHCR, another registry, remote Git pull, or mutable `la
 runtime env updates are newline-correct and preserve generated DB/API secrets; only the four
 documented Yandex names can transfer from ignored root `.env`. Backup precedes the importer, whose
 embedded migrations and checksum-pinned idempotent full-catalog activation precede HTTPS readiness.
-ONNX remains opt-in and refuses absent/placeholder HTTPS URL or SHA-256 data. Focused local tests
+ONNX staging assets are fetched automatically from the committed checksum-pinned lock; focused local tests
 and dry-run, production Compose rendering, PowerShell parsing, Rust fmt/strict Clippy/full tests,
 and diff checks passed. The final all-features Docker build downloaded dependencies and reached Rust
 compilation but was stopped at the owner's request before completion; it is not recorded as passed.

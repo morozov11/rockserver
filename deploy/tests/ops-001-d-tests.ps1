@@ -49,7 +49,9 @@ try {
     if ($deploySsh -contains '-tt' -or $deploySsh -notcontains 'BatchMode=yes' -or ($deploySsh -join ' ') -notmatch 'sudo -n') { throw 'normal deploy SSH/sudo construction is not non-interactive' }
 
     '{"enabled":true,"assetDirectory":"/opt/rockserver/assets/onnx","assets":[{"name":"model.onnx","url":"REQUIRED_OFFICIAL_HTTPS_URL","sha256":"REQUIRED_64_HEX_SHA256"}]}' | Set-Content "$temp/onnx.json"
-    Assert-Throws { Test-Ops001DOnnxManifest "$temp/onnx.json" | Out-Null } 'placeholder ONNX manifest was accepted'
+    Assert-Throws { Test-Ops001DOnnxManifest "$temp/onnx.json" | Out-Null } 'incomplete ONNX lock was accepted'
+    $onnxLock = Test-Ops001DOnnxManifest "$root/deploy/onnx-assets.lock.json"
+    if (-not $onnxLock.enabled -or @($onnxLock.assets).Count -ne 3) { throw 'committed automatic ONNX lock is invalid' }
     $catalogActual = Get-Ops001DCatalogMetadata "$root/catalog/rockcatalog/manifest.json" "$root/catalog/rockcatalog/stations.v1.json"
     $catalogAgain = Get-Ops001DCatalogMetadata "$root/catalog/rockcatalog/manifest.json" "$root/catalog/rockcatalog/stations.v1.json"
     if ($catalogActual.Count -lt 1 -or $catalogActual.Version -ne $catalogAgain.Version -or $catalogActual.Sha256 -ne $catalogAgain.Sha256) { throw 'pinned catalog seed input is not stable' }
@@ -62,9 +64,9 @@ try {
     $seedAt = $remote.IndexOf('run --rm catalog_seed')
     $readyAt = $remote.IndexOf('/health/ready')
     if ($backupAt -lt 0 -or $seedAt -le $backupAt -or $readyAt -le $seedAt -or $remote -match 'fixture') { throw 'backup/seed/readiness fail-closed ordering changed' }
-    if ($remote -notmatch 'applies embedded migrations' -or $remote -notmatch 'exact HTTPS URLs and SHA-256') { throw 'migration or ONNX safeguards are missing' }
+    if ($remote -notmatch 'applies embedded migrations' -or $remote -notmatch 'exact HTTPS URLs and SHA-256' -or $launcher -notmatch 'onnx-assets.lock.json') { throw 'migration or automatic ONNX safeguards are missing' }
 
-    Write-Host 'OPS-001-D local tests passed: registry-free artifact identity, password-free inventory, secret-safe env/summary, TTY/sudo construction, and seed/ONNX safeguards.'
+    Write-Host 'OPS-001-D local tests passed: registry-free artifact identity, password-free inventory, secret-safe env/summary, TTY/sudo construction, seed, and automatic pinned ONNX safeguards.'
 } finally {
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
 }

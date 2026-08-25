@@ -205,11 +205,14 @@ readiness. Repeating the importer is transactional/idempotent by its existing ca
 metadata and cannot substitute a fixture. The only release output/record fields are commit, image ID,
 artifact checksum, catalog version/count, backup checksum and readiness.
 
-To enable ONNX, create the ignored `deploy/onnx-assets.production.json` from its committed example
-with official HTTPS URLs and exact SHA-256 values. Placeholders fail before any download. Enabled
-assets download to the VPS cache only when missing or hash-invalid, are SHA-256 checked before
-atomic placement, and a mismatch fails the deployment. The committed example remains disabled
-because no verified official URL/hash is currently owned by this project.
+ONNX semantic search is enabled automatically. The committed
+`deploy/onnx-assets.lock.json` pins the exact `intfloat/multilingual-e5-small` ONNX graph,
+matching tokenizer, and the Linux x64 ONNX Runtime archive to official HTTPS sources plus
+SHA-256 values. On the first deployment the VPS downloads them only when absent or invalid,
+checks every archive/download before atomically placing the files, then starts RockServer with
+semantic search enabled. Subsequent deployments use the verified cache. No ONNX URL, hash, or
+local asset path is entered by the owner. Updating the model/runtime is a normal reviewed Git
+change to this lock file, never an unpinned automatic update.
 
 Local validation, with no VPS or credential/network use:
 
