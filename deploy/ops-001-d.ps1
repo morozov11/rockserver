@@ -83,13 +83,13 @@ try {
         & docker build --label "org.opencontainers.image.revision=$commit" --tag $image $repoRoot
         if ($LASTEXITCODE -ne 0) { throw 'Local Docker build failed.' }
         # PowerShell's native argument handling removes the inner quotes from a
-        # Docker Go-template map lookup on Windows. Read JSON instead so the
-        # revision label is checked identically on Windows and Linux.
-        $imageMetadata = @(& docker image inspect $image | ConvertFrom-Json)
+        # Docker Go-template map lookup on Windows. Inspect the whole labels
+        # map as JSON instead, so the revision label is read identically on
+        # Windows and Linux.
+        $imageId = (& docker image inspect --format '{{.Id}}' $image).Trim()
+        $labelsJson = (& docker image inspect --format '{{json .Config.Labels}}' $image).Trim()
         if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the local deployment image.' }
-        if ($imageMetadata.Count -ne 1) { throw 'Could not read exactly one local deployment image.' }
-        $imageId = [string]$imageMetadata[0].Id
-        $labelCommit = [string]$imageMetadata[0].Config.Labels.'org.opencontainers.image.revision'
+        $labelCommit = [string](ConvertFrom-Json -InputObject $labelsJson).'org.opencontainers.image.revision'
         Test-Ops001DArtifactIdentity -Image $image -Commit $commit -ImageId $imageId -LabelCommit $labelCommit | Out-Null
         $archive = Join-Path $stage 'rockserver-image.tar'
         & docker image save --output $archive $image
@@ -116,7 +116,7 @@ try {
         $remoteCommand = "sudo env OPS001D_INSTALL_DOCKER=$([int][bool]$InstallDocker) bash '$remoteStage/remote-ops-001-d.sh' bootstrap '$remoteStage' '$($inventory.SshUser)'"
         $sshArgs = Get-Ops001DSshCommand -Action bootstrap -KeyPath $key -Target $target -RemoteCommand $remoteCommand
     } else {
-        $remoteCommand = "sudo -n /opt/rockserver/remote-ops-001-d.sh deploy '$remoteStage' '$image' '$commit' '$imageId' '$archiveHash'"
+        $remoteCommand = "sudo -n /opt/rockserver/remote-ops-001-d.sh deploy '$remoteStage' '$image' '$commit' '$archiveHash'"
         $sshArgs = Get-Ops001DSshCommand -Action deploy -KeyPath $key -Target $target -RemoteCommand $remoteCommand
     }
     & ssh @sshArgs

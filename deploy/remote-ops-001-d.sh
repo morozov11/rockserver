@@ -81,10 +81,9 @@ bootstrap() {
   printf '%s\n' 'Bootstrap completed. Key login and a command-scoped non-interactive deploy sudo rule are installed. Review firewall manually: restrict TCP 22; expose only 80/443; never expose 3000/5432. SSH password-login policy is unchanged.'
 }
 validate_artifact() {
-  local stage="$1" image="$2" commit="$3" expected_id="$4" archive_hash="$5" actual_hash loaded_id label
+  local stage="$1" image="$2" commit="$3" archive_hash="$4" actual_hash loaded_id label
   [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || fail 'commit must be a full lowercase SHA'
   [ "$image" = "rockserver:sha-$commit" ] || fail 'image reference must exactly match the source commit'
-  [[ "$expected_id" =~ ^sha256:[0-9a-f]{64}$ ]] || fail 'expected image ID is invalid'
   [[ "$archive_hash" =~ ^[0-9a-f]{64}$ ]] || fail 'artifact SHA-256 is invalid'
   [ -f "$stage/rockserver-image.tar" ] && [ ! -L "$stage/rockserver-image.tar" ] || fail 'image artifact is missing or unsafe'
   actual_hash="$(sha256sum "$stage/rockserver-image.tar" | awk '{print $1}')"
@@ -92,8 +91,12 @@ validate_artifact() {
   docker image load --input "$stage/rockserver-image.tar" >/dev/null
   loaded_id="$(docker image inspect --format '{{.Id}}' "$image")"
   label="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")"
-  [ "$loaded_id" = "$expected_id" ] || fail 'loaded image ID does not match the locally inspected artifact'
+  # Docker Desktop may save an OCI manifest list while a Linux Docker Engine
+  # loads the platform image's config ID. The tarball checksum proves byte-for-
+  # byte transfer; the revision label binds that verified artifact to commit.
+  [[ "$loaded_id" =~ ^sha256:[0-9a-f]{64}$ ]] || fail 'loaded image ID is invalid'
   [ "$label" = "$commit" ] || fail 'loaded image revision label does not match the current commit'
+  printf '%s\n' "$loaded_id"
 }
 download_onnx() {
   local manifest="$release_root/onnx-assets.json"
@@ -137,13 +140,13 @@ for item in assets:
 PY
 }
 deploy() {
-  local stage="${1:?stage required}" image="${2:?image required}" commit="${3:?commit required}" expected_id="${4:?image ID required}" archive_hash="${5:?archive hash required}"
-  local backup container backup_hash domain catalog_version catalog_count compose
+  local stage="${1:?stage required}" image="${2:?image required}" commit="${3:?commit required}" archive_hash="${4:?archive hash required}"
+  local backup container backup_hash domain catalog_version catalog_count compose loaded_id
   require_root; validate_stage "$stage"
   [ -f "$env_file" ] || fail 'bootstrap has not provisioned the protected runtime env-file'
   ensure_host_log_dir
   install_owner_files "$stage"
-  validate_artifact "$stage" "$image" "$commit" "$expected_id" "$archive_hash"
+  loaded_id="$(validate_artifact "$stage" "$image" "$commit" "$archive_hash")"
   download_onnx
   compose="docker compose --project-name rockserver --env-file $env_file --file $release_root/compose.yaml --file $release_root/compose.production.yaml"
   ROCKSERVER_IMAGE="$image" $compose config >/dev/null
@@ -161,10 +164,10 @@ deploy() {
   curl --fail --silent --show-error --max-time 30 "https://${domain}/health/ready" >/dev/null
   catalog_version="$(sed -n 's/^OPS001D_CATALOG_VERSION=//p' "$env_file" | head -n1)"
   catalog_count="$(sed -n 's/^OPS001D_CATALOG_COUNT=//p' "$env_file" | head -n1)"
-  printf '{"commit":"%s","image_id":"%s","artifact_sha256":"%s","catalog_version":"%s","catalog_count":%s,"backup_sha256":"%s","readiness":"passed"}\n' "$commit" "$expected_id" "$archive_hash" "$catalog_version" "$catalog_count" "$backup_hash" > "$release_root/releases/current.json"
+  printf '{"commit":"%s","image_id":"%s","artifact_sha256":"%s","catalog_version":"%s","catalog_count":%s,"backup_sha256":"%s","readiness":"passed"}\n' "$commit" "$loaded_id" "$archive_hash" "$catalog_version" "$catalog_count" "$backup_hash" > "$release_root/releases/current.json"
   chmod 0600 "$release_root/releases/current.json"
   rm -rf -- "$stage"
-  printf 'deployed commit=%s image_id=%s catalog=%s count=%s readiness=passed\n' "$commit" "$expected_id" "$catalog_version" "$catalog_count"
+  printf 'deployed commit=%s image_id=%s catalog=%s count=%s readiness=passed\n' "$commit" "$loaded_id" "$catalog_version" "$catalog_count"
 }
 
 case "$action" in
