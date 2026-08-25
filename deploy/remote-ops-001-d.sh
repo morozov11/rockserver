@@ -162,10 +162,10 @@ deploy() {
   ROCKSERVER_IMAGE="$image" $compose config >/dev/null
   ROCKSERVER_IMAGE="$image" $compose up --detach --wait postgres
   backup="$release_root/backups/rockserver-$(date -u +%Y%m%d-%H%M%SZ).dump"
-  $compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --format=custom --file=/tmp/ops001d.dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"'
-  container="$($compose ps -q postgres)"
+  ROCKSERVER_IMAGE="$image" $compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --format=custom --file=/tmp/ops001d.dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"'
+  container="$(ROCKSERVER_IMAGE="$image" $compose ps -q postgres)"
   docker cp "${container}:/tmp/ops001d.dump" "$backup"
-  $compose exec -T postgres rm -f /tmp/ops001d.dump
+  ROCKSERVER_IMAGE="$image" $compose exec -T postgres rm -f /tmp/ops001d.dump
   backup_hash="$(sha256sum "$backup" | awk '{print $1}')"
   # The pinned importer first applies embedded migrations, then transactionally activates the full catalog.
   ROCKSERVER_IMAGE="$image" $compose run --rm catalog_seed >/dev/null

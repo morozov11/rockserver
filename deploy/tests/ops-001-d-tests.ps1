@@ -76,6 +76,7 @@ try {
     if ($launcher -notmatch 'docker image save' -or $remote -notmatch 'docker image load') { throw 'registry-free artifact transfer is missing' }
     if ($remote -notmatch 'transferred image artifact checksum mismatch' -or $remote -notmatch 'revision label binds that verified artifact to commit' -or $remote -match 'loaded image ID does not match') { throw 'cross-engine image artifact verification is not portable' }
     if ($remote -notmatch 'Accept the former five-argument form' -or $remote -notmatch 'deploy requires stage, image, commit, and artifact hash') { throw 'operator-script upgrade compatibility is missing' }
+    if ($remote -notmatch 'ROCKSERVER_IMAGE="\$image" \$compose exec' -or $remote -notmatch 'ROCKSERVER_IMAGE="\$image" \$compose ps') { throw 'Compose interpolation environment is not preserved for database commands' }
     $backupAt = $remote.IndexOf('pg_dump --format=custom')
     $seedAt = $remote.IndexOf('run --rm catalog_seed')
     $readyAt = $remote.IndexOf('/health/ready')
