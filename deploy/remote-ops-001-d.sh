@@ -112,6 +112,11 @@ assets = manifest.get('assets', [])
 if not assets:
     raise SystemExit('enabled ONNX manifest has no assets')
 root = pathlib.Path(manifest['assetDirectory'])
+root.mkdir(parents=True, exist_ok=True)
+# The service runs as UID 10001 inside the container. The host-side bootstrap
+# may leave this bind-mounted directory owned by root, but it must remain
+# traversable by the container user.
+os.chmod(root, 0o755)
 for item in assets:
     name, url, expected = item.get('name',''), item.get('url',''), item.get('sha256','').lower()
     archive_member = item.get('archiveMember')
