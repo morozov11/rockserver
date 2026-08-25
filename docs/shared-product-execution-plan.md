@@ -1,0 +1,267 @@
+# Исполнимый план интернет-беты
+
+**Статус:** все задачи ниже запланированы; реализация не начата.  
+**Основание:** [общий roadmap](shared-product-roadmap.md).  
+**Правило:** одна задача Codex — один ограниченный результат. Не запускать задачи параллельно,
+если не указано обратное. Перед каждой задачей прочитать `AGENTS.md` целевого репозитория,
+сохранить несвязанные изменения и не использовать production secrets, сеть или живых провайдеров
+без отдельного решения пользователя.
+
+## Сквозные решения, которые нельзя менять без отдельного approval
+
+- RockServer — единственный владелец аккаунтов, сессий, устройств, синхронизации и команд.
+- RockCast/RockMobile остаются функциональны без входа и при отключённом RockServer.
+- Общие station ID и lifecycle/replacement semantics берутся из RM-004.
+- Новый HTTP-контракт сначала фиксируется в OpenAPI и versioned `/v1` endpoints.
+- ESP32 не получает пароль, основной refresh token или полную копию каталога.
+
+## Нулевая готовность среды
+
+### GATE-001 — Подтверждение RM-004-I на Android
+
+- **Репозиторий:** RockMobile.
+- **Модель:** `gpt-5.6-terra`, `medium`.
+- **Работа:** предоставить читаемый Android API-36 SDK, принять требуемые лицензии в окружении,
+  запустить существующие unit/lint и короткий offline smoke с выключенным RockServer.
+- **Готово, когда:** RM-004-I больше не имеет environment blocker. Никаких новых функций.
+- **Зависимости:** нет.
+
+## RM-007 — Локальные избранное и история
+
+### RM-007-A — Общая модель личных данных и миграция идентификаторов
+
+- **Репозитории:** RockServer (только contract/docs), RockCast, RockMobile.
+- **Модель:** `gpt-5.6-sol`, `high`.
+- **Работа:** зафиксировать переносимую модель `Favourite`, `PlaybackHistoryEntry` и `LocalProfile`;
+  правила retention, дедупликации, URL-change/replacement/tombstone handling и будущей
+  синхронизации. Не создавать серверную авторизацию или sync endpoints.
+- **Готово, когда:** один документ/contract описывает совместимые поля, stable station ID и
+  migration policy для обоих клиентов; открытые решения выделены для approval.
+- **Зависимости:** RM-004 baseline и GATE-001.
+
+### RM-007-B — RockMobile: избранное и история офлайн
+
+- **Репозиторий:** RockMobile.
+- **Модель:** `gpt-5.6-terra`, `medium`.
+- **Работа:** реализовать локальное хранение избранного, истории, last-played и launch count;
+  добавить UI управления и миграцию от существующего состояния, если оно есть.
+- **Готово, когда:** данные переживают перезапуск, не меняются от URL change и работают с
+  baseline/extended/remote catalog без сети; unit tests покрывают replacement и retired station.
+- **Зависимости:** RM-007-A.
+
+### RM-007-C — RockCast: избранное и история офлайн
+
+- **Репозиторий:** RockCast.
+- **Модель:** `gpt-5.6-terra`, `medium`.
+- **Работа:** реализовать эквивалентное локальное хранение и UI без изменения playback/relay
+  поведения.
+- **Готово, когда:** offline persistence и migration policy соответствуют RM-007-A; тесты
+  покрывают add/remove/history/replacement.
+- **Зависимости:** RM-007-A.
+
+### RM-007-D — Межклиентская проверка RM-007
+
+- **Репозитории:** RockServer, RockCast, RockMobile; только tests/docs.
+- **Модель:** `gpt-5.6-terra`, `medium`.
+- **Работа:** сравнить одну и ту же выборку station ID и lifecycle cases в обоих клиентах;
+  проверить offline-first, миграцию и отсутствие сетевой зависимости.
+- **Готово, когда:** нет incompatible local data shape и результат записан в docs.
+- **Зависимости:** RM-007-B, RM-007-C.
+
+## OPS-001 — Основа безопасного интернет-развёртывания
+
+### OPS-001-A — Production deployment design
+
+- **Репозиторий:** RockServer; только `deploy/` и документация.
+- **Модель:** `gpt-5.6-sol`, `high`.
+- **Работа:** спроектировать single-VPS Docker Compose: `caddy`, `rockserver`, `postgres`,
+  закрытая сеть БД, volumes, production env contract, health/readiness, firewall matrix,
+  backup/restore и rollback. Не создавать VPS и не публиковать сервис.
+- **Готово, когда:** design review одобрен; в нём нет секретов и определён точный домен/ports,
+  ownership и recovery procedure.
+- **Зависимости:** нет; можно выполнять параллельно с RM-007-B/C после RM-007-A.
+
+### OPS-001-B — Reproducible container and Compose stack
+
+- **Репозиторий:** RockServer.
+- **Модель:** `gpt-5.6-terra`, `high`.
+- **Работа:** добавить reproducible Dockerfile, Compose base/prod override, Caddyfile templates,
+  non-secret environment example, healthchecks and local deployment verification.
+- **Готово, когда:** чистая машина способна поднять стек из документации; наружу публикуется
+  только reverse proxy; Postgres недоступен извне.
+- **Зависимости:** OPS-001-A approval.
+
+### OPS-001-C — CI image, release, backup and rollback runbook
+
+- **Репозиторий:** RockServer.
+- **Модель:** `gpt-5.6-terra`, `medium`.
+- **Работа:** CI builds/tests immutable commit-SHA image; manual release gate; deploy script
+  performs backup, preflight/migration, readiness and supports previous-image rollback. Добавить
+  pg_dump/pg_restore restore rehearsal в non-production environment.
+- **Готово, когда:** documented dry-run проходит без production secrets, rollback проверен,
+  а release не зависит от ручной правки контейнера на VPS.
+- **Зависимости:** OPS-001-B.
+
+### OPS-001-D — Staging launch checklist
+
+- **Репозиторий:** RockServer; docs/runbook.
+- **Модель:** `gpt-5.6-terra`, `medium`.
+- **Работа:** подготовить checklist для покупки VPS, DNS, SSH keys, secret injection, firewall,
+  HTTPS, uptime monitor, backup target, privacy notice и incident contacts.
+- **Готово, когда:** пользователь может выполнить checklist по шагам; публичный запуск остаётся
+  отдельным ручным действием пользователя.
+- **Зависимости:** OPS-001-C.
+
+## RM-011 — Регистрация, вход и устройства
+
+### RM-011-A — Auth/device contract and threat model
+
+- **Репозиторий:** RockServer; docs/OpenAPI proposal only.
+- **Модель:** `gpt-5.6-sol`, `high`.
+- **Работа:** определить account/session/device schemas, password hashing policy, access/refresh
+  lifecycle, token revocation/rotation, rate limits, error semantics, user enumeration protection,
+  delete-account and device-pairing protocol.
+- **Готово, когда:** OpenAPI proposal, migration and security review checklist approved человеком.
+- **Зависимости:** RM-007-D, OPS-001-B.
+
+### RM-011-B — RockServer: account and session persistence
+
+- **Репозиторий:** RockServer.
+- **Модель:** `gpt-5.6-terra`, `high`.
+- **Работа:** migrations and domain/persistence for users, password hashes, sessions, refresh-token
+  rotation/revocation, device ownership and audit-safe events.
+- **Готово, когда:** deterministic unit/PostgreSQL tests cover registration, duplicate email,
+  login failure, token revoke/rotate, account deletion and ownership isolation.
+- **Зависимости:** RM-011-A approval.
+
+### RM-011-C — RockServer: public auth and device API
+
+- **Репозиторий:** RockServer.
+- **Модель:** `gpt-5.6-terra`, `high`.
+- **Работа:** implement approved `/v1` OpenAPI endpoints, rate limits and request-safe logging;
+  include QR/short-code pairing issuance and redemption without ESP32 firmware.
+- **Готово, когда:** API/integration tests pass; tokens and passwords never appear in logs/errors;
+  anonymous radio endpoints remain compatible.
+- **Зависимости:** RM-011-B.
+
+### RM-011-D — RockMobile: account and secure session UX
+
+- **Репозиторий:** RockMobile.
+- **Модель:** `gpt-5.6-terra`, `medium`.
+- **Работа:** registration/login/logout, secure platform token storage, account/profile state and
+  device list/revoke UI; preserve anonymous and offline flows.
+- **Готово, когда:** no token in ordinary app storage/logs; logout clears session; unreachable
+  server never blocks radio.
+- **Зависимости:** RM-011-C, GATE-001.
+
+### RM-011-E — RockCast: account and secure session UX
+
+- **Репозиторий:** RockCast.
+- **Модель:** `gpt-5.6-terra`, `medium`.
+- **Работа:** equivalent login/session/device management using OS-appropriate secure storage; do
+  not put secrets into config files or CLI output.
+- **Готово, когда:** same contract tests and anonymous fallback guarantees as RockMobile.
+- **Зависимости:** RM-011-C.
+
+### RM-011-F — Closed beta security and integration review
+
+- **Репозитории:** all current clients and RockServer; tests/docs only.
+- **Модель:** `gpt-5.6-sol`, `high`.
+- **Работа:** review threat model implementation, auth failure paths, device isolation, account
+  deletion, rate limits, logs and HTTPS deployment assumptions.
+- **Готово, когда:** no unresolved high-severity auth/privacy issue; explicit go/no-go report for
+  small closed registration beta.
+- **Зависимости:** RM-011-D, RM-011-E, OPS-001-D.
+
+## RM-012 — Синхронизация и управление
+
+### RM-012-A — Sync and remote-command contract
+
+- **Репозиторий:** RockServer; docs/OpenAPI proposal only.
+- **Модель:** `gpt-5.6-sol`, `high`.
+- **Работа:** define sync conflict rules for favourites/history/preferences and command model:
+  `play(station_id)`, `pause`, `resume`, `stop`, `set_volume`, state acknowledgement,
+  idempotency key, offline/unsupported state and authorization.
+- **Готово, когда:** human-approved contract resolves concurrent updates and does not leak data
+  across account/device boundaries.
+- **Зависимости:** RM-011-F.
+
+### RM-012-B — RockServer: synchronized data persistence/API
+
+- **Репозиторий:** RockServer.
+- **Модель:** `gpt-5.6-terra`, `high`.
+- **Работа:** migrations, domain and endpoints for favourites/history/preferences sync using the
+  approved conflict and retention rules.
+- **Готово, когда:** deterministic PostgreSQL/API tests cover two devices, replay/idempotency,
+  delete and offline catch-up without changing catalog ownership.
+- **Зависимости:** RM-012-A approval.
+
+### RM-012-C — RockServer: device-command service/API
+
+- **Репозиторий:** RockServer.
+- **Модель:** `gpt-5.6-terra`, `high`.
+- **Работа:** authorization, command persistence/delivery abstraction, acknowledgement/state,
+  expiry and audit-safe events. No vendor-specific push dependency unless approved.
+- **Готово, когда:** owner can command only own device; retries are idempotent and an offline
+  device reports a truthful state.
+- **Зависимости:** RM-012-A, RM-011-C.
+
+### RM-012-D — RockMobile: sync and remote-control client
+
+- **Репозиторий:** RockMobile.
+- **Модель:** `gpt-5.6-terra`, `medium`.
+- **Работа:** opt-in sync, last-sync status, conflict/error UI and command receive/ack path that
+  does not interrupt local playback unexpectedly.
+- **Готово, когда:** offline queue/errors are understandable; sync can be disabled and local
+  account data can be deleted.
+- **Зависимости:** RM-012-B, RM-012-C.
+
+### RM-012-E — RockCast: sync and remote-control client
+
+- **Репозиторий:** RockCast.
+- **Модель:** `gpt-5.6-terra`, `medium`.
+- **Работа:** equivalent sync and command behaviour while preserving playback, relay and Cast.
+- **Готово, когда:** cross-client scenario produces equal favourites and safe command handling.
+- **Зависимости:** RM-012-B, RM-012-C.
+
+### RM-012-F — Internet-beta end-to-end verification
+
+- **Репозитории:** RockServer, RockMobile, RockCast; tests/docs/runbook.
+- **Модель:** `gpt-5.6-sol`, `high`.
+- **Работа:** verify staging HTTPS, registration, two client sessions, device revoke, sync,
+  remote command, server outage and local-radio fallback; publish severity-ranked go/no-go report.
+- **Готово, когда:** no unresolved high-severity user-data/auth/control problem and beta onboarding
+  runbook is ready.
+- **Зависимости:** RM-012-D, RM-012-E, OPS-001-D.
+
+## ESP32 — только после получения платы
+
+### ESP-001 — Hardware bring-up and capability inventory
+
+- **Репозиторий:** будущий ESP32 repository (создать после подтверждения названия и платы).
+- **Модель:** `gpt-5.6-terra`, `medium`.
+- **Работа:** проверить Wi-Fi, input controls, screen/audio hardware, power behaviour and safe OTA
+  path; никаких аккаунтов/production pairing.
+- **Готово, когда:** список реальных возможностей и выбранный UX подтверждены на железе.
+- **Зависимости:** плата получена, RM-012-A.
+
+### ESP-002 — Device pairing and remote-control client
+
+- **Репозитории:** ESP32 repository, RockServer only where contract requires.
+- **Модель:** `gpt-5.6-terra`, `high`.
+- **Работа:** one-time pairing, limited device credential, command/state protocol and revoke;
+  implement только подтверждённые ESP-001 controls.
+- **Готово, когда:** пользователь привязывает и отзывает ESP32, а утрата платы не раскрывает
+  пароль/основную сессию.
+- **Зависимости:** ESP-001, RM-012-C, RM-012-F.
+
+## Порядок выдачи задач Codex
+
+`GATE-001 → RM-007-A → (RM-007-B + RM-007-C) → RM-007-D → OPS-001-A → OPS-001-B →
+OPS-001-C → OPS-001-D → RM-011-A → RM-011-B → RM-011-C → (RM-011-D + RM-011-E) →
+RM-011-F → RM-012-A → (RM-012-B + RM-012-C) → (RM-012-D + RM-012-E) → RM-012-F →
+ESP-001 → ESP-002`.
+
+Параллельные пары разрешены только после завершения их общей проектной задачи и не должны менять
+одни и те же файлы. Перед началом любой задачи, которая затрагивает публичный API, требуется
+отдельное human approval её contract/design stage.

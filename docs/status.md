@@ -2,6 +2,21 @@
 
 Last updated: 2026-08-25
 
+## RM-007 local personal-data contract
+
+### RM-007-A common model and station-ID migration (2026-08-25)
+
+The proposed cross-client contract is recorded in
+[`rm-007-a-local-personal-data-contract.md`](rm-007-a-local-personal-data-contract.md). It defines
+versioned local `LocalProfile`, `Favourite`, and `PlaybackHistoryEntry` shapes; local-only privacy,
+dedupe/order/retention, safe rollback, and RM-004-compatible identity lifecycle rules. It specifies
+automatic resolution only for verified canonical IDs, reviewed legacy mappings, and `merged`
+tombstones; `split`, removed, and unknown references remain local unresolved records. The document
+does not claim existing favourites/history: verified sources show only RockMobile unavailable-voice
+ID migration and RockCast's catalog/legacy adapters. No code, database, API/OpenAPI, catalog, sync,
+or authentication behavior changed. Human approval remains required for the explicitly listed
+ordering/limits, split UX, RockCast legacy mapping, lifecycle artifact, and future-sync decisions.
+
 ## RM-004 shared catalog
 
 ### RM-004-I cutover and legacy cleanup (2026-08-25)
@@ -325,3 +340,56 @@ release gate. The previously recorded service follow-up remains to add determini
 for search and voice, then improve voice cancellation and state reporting across capture, upload,
 recognition, search, and playback, followed by retention-safe logging, provider resilience, and a
 second recognizer behind the existing trait.
+
+## Shared internet-beta roadmap
+
+Planning-only product roadmap added in `docs/shared-product-roadmap.md`. It places RM-007, RM-011,
+and RM-012 ahead of unrelated roadmap work to prepare a hosted RockServer beta with users,
+registration, device linking, synchronization, and remote control across RockMobile and RockCast.
+The ESP32 client is intentionally deferred until hardware is available. The documented proposed
+first deployment is a single VPS with Docker Compose, Caddy, private PostgreSQL, immutable images,
+manual release approval, backup, health checks, and rollback. No runtime, API, database, client,
+deployment, credential, or infrastructure change was made by this documentation task.
+
+## Executable internet-beta plan
+
+The shared roadmap is now decomposed into concrete, sequential Codex tasks in
+`docs/shared-product-execution-plan.md`: GATE-001; RM-007-A through D; OPS-001-A through D;
+RM-011-A through F; RM-012-A through F; then ESP-001 and ESP-002 when hardware exists. Every
+task has repository boundaries, dependency, recommended model/reasoning effort, scope and
+acceptance gate. The plan itself is not an approval to implement any task.
+
+## RM-007-D cross-client review
+
+RM-007-D is **not passed**. The evidence-based review in
+`docs/rm-007-d-cross-client-review.md` confirmed the shared baseline release and the clients'
+offline local-catalog paths, but found four unresolved High issues: RockMobile's persisted JSON is
+not the portable RM-007-A profile shape; its read/init path can replace corrupt or unsupported data
+with an empty profile and has no migration backup/rollback; its lifecycle resolver is not wired to
+production catalog state; and RockCast records URL-derived `rockserver-*` IDs for remote/voice
+plays instead of canonical server station IDs. Both clients also have incomplete favourite merge
+metadata semantics.
+
+Offline release verification passed for RockServer, RockCast and RockMobile (including the Mobile
+extended manifest); catalog tooling passed 12/12 tests; RockServer targeted catalog tests passed
+14/14; RockCast targeted personal-data tests passed 5/5 using a separate writable target directory
+after its ordinary target lock was inaccessible. RockServer fmt, strict Clippy and full tests, а
+также RockCast fmt, strict Clippy и full tests прошли; RockCast full result — 55 library и 2 relay
+integration tests, 8 live-network tests ignored. RockMobile targeted unit and lint commands both
+stopped before compilation on the inaccessible Gradle wrapper `.zip.lck`, despite the required
+process-local `-Duser.home=C:\Users\alex`; lint is not claimed as passed and its three previously
+known errors remain unresolved/unverified in this run. No network, production service, secret,
+live database, device test, product code or catalog data was changed.
+
+OPS-001-A remains independently available as design-only work. RM-011-A remains blocked on a
+passed RM-007-D and must not treat the current client stores as a compatible sync basis.
+
+### RM-007-D remediation
+
+The four original High findings were remediated in client source: RockMobile now uses the portable
+v1 profile/timestamp shape with checked persistence, fail-closed reads, legacy backup/journal,
+explicit rollback and wired baseline lifecycle resolution; RockCast now preserves canonical server
+IDs for search/voice personal records and completes dedup/journal/rollback behavior. RockCast fmt,
+strict Clippy and full tests pass after remediation. Android targeted unit and lint commands remain
+blocked before compilation by the inaccessible Gradle wrapper lock, so RM-007-D remains not passed
+as a verification gate and RM-011-A remains blocked.

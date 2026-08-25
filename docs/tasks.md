@@ -1,5 +1,23 @@
 # Task log
 
+## RM-007-A — 2026-08-25 — Common local personal-data model and ID migration contract
+
+- Goal: define one portable offline-first personal-data contract for future RockMobile and RockCast
+  favourites/history without implementing either feature, sync, authentication, server endpoints, or
+  catalog changes.
+- Scope: RockServer documentation only: versioned `LocalProfile`, `Favourite`, and
+  `PlaybackHistoryEntry` model; deterministic dedupe/order/retention; RM-004 ID/lifecycle handling;
+  local-first migration/rollback; verified client field mapping; privacy boundary; and human
+  approval decisions.
+- Result: [`rm-007-a-local-personal-data-contract.md`](rm-007-a-local-personal-data-contract.md)
+  distinguishes verified current client behavior from proposed RM-007 design. It preserves IDs for
+  URL/primary-stream/rename changes, follows only merged tombstones, and quarantines split, removed,
+  missing, and unmapped legacy references. The present RockMobile unavailable-voice migration and
+  RockCast URL-derived transitional IDs are not represented as nonexistent favourites/history.
+- Checks: documentation/source consistency review against RM-004 contract, current
+  RockServer/RockCast/RockMobile status, and `git diff --check` passed.
+- Status: ready for human approval; implementation is intentionally deferred to RM-007-B/C.
+
 ## RM-004-D — 2026-08-21 — RockServer shared station catalog integration
 
 - Goal: integrate the approved immutable RockCatalog release candidate without adding a network or
@@ -558,3 +576,67 @@
 - Status: cutover work complete locally, but the RM-004-I acceptance gate is not fully passed until
   RockMobile's offline unit/device verification can run against a readable, licensed Android API-36
   SDK. This is an environment handoff item, not a claimed successful check.
+
+## Shared roadmap — 2026-08-25 — Internet beta planning
+
+- Goal: create a cross-project execution route for RockServer, RockCast, RockMobile, and a future
+  ESP32 client before public internet testing.
+- Scope: documentation only in `docs/shared-product-roadmap.md`, plus status/task recording.
+- Result: RM-007 → RM-011 → RM-012 is the current priority. The plan defines local personal data,
+  account/session/device registration, synchronization and remote control, then ESP32 pairing after
+  hardware arrives. It recommends a single-VPS Docker Compose/Caddy/private-PostgreSQL deployment
+  with immutable-image releases, backup, readiness checks, and rollback.
+- Checks: documentation reviewed for scope; `git diff --check` to be run before handoff.
+- Status: planned; no implementation, live deployment, external access, credentials, API, or client
+  code changes performed.
+
+## Shared roadmap — 2026-08-25 — Executable task decomposition
+
+- Goal: turn the internet-beta roadmap into bounded tasks that can be separately approved and sent
+  to Codex.
+- Scope: documentation only: `docs/shared-product-execution-plan.md`, roadmap link and status/task
+  records.
+- Result: created GATE-001, four RM-007 tasks, four OPS-001 deployment tasks, six RM-011 account
+  tasks, six RM-012 sync/control tasks and two post-hardware ESP32 tasks. Each records repository
+  boundary, dependency, model/reasoning, work and acceptance gate.
+- Checks: `git diff --check` to be run before handoff.
+- Status: planned; this decomposition authorizes no implementation or deployment.
+
+## RM-007-D — 2026-08-25 — Cross-client local personal-data review
+
+- Goal: verify RM-007-A field mapping, stable identity, lifecycle, offline-first behavior,
+  migration/restart safety and rollback across the existing RockMobile RM-007-B and RockCast
+  RM-007-C working trees without changing either client implementation.
+- Scope: read-only client/catalog/source/test review and local offline verification; writes limited
+  to RockServer `docs/**`. Existing dirty changes in all repositories were preserved. No network,
+  production service, secret, live database, device test, shared catalog mutation or commit.
+- Result: added `docs/rm-007-d-cross-client-review.md`. Baseline/catalog identity is consistent and
+  pure lifecycle rules avoid automatic split selection, but four High blockers remain: incompatible
+  RockMobile profile/timestamp shape, destructive fail-open Mobile profile reading without
+  migration rollback, unwired Mobile lifecycle reconciliation, and URL-derived RockCast remote/
+  voice history identity. RM-011-A is blocked; OPS-001-A remains independent design-only work.
+- Checks: release verification passed for all three consumers including the Mobile extended
+  manifest; catalog-tool tests passed 12/12; RockServer `cargo test catalog --lib` passed 14/14;
+  RockCast `cargo test personal_data --lib` was initially blocked by its ordinary cargo lock and
+  then passed 5/5 with `--target-dir C:\repos\rockserver\target\rm007d-rockcast`. RockServer fmt,
+  strict Clippy and full tests passed. RockCast fmt, strict Clippy and full tests passed (55 library
+  + 2 relay integration; 8 live-network tests ignored). RockMobile
+  targeted unit and lint invocations used process-local
+  `-Duser.home=C:\Users\alex` sequentially, but both stopped before compilation on the inaccessible
+  Gradle wrapper `.zip.lck`; lint is not passed and the three known errors were not cleared.
+- Status: **not passed**; remediate every High finding and repeat the same-fixture cross-client
+  review before RM-011-A.
+
+## RM-007-D remediation — 2026-08-25
+
+- Goal: remediate every High/Medium implementation finding from the cross-client review without
+  changing shared catalog data or adding server/auth/sync functionality.
+- Result: RockMobile portable v1 storage, safe legacy migration/rollback, lifecycle integration and
+  resolver edge cases were implemented; RockCast canonical remote identity, favourite merge,
+  migration counts and explicit rollback were implemented. Client documentation was updated.
+- Checks: RockCast fmt, strict Clippy and full tests passed (55 library + 2 relay integration; 8
+  live-network ignored). RockMobile targeted unit and lint commands used the required sequential
+  process-local `-Duser.home=C:\Users\alex` policy but both stopped before compilation on the
+  inaccessible Gradle wrapper lock.
+- Status: implementation findings remediated; cross-client gate remains **not passed** until
+  RockMobile compile/unit/lint verification can execute successfully.
