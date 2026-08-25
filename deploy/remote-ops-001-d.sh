@@ -5,6 +5,7 @@ set -euo pipefail
 action="${1:?action required}"
 release_root="/opt/rockserver"
 env_file="$release_root/release.env"
+host_log_dir="/home/rockserver/logs"
 
 fail() { printf '%s\n' "$1" >&2; exit 1; }
 require_root() { [ "$(id -u)" -eq 0 ] || fail 'remote operation must run through sudo'; }
@@ -19,6 +20,9 @@ install_docker_if_requested() {
   command -v apt-get >/dev/null 2>&1 || fail 'Automatic Docker installation is implemented only for apt-based Ubuntu/Debian hosts.'
   apt-get update
   apt-get install -y ca-certificates curl docker.io docker-compose-plugin || fail 'Docker prerequisite installation failed.'
+}
+ensure_host_log_dir() {
+  install -d -m 0750 -o 10001 "$host_log_dir"
 }
 write_or_keep_secret() {
   local key="$1" value
@@ -51,6 +55,7 @@ bootstrap() {
   [[ "$deploy_user" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || fail 'unsafe deploy user'
   install_docker_if_requested
   install -d -m 0750 "$release_root" "$release_root/backups" "$release_root/releases" "$release_root/assets/onnx"
+  ensure_host_log_dir
   install_owner_files "$stage"
   write_or_keep_secret POSTGRES_PASSWORD
   write_or_keep_secret ROCKSERVER_API_BEARER_TOKEN
@@ -129,6 +134,7 @@ deploy() {
   local backup container backup_hash domain catalog_version catalog_count compose
   require_root; validate_stage "$stage"
   [ -f "$env_file" ] || fail 'bootstrap has not provisioned the protected runtime env-file'
+  ensure_host_log_dir
   install_owner_files "$stage"
   validate_artifact "$stage" "$image" "$commit" "$expected_id" "$archive_hash"
   download_onnx

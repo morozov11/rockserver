@@ -54,11 +54,15 @@ OPS-001-D, а не публикацией из этого репозитория
 | --- | --- | --- | --- |
 | PostgreSQL cluster | RockServer service owner | named volume `rockserver-postgres-data` | восстанавливается только из проверенного encrypted logical backup |
 | Caddy certificates/account state | VPS operator | named volumes `caddy-data`, `caddy-config` | восстанавливается с VPS volume; повторная выдача сертификата допустима только для реального домена |
+| RockServer JSON logs | RockServer service owner | host bind mount `/home/rockserver/logs` → `/var/log/rockserver` | сохраняются при пересоздании контейнера; rotation/retention требуют отдельной host policy |
 | Images и Compose/config templates | release owner | staging: checksummed SSH artifact; production policy is separate | immutable commit-SHA image; не редактируется в работающем контейнере |
 | Backups | backup owner, отдельный от runtime VPS | зашифрованное off-VPS storage | доступ проверяется restore rehearsal; retention и encryption key custody требуют human approval |
 
 Docker volumes не являются backup. PostgreSQL не должен получать host bind mount с неясным
 ownership; backup-файлы не должны храниться в repository, image или обычном service volume.
+Production bootstrap/deploy creates `/home/rockserver/logs` with ownership for the container UID
+`10001` before Compose starts. Both the RockServer service and the one-shot catalog/vector seed
+job write their structured file logs there; console output remains available through Docker logs.
 
 ## Production environment contract
 

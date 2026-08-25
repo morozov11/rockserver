@@ -1,6 +1,12 @@
 services:
   rockserver:
     image: ${ROCKSERVER_IMAGE:?ROCKSERVER_IMAGE must point to an approved immutable image}
+    volumes:
+      - /home/rockserver/logs:/var/log/rockserver
+
+  catalog_seed:
+    volumes:
+      - /home/rockserver/logs:/var/log/rockserver
 
   caddy:
     environment:
