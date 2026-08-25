@@ -77,6 +77,7 @@ try {
     if ($remote -notmatch 'transferred image artifact checksum mismatch' -or $remote -notmatch 'revision label binds that verified artifact to commit' -or $remote -match 'loaded image ID does not match') { throw 'cross-engine image artifact verification is not portable' }
     if ($remote -notmatch 'Accept the former five-argument form' -or $remote -notmatch 'deploy requires stage, image, commit, and artifact hash') { throw 'operator-script upgrade compatibility is missing' }
     if ($remote -notmatch 'ROCKSERVER_IMAGE="\$image" \$compose exec' -or $remote -notmatch 'ROCKSERVER_IMAGE="\$image" \$compose ps') { throw 'Compose interpolation environment is not preserved for database commands' }
+    if ($remote -notmatch 'os\.chmod\(path, 0o755 if name == .libonnxruntime\.so. else 0o644\)') { throw 'ONNX runtime executable permissions are not repaired after download' }
     $backupAt = $remote.IndexOf('pg_dump --format=custom')
     $seedAt = $remote.IndexOf('run --rm catalog_seed')
     $readyAt = $remote.IndexOf('/health/ready')

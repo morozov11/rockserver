@@ -119,6 +119,7 @@ for item in assets:
         raise SystemExit('ONNX manifest requires exact HTTPS URLs and SHA-256 values')
     path = root / name
     if path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() == expected:
+        os.chmod(path, 0o755 if name == 'libonnxruntime.so' else 0o644)
         continue
     temp = path.with_suffix(path.suffix + '.download')
     subprocess.run(['curl', '--fail', '--location', '--proto', '=https', '--silent', '--show-error', '--output', str(temp), url], check=True)
@@ -137,6 +138,7 @@ for item in assets:
         os.replace(extracted, path)
     else:
         os.replace(temp, path)
+    os.chmod(path, 0o755 if name == 'libonnxruntime.so' else 0o644)
 PY
 }
 deploy() {
