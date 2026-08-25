@@ -47,6 +47,8 @@ try {
     $deploySsh = Get-Ops001DSshCommand deploy 'key path' 'deploy@host' "sudo -n /opt/rockserver/remote-ops-001-d.sh deploy '/tmp/stage' 'rockserver:sha-$commit' '$commit' '$imageId' $('b' * 64)"
     if ($bootstrapSsh -notcontains '-tt' -or ($bootstrapSsh -join ' ') -notmatch 'sudo env' -or ($bootstrapSsh -join ' ') -match 'password') { throw 'bootstrap SSH/sudo construction is not interactive and secret-safe' }
     if ($deploySsh -contains '-tt' -or $deploySsh -notcontains 'BatchMode=yes' -or ($deploySsh -join ' ') -notmatch 'sudo -n') { throw 'normal deploy SSH/sudo construction is not non-interactive' }
+    $launcherScript = Get-Content -Raw (Join-Path $root 'deploy/ops-001-d.ps1')
+    if ($launcherScript -notmatch 'cmd\.exe /d /c.*ssh-keygen.*-N') { throw 'Windows-safe empty-passphrase SSH key generation is missing' }
 
     '{"enabled":true,"assetDirectory":"/opt/rockserver/assets/onnx","assets":[{"name":"model.onnx","url":"REQUIRED_OFFICIAL_HTTPS_URL","sha256":"REQUIRED_64_HEX_SHA256"}]}' | Set-Content "$temp/onnx.json"
     Assert-Throws { Test-Ops001DOnnxManifest "$temp/onnx.json" | Out-Null } 'incomplete ONNX lock was accepted'

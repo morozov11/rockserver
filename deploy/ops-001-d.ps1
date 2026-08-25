@@ -32,7 +32,19 @@ $key = Join-Path $keyDir 'rockserver_ed25519'
 $target = "$($inventory.SshUser)@$($inventory.SshHost)"
 if (-not (Test-Path -LiteralPath $key)) {
     New-Item -ItemType Directory -Force -Path $keyDir | Out-Null
-    & ssh-keygen -q -t ed25519 -f $key -N ''
+    # Windows PowerShell drops an empty native argument, turning `-N ''` into a
+    # missing value. Run from the key directory through cmd.exe so `-N ""` is
+    # passed to OpenSSH as an actual empty passphrase.
+    Push-Location $keyDir
+    try {
+        if (Get-Command cmd.exe -ErrorAction SilentlyContinue) {
+            & cmd.exe /d /c 'ssh-keygen -q -t ed25519 -f rockserver_ed25519 -N ""'
+        } else {
+            & ssh-keygen -q -t ed25519 -f $key -N ([string]::Empty)
+        }
+    } finally {
+        Pop-Location
+    }
     if ($LASTEXITCODE -ne 0) { throw 'Could not generate the ignored deployment SSH key.' }
     Write-Host 'OpenSSH will now prompt interactively for the VPS login password once. No password is read from config, passed in argv, stored, or logged.'
     Get-Content -LiteralPath "$key.pub" | & ssh $target 'umask 077; mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys'
