@@ -73,6 +73,7 @@ try {
     if ($backupAt -lt 0 -or $seedAt -le $backupAt -or $readyAt -le $seedAt -or $remote -match 'fixture') { throw 'backup/seed/readiness fail-closed ordering changed' }
     if ($remote -notmatch 'applies embedded migrations' -or $remote -notmatch 'exact HTTPS URLs and SHA-256' -or $launcher -notmatch 'onnx-assets.lock.json') { throw 'migration or automatic ONNX safeguards are missing' }
     if ($compose -notmatch 'import_full_catalog.*backfill_embeddings' -or $compose -notmatch 'ROCKSERVER_SEMANTIC_PROVIDER: onnx-e5-local' -or $compose -notmatch 'ORT_DYLIB_PATH') { throw 'first-deploy ONNX backfill is not wired after the full catalog import' }
+    if ($compose -notmatch 'ROCKSERVER_LOG_RETENTION_DAYS: \$\{ROCKSERVER_LOG_RETENTION_DAYS:-14\}') { throw 'RockServer log retention is not configured for production' }
     if ($productionCompose -notmatch '/home/rockserver/logs:/var/log/rockserver' -or $remote -notmatch 'host_log_dir="/home/rockserver/logs"' -or $remote -notmatch 'ensure_host_log_dir') { throw 'persistent host log directory is not wired for production' }
 
     Write-Host 'OPS-001-D local tests passed: registry-free artifact identity, password-free inventory, secret-safe env/summary, TTY/sudo construction, seed, and automatic pinned ONNX safeguards.'
