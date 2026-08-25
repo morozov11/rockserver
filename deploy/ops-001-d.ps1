@@ -11,6 +11,19 @@ Import-Module (Join-Path $PSScriptRoot 'ops-001-d.psm1') -Force
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($InventoryPath)) { $InventoryPath = Join-Path $PSScriptRoot 'private.inventory.psd1' }
 
+function Initialize-Ops001DLocalDocker {
+    # Docker Desktop on Windows listens through a named pipe. A stale WSL/Linux
+    # DOCKER_HOST makes the Windows client try unix:///var/run/docker.sock instead.
+    if ($env:OS -eq 'Windows_NT' -and $env:DOCKER_HOST -match '^unix://') {
+        Write-Host 'Ignoring incompatible Unix DOCKER_HOST for this Windows deployment process.'
+        $env:DOCKER_HOST = 'npipe:////./pipe/docker_engine'
+    }
+    $null = & docker info --format '{{.ServerVersion}}' 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Local Docker Engine is unavailable. Start Docker Desktop and wait for “Engine running”, then retry the deploy command.'
+    }
+}
+
 $inventoryFile = Test-Ops001DPrivateInventory -Path $InventoryPath -RepositoryRoot $repoRoot
 $inventory = Import-PowerShellDataFile -LiteralPath $inventoryFile
 Test-Ops001DInventoryValues -Inventory $inventory | Out-Null
@@ -26,6 +39,8 @@ if ($DryRun) {
     Write-Host "Dry-run passed: action=$Action catalog=$($catalog.Version) count=$($catalog.Count) $summary"
     return
 }
+
+Initialize-Ops001DLocalDocker
 
 $keyDir = Join-Path $PSScriptRoot '.keys'
 $key = Join-Path $keyDir 'rockserver_ed25519'
