@@ -1,6 +1,35 @@
 # Project status
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
+
+## MVP-001-A — public API contract and abuse model (2026-08-26)
+
+Added approval-only `docs/mvp-001-a-public-api-contract.md` and a separate proposed OpenAPI
+contract. They specify the exact five-endpoint anonymous `/v1` allowlist for bounded catalog,
+search and voice flows; account, device, sync, admin, operations, health and legacy routes remain
+protected or infrastructure-only. The proposal explicitly bans shared Bearer tokens and client
+secrets for public users, and fixes draft rate/audio/session/concurrency limits, error semantics,
+aggregate metrics and redacted logging. Existing `api/openapi.yaml`, router/runtime behavior,
+RockCast and RockMobile were not changed; current protected routes remain protected until the
+separately reviewed MVP-001-B implementation.
+
+Владелец одобрил proposal 2026-08-26: в MVP входят paged public catalog, text и streaming voice;
+draft quotas являются стартовыми и требуют отдельного review для увеличения. До публичного rollout
+proxy CIDRs, rate-limit store и retention keyed-IP hashes должны быть заданы в deployment
+configuration; в implementation до этого действует fail-closed direct-peer policy. Existing
+`/api/v1` aliases остаются protected. MVP-001-B разрешена к реализации в утверждённых границах.
+Local checks are recorded in `docs/tasks.md`.
+
+## Station icons — шаг 0: контракт (2026-08-26)
+
+Документационный шаг 0 завершён в `docs/roadmap/station-icons.md`. В нём явно как
+**планируемое**, а не текущее поведение, зафиксированы RockServer-first URL
+`GET /api/v1/stations/{id}/icon`, nullable `faviconUrl`, внутренний `source_url`, приоритет
+источников, формат/лимиты, `200`/`304`/`404`, cache policy и rollout/rollback. Проверка текущего
+`api/openapi.yaml` подтвердила, что endpoint и поле ещё не входят в действующий HTTP-контракт.
+Маршруты, Rust-код, SQL migrations, OpenAPI и service diagram не менялись; текущий сервис не
+получил выдачу или загрузку station icons.
+Проверки документации и `git diff --check` (включая no-index check нового roadmap-файла) прошли.
 
 ## OPS-001-D automated VPS bootstrap and staging rollout (2026-08-25)
 
@@ -496,3 +525,25 @@ warnings remain non-fatal).
 The actual GHCR publication, production backup/deploy, public HTTPS readiness, and live rollback
 remain manual actions requiring an approved registry/release environment, owned domain/VPS,
 external backup target and injected secrets. They were not performed or claimed here.
+
+## MVP-001-B — anonymous `/v1` public policy (local implementation)
+
+`/v1/catalog/stations`, `/v1/catalog/stations/{station_id}`, `/v1/search`,
+`/v1/voice/command`, and `/v1/voice/stream` now use the approved anonymous route boundary;
+the existing `/api/v1` aliases retain Bearer authentication. Anonymous JSON is capped at 16 KiB;
+search/transcript length is capped at 500 characters and results at 20/10. Until trusted proxy
+CIDRs are configured, forwarded headers are ignored and a conservative direct-peer fallback
+bucket is used. Voice streaming has global admission, 16 kHz PCM16 mono, 32 KiB frames,
+2 MiB/60-second audio, and bounded idle/wall/STT/search time.
+
+The changed public handlers log only aggregate-safe fields; request content, transcripts, URLs,
+credentials, provider payloads, IPs and forwarded headers are not emitted. `api/openapi.yaml`
+remains unchanged until it is reconciled line-for-line with the runtime contract.
+
+## MVP-001-C follow-up — local launcher credential fallback
+
+`run-rockserver-local.ps1` no longer rejects a local `.env` solely because it
+omits `ROCKSERVER_API_BEARER_TOKEN`. It generates a random, non-production,
+process-local development credential only for the legacy protected `/api/v1`
+and local admin access gate. The anonymous `/v1` allowlist remains
+unauthenticated; production startup policy is unchanged.

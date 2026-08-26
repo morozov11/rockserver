@@ -1,10 +1,10 @@
 //! Axum routes and transport DTOs for the RockServer HTTP API.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     future::Future,
-    sync::Arc,
     sync::atomic::{AtomicU64, Ordering},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -12,7 +12,7 @@ use axum::{
     Json, Router,
     body::{Body, to_bytes},
     extract::{
-        State, WebSocketUpgrade,
+        Path, Query, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
     http::{HeaderMap, HeaderValue, StatusCode, header},
@@ -42,13 +42,48 @@ static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 /// Production startup must supply a unique secret through [`router_with_services_and_bearer_token`].
 pub const TEST_API_BEARER_TOKEN: &str = "rockserver-offline-test-token";
 
-const MAX_JSON_REQUEST_BODY_BYTES: usize = 64 * 1024;
+const MAX_PUBLIC_JSON_REQUEST_BODY_BYTES: usize = 16 * 1024;
 const REQUEST_ID_HEADER: &str = "x-request-id";
-const MAX_STREAM_AUDIO_CHUNK_BYTES: usize = 64 * 1024;
-const MAX_STREAM_AUDIO_BYTES: usize = 10 * 1024 * 1024;
-const DEFAULT_STREAM_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_STREAM_AUDIO_CHUNK_BYTES: usize = 32 * 1024;
+const MAX_STREAM_AUDIO_BYTES: usize = 2 * 1024 * 1024;
+const MAX_STREAM_AUDIO_SECONDS: usize = 60;
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
+const STREAM_WALL_TIMEOUT: Duration = Duration::from_secs(75);
+const DEFAULT_STREAM_OPERATION_TIMEOUT: Duration = Duration::from_secs(15);
 /// Maximum duration the voice-command transport waits for query interpretation and search.
 pub const DEFAULT_VOICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
+
+const RATE_WINDOW: Duration = Duration::from_secs(60);
+const RETRY_AFTER_SECONDS: u64 = 60;
+const VOICE_CAPACITY_RETRY_AFTER_SECONDS: u64 = 30;
+const GLOBAL_VOICE_SESSIONS: usize = 100;
+
+#[derive(Clone, Copy)]
+struct PublicLimit {
+    requests: usize,
+    burst: usize,
+}
+
+const CATALOG_LIST_LIMIT: PublicLimit = PublicLimit {
+    requests: 60,
+    burst: 20,
+};
+const CATALOG_GET_LIMIT: PublicLimit = PublicLimit {
+    requests: 120,
+    burst: 40,
+};
+const SEARCH_LIMIT: PublicLimit = PublicLimit {
+    requests: 30,
+    burst: 10,
+};
+const VOICE_COMMAND_LIMIT: PublicLimit = PublicLimit {
+    requests: 12,
+    burst: 4,
+};
+const VOICE_UPGRADE_LIMIT: PublicLimit = PublicLimit {
+    requests: 6,
+    burst: 2,
+};
 
 /// Stable JSON response returned by the health endpoints.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -157,18 +192,21 @@ pub fn router_with_speech_recognizers_and_bearer_token(
         speech_recognizers,
         voice_command_timeout,
         api_bearer_token: api_bearer_token.into(),
+        public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
     };
 
     Router::new()
         .route("/admin", get(admin_console))
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
+        .route("/v1/catalog/stations", get(public_catalog_list))
+        .route("/v1/catalog/stations/{station_id}", get(public_catalog_get))
         .route("/api/v1/search", post(search))
-        .route("/v1/search", post(search))
+        .route("/v1/search", post(public_search))
         .route("/api/v1/voice/command", post(voice_command))
-        .route("/v1/voice/command", post(voice_command))
+        .route("/v1/voice/command", post(public_voice_command))
         .route("/api/v1/voice/stream", get(voice_stream))
-        .route("/v1/voice/stream", get(voice_stream))
+        .route("/v1/voice/stream", get(public_voice_stream))
         .with_state(state)
         .layer(
             TraceLayer::new_for_http()
@@ -253,16 +291,52 @@ async fn voice_stream(
     if !state.is_authorized(&headers) {
         return unauthorized_response(&request_id);
     }
-    tracing::info!(%request_id, "voice websocket upgrade requested");
+    voice_stream_impl(state, headers, upgrade, request_id, None).await
+}
+
+/// Admits the approved anonymous WebSocket voice session without trusting forwarded headers.
+async fn public_voice_stream(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    let request_id = request_id(&headers);
+    if let Err(response) =
+        state.public_request_allowed("voice_stream", VOICE_UPGRADE_LIMIT, &request_id)
+    {
+        return *response;
+    }
+    let slot = match state.reserve_voice_slot(&request_id) {
+        Ok(slot) => slot,
+        Err(response) => return *response,
+    };
+    voice_stream_impl(state, headers, upgrade, request_id, Some(slot)).await
+}
+
+async fn voice_stream_impl(
+    state: AppState,
+    _headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+    request_id: String,
+    slot: Option<VoiceSlot>,
+) -> Response {
     let socket_request_id = request_id.clone();
     let response = upgrade
         .max_message_size(MAX_STREAM_AUDIO_CHUNK_BYTES + 1024)
-        .on_upgrade(move |socket| run_voice_stream(socket, state, socket_request_id));
+        .on_upgrade(move |socket| async move {
+            let _slot = slot;
+            run_voice_stream(socket, state, socket_request_id).await
+        });
     with_request_id(response, &request_id)
 }
 
 async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: String) {
-    let Some(Ok(Message::Text(start_message))) = socket.recv().await else {
+    let Some(Ok(Message::Text(start_message))) =
+        tokio::time::timeout(STREAM_IDLE_TIMEOUT, socket.recv())
+            .await
+            .ok()
+            .flatten()
+    else {
         let _ = send_stream_error(
             &mut socket,
             &request_id,
@@ -287,14 +361,6 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
             return;
         }
     };
-    tracing::info!(
-        %request_id,
-        locale = %start.locale,
-        sample_rate_hz = start.sample_rate_hz,
-        limit = start.limit,
-        excluded_stations = start.exclude_station_ids.len(),
-        "voice websocket session started"
-    );
 
     let mut session = match tokio::time::timeout(
         DEFAULT_STREAM_OPERATION_TIMEOUT,
@@ -347,30 +413,51 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
         return;
     }
 
+    let started_at = tokio::time::Instant::now();
     let mut audio_bytes = 0usize;
     let mut last_final_transcript = None;
-    while let Some(message) = socket.recv().await {
+    while started_at.elapsed() < STREAM_WALL_TIMEOUT {
+        let Some(message) = tokio::time::timeout(STREAM_IDLE_TIMEOUT, socket.recv())
+            .await
+            .ok()
+            .flatten()
+        else {
+            let _ = send_stream_error(
+                &mut socket,
+                &request_id,
+                "voice_timeout",
+                "Voice session timed out.",
+                json!({"timeout_ms": STREAM_IDLE_TIMEOUT.as_millis()}),
+            )
+            .await;
+            return;
+        };
         match message {
             Ok(Message::Binary(audio)) => {
-                if audio.is_empty() || audio.len() > MAX_STREAM_AUDIO_CHUNK_BYTES {
+                if audio.is_empty()
+                    || audio.len() > MAX_STREAM_AUDIO_CHUNK_BYTES
+                    || audio.len() % 2 != 0
+                {
                     let _ = send_stream_error(
                         &mut socket,
                         &request_id,
                         "audio_chunk_invalid",
-                        "Audio chunks must contain between 1 and 65536 bytes.",
+                        "Audio frames must be bounded PCM16 data.",
                         json!({"max_chunk_bytes": MAX_STREAM_AUDIO_CHUNK_BYTES}),
                     )
                     .await;
                     return;
                 }
                 audio_bytes = audio_bytes.saturating_add(audio.len());
-                if audio_bytes > MAX_STREAM_AUDIO_BYTES {
+                if audio_bytes > MAX_STREAM_AUDIO_BYTES
+                    || audio_bytes / 2 / 16_000 > MAX_STREAM_AUDIO_SECONDS
+                {
                     let _ = send_stream_error(
                         &mut socket,
                         &request_id,
-                        "audio_limit_exceeded",
+                        "audio_too_large",
                         "Streaming session audio limit was exceeded.",
-                        json!({"max_audio_bytes": MAX_STREAM_AUDIO_BYTES}),
+                        json!({"max_bytes": MAX_STREAM_AUDIO_BYTES}),
                     )
                     .await;
                     return;
@@ -394,7 +481,6 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
                 }
             }
             Ok(Message::Text(text)) if is_commit_event(&text) => {
-                tracing::info!(%request_id, audio_bytes, "voice audio committed");
                 let updates = match speech_operation(session.finish()).await {
                     Ok(updates) => updates,
                     Err(error) => {
@@ -443,6 +529,14 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
             }
         }
     }
+    let _ = send_stream_error(
+        &mut socket,
+        &request_id,
+        "voice_timeout",
+        "Voice session timed out.",
+        json!({"timeout_ms": STREAM_WALL_TIMEOUT.as_millis()}),
+    )
+    .await;
 }
 
 fn newest_final_transcript(updates: &[TranscriptUpdate]) -> Option<String> {
@@ -474,11 +568,141 @@ async fn ready(State(state): State<AppState>) -> Response {
     }
 }
 
+#[derive(Deserialize)]
+struct CatalogQuery {
+    #[serde(default)]
+    limit: Option<u8>,
+    #[serde(default)]
+    cursor: Option<String>,
+}
+
+/// Lists the bounded active public catalog using an opaque stable-ID cursor.
+async fn public_catalog_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<CatalogQuery>,
+) -> Response {
+    let request_id = request_id(&headers);
+    if let Err(response) =
+        state.public_request_allowed("catalog_list", CATALOG_LIST_LIMIT, &request_id)
+    {
+        return *response;
+    }
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=50).contains(&limit)
+        || query.cursor.as_ref().is_some_and(|cursor| {
+            cursor.is_empty()
+                || cursor.len() > 512
+                || !cursor
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+    {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "malformed_request",
+            "Catalog request is invalid.",
+            &request_id,
+            json!({"field":"limit_or_cursor"}),
+        );
+    }
+    let stations = match state
+        .search_service
+        .public_catalog(query.cursor.as_deref(), usize::from(limit))
+        .await
+    {
+        Ok(stations) => stations,
+        Err(_) => {
+            return error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "service_unavailable",
+                "Catalog is temporarily unavailable.",
+                &request_id,
+                json!({}),
+            );
+        }
+    };
+    let next_cursor = (stations.len() == usize::from(limit))
+        .then(|| stations.last().map(|station| station.id.clone()))
+        .flatten();
+    with_request_id(
+        Json(CatalogPageDto {
+            request_id: request_id.clone(),
+            stations: stations.iter().map(PublicStationDto::from).collect(),
+            next_cursor,
+        })
+        .into_response(),
+        &request_id,
+    )
+}
+
+/// Returns one active public station or a safe not-found response.
+async fn public_catalog_get(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(station_id): Path<String>,
+) -> Response {
+    let request_id = request_id(&headers);
+    if let Err(response) =
+        state.public_request_allowed("catalog_get", CATALOG_GET_LIMIT, &request_id)
+    {
+        return *response;
+    }
+    if station_id.is_empty() || station_id.len() > 128 {
+        return error_response(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Station was not found.",
+            &request_id,
+            json!({}),
+        );
+    }
+    match state.search_service.public_station(&station_id).await {
+        Ok(Some(station)) => with_request_id(
+            Json(PublicStationDto::from(&station)).into_response(),
+            &request_id,
+        ),
+        Ok(None) => error_response(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Station was not found.",
+            &request_id,
+            json!({}),
+        ),
+        Err(_) => error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "service_unavailable",
+            "Catalog is temporarily unavailable.",
+            &request_id,
+            json!({}),
+        ),
+    }
+}
+
 async fn search(State(state): State<AppState>, headers: HeaderMap, body: Body) -> Response {
     let request_id = request_id(&headers);
     if !state.is_authorized(&headers) {
         return unauthorized_response(&request_id);
     }
+    search_impl(state, headers, body, request_id, 50).await
+}
+
+/// Serves the approved anonymous, bounded station-search operation.
+async fn public_search(State(state): State<AppState>, headers: HeaderMap, body: Body) -> Response {
+    let request_id = request_id(&headers);
+    if let Err(response) = state.public_request_allowed("search", SEARCH_LIMIT, &request_id) {
+        return *response;
+    }
+    search_impl(state, headers, body, request_id, 20).await
+}
+
+async fn search_impl(
+    state: AppState,
+    headers: HeaderMap,
+    body: Body,
+    request_id: String,
+    max_limit: u8,
+) -> Response {
     let request = match parse_json_request::<SearchRequestDto>(&headers, body, &request_id).await {
         Ok(request) => request,
         Err(response) => return response,
@@ -495,33 +719,35 @@ async fn search(State(state): State<AppState>, headers: HeaderMap, body: Body) -
             );
         }
     };
-    tracing::info!(
-        %request_id,
-        query = %validated.query,
-        locale = %validated.locale,
-        limit = validated.limit,
-        excluded_stations = validated.exclude_station_ids.len(),
-        "station search request"
-    );
+    if validated.limit > usize::from(max_limit) {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_failed",
+            "Request validation failed.",
+            &request_id,
+            json!({"limit": format!("must be between 1 and {max_limit}")}),
+        );
+    }
 
     let constraints = SearchConstraints {
         limit: validated.limit,
         excluded_station_ids: validated.exclude_station_ids,
     };
-    let outcome = match state
-        .search_service
-        .interpret_and_search(
+    let outcome = match tokio::time::timeout(
+        state.voice_command_timeout,
+        state.search_service.interpret_and_search(
             QueryParserInput {
                 query: validated.query,
                 locale: validated.locale,
             },
             &constraints,
-        )
-        .await
+        ),
+    )
+    .await
     {
-        Ok(outcome) => outcome,
-        Err(error) => {
-            tracing::error!(%error, %request_id, "station search failed");
+        Ok(Ok(outcome)) => outcome,
+        Ok(Err(_)) => {
+            tracing::warn!(%request_id, endpoint = "search", "public-safe search failure");
             return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -530,26 +756,17 @@ async fn search(State(state): State<AppState>, headers: HeaderMap, body: Body) -
                 json!({}),
             );
         }
+        Err(_) => {
+            return error_response(
+                StatusCode::GATEWAY_TIMEOUT,
+                "search_timeout",
+                "Station search timed out.",
+                &request_id,
+                json!({"timeout_ms": state.voice_command_timeout.as_millis()}),
+            );
+        }
     };
-    tracing::info!(
-        %request_id,
-        terms = ?outcome.query.terms,
-        tags = ?outcome.query.tags,
-        language = ?outcome.query.language,
-        country_code = ?outcome.query.country_code,
-        stations = outcome.stations.len(),
-        "station search completed"
-    );
-    for (rank, station) in outcome.stations.iter().enumerate() {
-        tracing::info!(
-            %request_id,
-            rank,
-            station_id = %station.station.id,
-            station = %station.station.name,
-            score = station.score,
-            "station search candidate"
-        );
-    }
+    tracing::info!(%request_id, endpoint = "search", status = 200, stations = outcome.stations.len(), "public request completed");
 
     with_request_id(
         Json(SearchResponseDto {
@@ -575,6 +792,31 @@ async fn voice_command(State(state): State<AppState>, headers: HeaderMap, body: 
     if !state.is_authorized(&headers) {
         return unauthorized_response(&request_id);
     }
+    voice_command_impl(state, headers, body, request_id, 50).await
+}
+
+/// Serves the approved anonymous, transcript-only voice command operation.
+async fn public_voice_command(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    let request_id = request_id(&headers);
+    if let Err(response) =
+        state.public_request_allowed("voice_command", VOICE_COMMAND_LIMIT, &request_id)
+    {
+        return *response;
+    }
+    voice_command_impl(state, headers, body, request_id, 10).await
+}
+
+async fn voice_command_impl(
+    state: AppState,
+    headers: HeaderMap,
+    body: Body,
+    request_id: String,
+    max_limit: u8,
+) -> Response {
     let request =
         match parse_json_request::<VoiceCommandRequestDto>(&headers, body, &request_id).await {
             Ok(request) => request,
@@ -592,13 +834,15 @@ async fn voice_command(State(state): State<AppState>, headers: HeaderMap, body: 
             );
         }
     };
-    tracing::info!(
-        %request_id,
-        transcript = %validated.transcript,
-        locale = %validated.locale,
-        limit = validated.limit,
-        "voice command request"
-    );
+    if validated.limit > usize::from(max_limit) {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_failed",
+            "Request validation failed.",
+            &request_id,
+            json!({"limit": format!("must be between 1 and {max_limit}")}),
+        );
+    }
     let constraints = SearchConstraints {
         limit: validated.limit,
         excluded_station_ids: validated.exclude_station_ids,
@@ -616,8 +860,8 @@ async fn voice_command(State(state): State<AppState>, headers: HeaderMap, body: 
     .await
     {
         Ok(Ok(outcome)) => outcome,
-        Ok(Err(error)) => {
-            tracing::error!(%error, %request_id, "voice command search failed");
+        Ok(Err(_error)) => {
+            tracing::warn!(%request_id, endpoint = "voice_command", "public-safe voice command failure");
             return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -627,7 +871,6 @@ async fn voice_command(State(state): State<AppState>, headers: HeaderMap, body: 
             );
         }
         Err(_) => {
-            tracing::warn!(%request_id, timeout_ms = state.voice_command_timeout.as_millis(), "voice command search timed out");
             return error_response(
                 StatusCode::GATEWAY_TIMEOUT,
                 "search_timeout",
@@ -644,17 +887,7 @@ async fn voice_command(State(state): State<AppState>, headers: HeaderMap, body: 
         .map(StationResultDto::from)
         .collect::<Vec<_>>();
     let selected_station = stations.first().cloned();
-    tracing::info!(
-        %request_id,
-        transcript = %validated.transcript,
-        terms = ?outcome.query.terms,
-        tags = ?outcome.query.tags,
-        language = ?outcome.query.language,
-        country_code = ?outcome.query.country_code,
-        stations = stations.len(),
-        selected_station = ?selected_station.as_ref().map(|station| station.name.as_str()),
-        "voice command completed"
-    );
+    tracing::info!(%request_id, endpoint = "voice_command", status = 200, stations = stations.len(), "public request completed");
     with_request_id(
         Json(VoiceCommandResponseDto {
             request_id: request_id.clone(),
@@ -898,7 +1131,7 @@ where
             json!({"content_type": "application/json is required"}),
         ));
     }
-    let body = to_bytes(body, MAX_JSON_REQUEST_BODY_BYTES)
+    let body = to_bytes(body, MAX_PUBLIC_JSON_REQUEST_BODY_BYTES)
         .await
         .map_err(|_| {
             error_response(
@@ -906,25 +1139,25 @@ where
                 "request_too_large",
                 "Request body exceeds the allowed size.",
                 request_id,
-                json!({"max_bytes": MAX_JSON_REQUEST_BODY_BYTES}),
+                json!({"max_bytes": MAX_PUBLIC_JSON_REQUEST_BODY_BYTES}),
             )
         })?;
-    let value = serde_json::from_slice::<Value>(&body).map_err(|error| {
+    let value = serde_json::from_slice::<Value>(&body).map_err(|_error| {
         error_response(
             StatusCode::BAD_REQUEST,
             "malformed_request",
             "Request body must contain valid JSON.",
             request_id,
-            json!({"body": error.to_string()}),
+            json!({"field":"body"}),
         )
     })?;
-    serde_json::from_value(value).map_err(|error| {
+    serde_json::from_value(value).map_err(|_error| {
         error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
             "validation_failed",
             "Request validation failed.",
             request_id,
-            json!({"request": error.to_string()}),
+            json!({"field":"request"}),
         )
     })
 }
@@ -1005,9 +1238,73 @@ struct AppState {
     speech_recognizers: SpeechRecognizers,
     voice_command_timeout: Duration,
     api_bearer_token: String,
+    public_limits: Arc<Mutex<PublicLimitState>>,
+}
+
+#[derive(Default)]
+struct PublicLimitState {
+    requests: HashMap<&'static str, Vec<std::time::Instant>>,
+    active_voice: usize,
 }
 
 impl AppState {
+    /// Applies the fail-closed direct-peer anonymous quota.
+    ///
+    /// The current deployment has no approved trusted-proxy CIDRs, therefore forwarded headers
+    /// are intentionally ignored and all direct peers share the conservative process bucket.
+    fn public_request_allowed(
+        &self,
+        endpoint: &'static str,
+        limit: PublicLimit,
+        request_id: &str,
+    ) -> Result<(), Box<Response>> {
+        let mut state = self
+            .public_limits
+            .lock()
+            .expect("public limiter mutex is not poisoned");
+        let now = std::time::Instant::now();
+        let bucket = state.requests.entry(endpoint).or_default();
+        bucket.retain(|seen| now.duration_since(*seen) < RATE_WINDOW);
+        if bucket.len() >= limit.burst {
+            tracing::warn!(%request_id, endpoint, limit_scope = "direct_peer", requests_per_minute = limit.requests, "public rate limit rejected");
+            return Err(Box::new(retry_after(
+                error_response(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "rate_limited",
+                    "Request rate limit exceeded.",
+                    request_id,
+                    json!({"limit_scope":"direct_peer"}),
+                ),
+                RETRY_AFTER_SECONDS,
+            )));
+        }
+        bucket.push(now);
+        Ok(())
+    }
+
+    /// Reserves a global public voice slot before a WebSocket upgrade.
+    fn reserve_voice_slot(&self, request_id: &str) -> Result<VoiceSlot, Box<Response>> {
+        let mut state = self
+            .public_limits
+            .lock()
+            .expect("public limiter mutex is not poisoned");
+        if state.active_voice >= GLOBAL_VOICE_SESSIONS {
+            return Err(Box::new(retry_after(
+                error_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "voice_capacity_exhausted",
+                    "Voice service is temporarily at capacity.",
+                    request_id,
+                    json!({}),
+                ),
+                VOICE_CAPACITY_RETRY_AFTER_SECONDS,
+            )));
+        }
+        state.active_voice += 1;
+        Ok(VoiceSlot {
+            limiter: Arc::clone(&self.public_limits),
+        })
+    }
     /// Verifies the configured opaque application credential without logging the supplied value.
     fn is_authorized(&self, headers: &HeaderMap) -> bool {
         let Some(value) = headers
@@ -1021,6 +1318,26 @@ impl AppState {
         };
         constant_time_eq(token.as_bytes(), self.api_bearer_token.as_bytes())
     }
+}
+
+struct VoiceSlot {
+    limiter: Arc<Mutex<PublicLimitState>>,
+}
+impl Drop for VoiceSlot {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.limiter.lock() {
+            state.active_voice = state.active_voice.saturating_sub(1);
+        }
+    }
+}
+
+fn retry_after(mut response: Response, seconds: u64) -> Response {
+    response.headers_mut().insert(
+        header::RETRY_AFTER,
+        HeaderValue::from_str(&seconds.to_string())
+            .expect("positive retry-after is a valid header"),
+    );
+    response
 }
 
 /// Compares opaque credentials without returning early for a matching prefix.
@@ -1088,11 +1405,8 @@ impl TryFrom<VoiceStreamStartDto> for ValidatedVoiceStreamStart {
                 SpeechRecognizerMode::default()
             }
         };
-        if !matches!(sample_rate_hz, 8_000 | 16_000 | 24_000 | 48_000) {
-            details.insert(
-                "sample_rate_hz".to_owned(),
-                json!("must be one of 8000, 16000, 24000, or 48000"),
-            );
+        if sample_rate_hz != 16_000 {
+            details.insert("sample_rate_hz".to_owned(), json!("must equal 16000"));
         }
         let validated = ValidatedSearchRequest::try_from(SearchRequestDto {
             query: "stream".to_owned(),
@@ -1105,7 +1419,7 @@ impl TryFrom<VoiceStreamStartDto> for ValidatedVoiceStreamStart {
                 locale: validated.locale,
                 sample_rate_hz,
                 recognizer_mode,
-                limit: validated.limit,
+                limit: validated.limit.min(10),
                 exclude_station_ids: validated.exclude_station_ids,
             }),
             Ok(_) => Err(details),
@@ -1341,6 +1655,44 @@ struct StationResultDto {
     score: f64,
     reason: String,
     health: &'static str,
+}
+
+/// Minimal public station representation that excludes ranking and provider metadata.
+#[derive(Clone, Serialize)]
+struct PublicStationDto {
+    id: String,
+    name: String,
+    stream_url: String,
+    homepage_url: Option<String>,
+    tags: Vec<String>,
+    language: Option<String>,
+    country_code: Option<String>,
+    codec: Option<String>,
+    bitrate_kbps: Option<u32>,
+}
+
+impl From<&crate::search::Station> for PublicStationDto {
+    fn from(station: &crate::search::Station) -> Self {
+        Self {
+            id: station.id.clone(),
+            name: station.name.clone(),
+            stream_url: station.stream_url.clone(),
+            homepage_url: station.homepage_url.clone(),
+            tags: station.tags.clone(),
+            language: station.language.clone(),
+            country_code: station.country_code.clone(),
+            codec: station.codec.clone(),
+            bitrate_kbps: station.bitrate_kbps,
+        }
+    }
+}
+
+/// Bounded public catalog page with an opaque next cursor.
+#[derive(Serialize)]
+struct CatalogPageDto {
+    request_id: String,
+    stations: Vec<PublicStationDto>,
+    next_cursor: Option<String>,
 }
 
 /// Successful response for the stable voice-command JSON boundary.

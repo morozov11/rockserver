@@ -55,13 +55,15 @@ Update the OpenAPI contract and relevant tests whenever a public HTTP behavior c
 
 ## graphify
 
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+Use Graphify only when the user explicitly invokes `/graphify` or when a genuinely large,
+cross-repository architecture investigation needs relationship traversal that `rg` and targeted file
+reading cannot provide. For routine code search, roadmap/status questions, concrete bugs, and
+single-repository work, use `rg` and read only the relevant files.
 
-When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
+Do not run `graphify update .` after ordinary changes. Never use Graphify merely because
+`graphify-out/` exists or is dirty.
 
-Rules:
-- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
-- Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
-- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
-- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+After every Graphify invocation, including failure, timeout, or interruption, inspect Python
+processes created by that invocation. Gracefully stop only processes positively identified as
+Graphify-owned (for example by command line containing `graphify`, its working directory, or a
+Graphify helper), verify they exited, and never terminate unrelated Python processes.

@@ -64,9 +64,10 @@ By default, RockServer listens on all interfaces at `0.0.0.0:3000`. Override the
 ROCKSERVER_BIND_ADDR=127.0.0.1:8080 cargo run
 ```
 
-Application routes use `Authorization: Bearer <token>`. The service requires
-`ROCKSERVER_API_BEARER_TOKEN` at startup and never logs its value. Use a process-local value in
-`.env` for local development; do not put a production value in Git or pass it on a command line.
+The production service requires `ROCKSERVER_API_BEARER_TOKEN` at startup and never logs its
+value. The `run-rockserver-local.ps1` helper generates a random process-local development value when
+the local `.env` omits it, so public `/v1` testing does not need a token. It still protects legacy
+`/api/v1` and local admin routes; do not put a production value in Git or pass it on a command line.
 
 Use `RUST_LOG` to adjust the tracing filter. If it is unset or invalid, the service uses `info`.
 

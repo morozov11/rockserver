@@ -152,6 +152,29 @@ pub trait StationRepository {
 
     /// Verifies that the repository dependency can currently serve requests.
     async fn check_readiness(&self) -> Result<(), RepositoryError>;
+
+    /// Lists a bounded, deterministic public view of active playable stations.
+    ///
+    /// Implementations that do not own a browsable catalog may leave the default safe failure.
+    async fn list_public(
+        &self,
+        _after_id: Option<&str>,
+        _limit: usize,
+    ) -> Result<Vec<Station>, RepositoryError> {
+        Err(RepositoryError::new(
+            "public catalog listing",
+            io::Error::other("public catalog listing is unavailable"),
+        ))
+    }
+
+    /// Resolves one active playable station by its stable public identifier.
+    async fn get_public(&self, id: &str) -> Result<Option<Station>, RepositoryError> {
+        Ok(self
+            .list_public(None, usize::MAX)
+            .await?
+            .into_iter()
+            .find(|station| station.id == id))
+    }
 }
 
 /// An operational repository failure safe to map at service boundaries.
@@ -349,6 +372,28 @@ impl StationRepository for InMemoryStationRepository {
     async fn check_readiness(&self) -> Result<(), RepositoryError> {
         Ok(())
     }
+
+    async fn list_public(
+        &self,
+        after_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Station>, RepositoryError> {
+        Ok(self
+            .stations
+            .iter()
+            .filter(|station| after_id.is_none_or(|after| station.id.as_str() > after))
+            .take(limit)
+            .cloned()
+            .collect())
+    }
+
+    async fn get_public(&self, id: &str) -> Result<Option<Station>, RepositoryError> {
+        Ok(self
+            .stations
+            .iter()
+            .find(|station| station.id == id)
+            .cloned())
+    }
 }
 
 /// Repository used only to surface an unavailable pinned catalog through readiness and request errors.
@@ -450,6 +495,20 @@ impl SearchService {
             embedding_provider,
             language_classifier,
         }
+    }
+
+    /// Returns a bounded public catalog page without exposing repository internals.
+    pub async fn public_catalog(
+        &self,
+        after_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Station>, RepositoryError> {
+        self.repository.list_public(after_id, limit).await
+    }
+
+    /// Returns one active public catalog station by stable identifier.
+    pub async fn public_station(&self, id: &str) -> Result<Option<Station>, RepositoryError> {
+        self.repository.get_public(id).await
     }
 
     /// Returns matching stations ordered by score descending and station ID ascending.

@@ -1,0 +1,181 @@
+openapi: 3.1.0
+info:
+  title: RockServer Public Anonymous API — MVP-001-A proposal
+  version: 0.1.0-proposed
+  description: Approval-only proposal, not current runtime behavior. No public operation accepts a shared Bearer token, API key, client secret, or provider credential.
+servers:
+  - url: https://api.example.invalid
+paths:
+  /v1/catalog/stations:
+    get:
+      operationId: listPublicCatalogStations
+      summary: List active playable station summaries
+      security: []
+      x-rate-limit: { scope: ip, requests_per_minute: 60, burst: 20 }
+      parameters:
+        - $ref: '#/components/parameters/CatalogLimit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200': { $ref: '#/components/responses/CatalogPage' }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/catalog/stations/{station_id}:
+    get:
+      operationId: getPublicCatalogStation
+      summary: Get one active playable station summary
+      security: []
+      x-rate-limit: { scope: ip, requests_per_minute: 120, burst: 40 }
+      parameters:
+        - name: station_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200': { $ref: '#/components/responses/Station' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/search:
+    post:
+      operationId: searchPublicStations
+      summary: Search active playable stations
+      security: []
+      x-rate-limit: { scope: ip, requests_per_minute: 30, burst: 10 }
+      x-max-body-bytes: 16384
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/SearchRequest' } }
+      responses:
+        '200': { $ref: '#/components/responses/SearchResults' }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '413': { $ref: '#/components/responses/RequestTooLarge' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+        '504': { $ref: '#/components/responses/SearchTimeout' }
+  /v1/voice/command:
+    post:
+      operationId: resolvePublicVoiceCommand
+      summary: Resolve an already-recognized text voice command
+      security: []
+      x-rate-limit: { scope: ip, requests_per_minute: 12, burst: 4 }
+      x-max-body-bytes: 16384
+      parameters: [ { $ref: '#/components/parameters/RequestId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/VoiceCommandRequest' } }
+      responses:
+        '200': { $ref: '#/components/responses/SearchResults' }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '413': { $ref: '#/components/responses/RequestTooLarge' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+        '504': { $ref: '#/components/responses/VoiceTimeout' }
+  /v1/voice/stream:
+    get:
+      operationId: streamPublicVoiceCommand
+      summary: Start one bounded public PCM16 mono voice WebSocket session
+      security: []
+      x-rate-limit: { scope: ip, upgrade_attempts_per_minute: 6, burst: 2, active_sessions_per_ip: 1, active_sessions_per_ipv6_64: 2, global_active_sessions: 100 }
+      x-audio-limits: { sample_rate_hz: 16000, channels: 1, sample_format: pcm_s16le, max_frame_bytes: 32768, max_total_bytes: 2097152, max_audio_seconds: 60, max_wall_seconds: 75, idle_timeout_seconds: 10 }
+      parameters: [ { $ref: '#/components/parameters/RequestId' } ]
+      responses:
+        '101': { description: WebSocket upgrade accepted after admission control. }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '429': { $ref: '#/components/responses/VoiceSessionLimited' }
+        '503': { $ref: '#/components/responses/VoiceCapacityExhausted' }
+components:
+  parameters:
+    CatalogLimit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 50, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string, maxLength: 512 }
+      description: Opaque server-issued cursor; never an offset or provider identifier.
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' }
+  responses:
+    CatalogPage:
+      description: Bounded page of active station summaries.
+      content: { application/json: { schema: { $ref: '#/components/schemas/CatalogPage' } } }
+    Station:
+      description: Active station summary.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Station' } } }
+    SearchResults:
+      description: Bounded ranked active station summaries.
+      content: { application/json: { schema: { $ref: '#/components/schemas/SearchResults' } } }
+    MalformedRequest: { description: Invalid HTTP, JSON, WebSocket, frame or sequence; safe ErrorResponse only. }
+    RequestTooLarge: { description: Body or audio bound exceeded; safe ErrorResponse only. }
+    ValidationFailed: { description: Schema/value validation failed; safe ErrorResponse only. }
+    RateLimited:
+      description: Per-IP request quota exhausted before provider work.
+      headers: { Retry-After: { schema: { type: integer, minimum: 1 } } }
+    VoiceSessionLimited:
+      description: Per-IP upgrade or concurrency quota exhausted.
+      headers: { Retry-After: { schema: { type: integer, minimum: 1 } } }
+    VoiceCapacityExhausted:
+      description: Global voice admission capacity is full; not a per-IP quota failure.
+      headers: { Retry-After: { schema: { type: integer, minimum: 1 }, example: 30 } }
+    ServiceUnavailable: { description: Retryable safe service/provider/readiness failure. }
+    SearchTimeout: { description: Bounded search deadline exceeded; safe ErrorResponse only. }
+    VoiceTimeout: { description: Bounded voice/STT or final-search deadline exceeded; safe ErrorResponse only. }
+    NotFound: { description: No active public station exists for the stable identifier. }
+  schemas:
+    CatalogPage:
+      type: object
+      additionalProperties: false
+      required: [request_id, stations]
+      properties:
+        request_id: { type: string }
+        stations: { type: array, maxItems: 50, items: { $ref: '#/components/schemas/Station' } }
+        next_cursor: { type: [string, 'null'], maxLength: 512 }
+    SearchRequest:
+      type: object
+      additionalProperties: false
+      required: [query]
+      properties:
+        query: { type: string, minLength: 1, maxLength: 500 }
+        locale: { type: string, maxLength: 35 }
+        limit: { type: integer, minimum: 1, maximum: 20, default: 10 }
+        exclude_station_ids: { type: array, maxItems: 20, items: { type: string, maxLength: 128 } }
+    VoiceCommandRequest:
+      type: object
+      additionalProperties: false
+      required: [transcript]
+      properties:
+        transcript: { type: string, minLength: 1, maxLength: 500 }
+        locale: { type: string, maxLength: 35 }
+        limit: { type: integer, minimum: 1, maximum: 10, default: 3 }
+        exclude_station_ids: { type: array, maxItems: 10, items: { type: string, maxLength: 128 } }
+    SearchResults:
+      type: object
+      additionalProperties: false
+      required: [request_id, stations]
+      properties:
+        request_id: { type: string }
+        stations: { type: array, maxItems: 20, items: { $ref: '#/components/schemas/Station' } }
+    Station:
+      type: object
+      additionalProperties: false
+      required: [id, name, stream_url, tags]
+      properties:
+        id: { type: string, maxLength: 128 }
+        name: { type: string, maxLength: 256 }
+        stream_url: { type: string, format: uri, maxLength: 2048 }
+        homepage_url: { type: [string, 'null'], format: uri, maxLength: 2048 }
+        tags: { type: array, maxItems: 20, items: { type: string, maxLength: 64 } }
+        language: { type: [string, 'null'], maxLength: 32 }
+        country_code: { type: [string, 'null'], maxLength: 2 }
+        codec: { type: [string, 'null'], maxLength: 32 }
+        bitrate_kbps: { type: [integer, 'null'], minimum: 1, maximum: 10000 }

@@ -115,7 +115,7 @@ async fn voice_command_rejects_oversized_json_with_a_structured_413_error() {
         "request_too_large",
         "Request body exceeds the allowed size.",
     );
-    assert_eq!(body["details"]["max_bytes"], 65_536);
+    assert_eq!(body["details"]["max_bytes"], 16_384);
 }
 
 struct SlowRepository;

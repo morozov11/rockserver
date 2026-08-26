@@ -119,12 +119,12 @@ async fn search(payload: Value) -> (StatusCode, Value) {
 }
 
 #[tokio::test]
-async fn application_endpoints_require_a_bearer_token_but_health_remains_public() {
+async fn approved_v1_search_is_anonymous_but_api_alias_remains_bearer_protected() {
     let app = rockserver::http::router();
     let unauthorized = app
         .clone()
         .oneshot(
-            Request::post("/v1/search")
+            Request::post("/api/v1/search")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(r#"{"query":"jazz"}"#))
                 .unwrap(),
@@ -139,11 +139,57 @@ async fn application_endpoints_require_a_bearer_token_but_health_remains_public(
         "A valid Bearer token is required.",
     );
 
+    let public_search = app
+        .clone()
+        .oneshot(
+            Request::post("/v1/search")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"query":"jazz"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(public_search.status(), StatusCode::OK);
+
     let health = app
         .oneshot(Request::get("/health/live").body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(health.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn anonymous_search_rejects_the_burst_before_work_is_started() {
+    let app = rockserver::http::router();
+    for _ in 0..10 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/search")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"query":"jazz"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    let rejected = app
+        .oneshot(
+            Request::post("/v1/search")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"query":"jazz"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(rejected.headers()[header::RETRY_AFTER], "60");
+    assert_contract_error(
+        &response_body(rejected).await,
+        "rate_limited",
+        "Request rate limit exceeded.",
+    );
 }
 
 async fn response_body(response: axum::response::Response) -> Value {

@@ -15,6 +15,71 @@
 - Новый HTTP-контракт сначала фиксируется в OpenAPI и versioned `/v1` endpoints.
 - ESP32 не получает пароль, основной refresh token или полную копию каталога.
 
+## MVP-001 — Публичный анонимный MVP без общего токена
+
+### MVP-001-A — Public API contract and abuse model
+
+- **Репозиторий:** RockServer; docs/OpenAPI proposal only.
+- **Модель:** `gpt-5.6-sol`, `high`.
+- **Работа:** определить точный allowlist анонимных `/v1` endpoints для каталога, поиска и voice,
+  а также отдельно protected/admin/account/device endpoints. Зафиксировать rate limits, лимиты
+  аудио/сессий/параллельности, ошибки, метрики и правила безопасных логов. Запретить shared
+  bearer token и любые клиентские секреты как способ авторизации публичного пользователя.
+- **Готово, когда:** human-approved OpenAPI/threat model описывает анонимный пользовательский
+  путь и стоимость/защиту voice API; будущая account auth не меняет публичный MVP contract.
+- **Зависимости:** нет.
+- **Статус:** approved владельцем 2026-08-26; MVP-001-B разрешена к реализации в границах
+  [mvp-001-a-public-api-contract.md](mvp-001-a-public-api-contract.md).
+
+### MVP-001-B — RockServer: anonymous public endpoint policy
+
+- **Репозиторий:** RockServer.
+- **Модель:** `gpt-5.6-terra`, `high`.
+- **Работа:** реализовать approved allowlist и application-level ограничения для публичных
+  search/voice endpoints: rate limit, payload/duration/concurrency limits, безопасные ответы и
+  метрики. Сохранить bearer auth для protected endpoints; ключи Yandex остаются только в server
+  environment. Не добавлять user accounts или shared client secret.
+- **Готово, когда:** анонимный запрос может выполнить разрешённый сценарий, protected endpoint
+  без auth отклоняется, а тесты покрывают limit/exhaustion/error paths без живого SpeechKit.
+- **Зависимости:** MVP-001-A approval. Публичный rollout требует OPS-001-D, но локальная
+  реализация и тесты не должны ждать его.
+
+### MVP-001-C — RockCast: zero-config public connection
+
+- **Репозиторий:** RockCast.
+- **Модель:** `gpt-5.6-terra`, `medium`.
+- **Работа:** задать production RockServer URL для official release, убрать URL/token из обычного
+  пользовательского UI и не отправлять bearer для approved public routes. Сохранить isolated
+  developer/test override, не попадающий в release user settings. При ошибке публичного API
+  продолжать local catalog/playback.
+- **Готово, когда:** чистый профиль RockCast получает search/voice без ручной настройки, а
+  отключённый RockServer не блокирует радио; test build может использовать отдельный endpoint.
+- **Зависимости:** MVP-001-A approval.
+
+### MVP-001-D — RockMobile: zero-config public connection
+
+- **Репозиторий:** RockMobile.
+- **Модель:** `gpt-5.6-terra`, `medium`.
+- **Работа:** задать production RockServer URL для official release, убрать URL/token из обычного
+  пользовательского UI и не отправлять bearer для approved public routes. Сохранить isolated
+  developer/test override, не попадающий в release user settings. При ошибке публичного API
+  продолжать bundled catalog/playback.
+- **Готово, когда:** чистая установка RockMobile получает search/voice без ручной настройки,
+  а отключённый RockServer не блокирует радио; test build может использовать отдельный endpoint.
+- **Зависимости:** MVP-001-A approval, GATE-001.
+
+### MVP-001-E — Anonymous MVP end-to-end gate
+
+- **Репозитории:** RockServer, RockCast, RockMobile; tests/docs/runbook.
+- **Модель:** `gpt-5.6-sol`, `high`.
+- **Работа:** проверить чистую установку обоих клиентов без URL/token, public search/voice
+  contract, лимиты и fallback при outage; подтвердить, что protected endpoints не стали
+  публичными. Живой Yandex и публичный нагрузочный тест запускаются только по отдельному решению
+  владельца.
+- **Готово, когда:** выпущен severity-ranked go/no-go report для анонимного MVP, без открытого
+  shared secret или unresolved high-severity abuse/security issue.
+- **Зависимости:** MVP-001-B, MVP-001-C, MVP-001-D, OPS-001-D.
+
 ## Нулевая готовность среды
 
 ### GATE-001 — Подтверждение RM-004-I на Android
@@ -263,8 +328,10 @@
 
 ## Порядок выдачи задач Codex
 
-`GATE-001 → RM-007-A → (RM-007-B + RM-007-C) → RM-007-D → OPS-001-A → OPS-001-B →
-OPS-001-C → OPS-001-D → RM-011-A → RM-011-B → RM-011-C → (RM-011-D + RM-011-E) →
+`MVP-001-A → (MVP-001-B + MVP-001-C) → OPS-001-A → OPS-001-B → OPS-001-C →
+OPS-001-D → GATE-001 → MVP-001-D → MVP-001-E → RM-007-A →
+(RM-007-B + RM-007-C) → RM-007-D →
+RM-011-A → RM-011-B → RM-011-C → (RM-011-D + RM-011-E) →
 RM-011-F → RM-012-A → (RM-012-B + RM-012-C) → (RM-012-D + RM-012-E) → RM-012-F →
 ESP-001 → ESP-002`.
 

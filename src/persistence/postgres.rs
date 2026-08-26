@@ -324,6 +324,64 @@ impl StationRepository for PostgresStationRepository {
             .map(|_| ())
             .map_err(|error| RepositoryError::new("readiness check", error))
     }
+
+    async fn list_public(
+        &self,
+        after_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Station>, RepositoryError> {
+        sqlx::query_as::<_, PublicStationRow>("SELECT s.id, s.name, ss.stream_url, s.homepage_url, s.tags, s.language, s.country_code, ss.codec, ss.bitrate_kbps, ss.health FROM stations s JOIN station_streams ss ON ss.station_id = s.id AND ss.is_primary WHERE ($1::text IS NULL OR s.id > $1) ORDER BY s.id LIMIT $2")
+            .bind(after_id).bind(i64::try_from(limit).unwrap_or(50)).fetch_all(&self.pool).await
+            .map_err(|error| RepositoryError::new("public catalog listing", error))?
+            .into_iter().map(Station::try_from).collect::<Result<Vec<_>, _>>().map_err(|error| RepositoryError::new("public catalog row conversion", error))
+    }
+
+    async fn get_public(&self, id: &str) -> Result<Option<Station>, RepositoryError> {
+        sqlx::query_as::<_, PublicStationRow>("SELECT s.id, s.name, ss.stream_url, s.homepage_url, s.tags, s.language, s.country_code, ss.codec, ss.bitrate_kbps, ss.health FROM stations s JOIN station_streams ss ON ss.station_id = s.id AND ss.is_primary WHERE s.id = $1")
+            .bind(id).fetch_optional(&self.pool).await.map_err(|error| RepositoryError::new("public catalog get", error))?
+            .map(Station::try_from).transpose().map_err(|error| RepositoryError::new("public catalog row conversion", error))
+    }
+}
+
+#[derive(Debug, FromRow)]
+struct PublicStationRow {
+    id: String,
+    name: String,
+    stream_url: String,
+    homepage_url: Option<String>,
+    tags: Vec<String>,
+    language: Option<String>,
+    country_code: Option<String>,
+    codec: Option<String>,
+    bitrate_kbps: Option<i32>,
+    health: String,
+}
+
+impl TryFrom<PublicStationRow> for Station {
+    type Error = RowConversionError;
+    fn try_from(row: PublicStationRow) -> Result<Self, Self::Error> {
+        let health = match row.health.as_str() {
+            "healthy" => StationHealth::Healthy,
+            "degraded" => StationHealth::Degraded,
+            "unknown" => StationHealth::Unknown,
+            _ => return Err(RowConversionError::InvalidHealth(row.health)),
+        };
+        Ok(Station {
+            id: row.id,
+            name: row.name,
+            stream_url: row.stream_url,
+            homepage_url: row.homepage_url,
+            tags: row.tags,
+            language: row.language,
+            country_code: row.country_code,
+            codec: row.codec,
+            bitrate_kbps: row
+                .bitrate_kbps
+                .map(|value| u32::try_from(value).map_err(|_| RowConversionError::InvalidBitrate))
+                .transpose()?,
+            health,
+        })
+    }
 }
 
 #[derive(Debug, FromRow)]

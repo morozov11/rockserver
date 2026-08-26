@@ -11,7 +11,14 @@ Get-Content -LiteralPath $envFile | ForEach-Object {
 }
 
 if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) { throw 'DATABASE_URL is missing from the local .env file.' }
-if ([string]::IsNullOrWhiteSpace($env:ROCKSERVER_API_BEARER_TOKEN)) { throw 'ROCKSERVER_API_BEARER_TOKEN is missing from the local .env file.' }
+if ([string]::IsNullOrWhiteSpace($env:ROCKSERVER_API_BEARER_TOKEN)) {
+    # Public /v1 does not use this value. It only keeps legacy /api/v1 and
+    # local admin routes protected while developing without a secret in .env.
+    $tokenBytes = New-Object byte[] 32
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($tokenBytes)
+    $env:ROCKSERVER_API_BEARER_TOKEN = [Convert]::ToBase64String($tokenBytes)
+    Write-Host 'ROCKSERVER_API_BEARER_TOKEN is unset; using a process-local development credential for protected local routes.' -ForegroundColor Yellow
+}
 if ($env:ROCKSERVER_API_BEARER_TOKEN.Trim().Length -lt 32) { throw 'ROCKSERVER_API_BEARER_TOKEN must contain at least 32 characters.' }
 $model = Join-Path $assetsRoot 'model.onnx'
 $tokenizer = Join-Path $assetsRoot 'tokenizer.json'

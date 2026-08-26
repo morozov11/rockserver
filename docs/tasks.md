@@ -1,5 +1,20 @@
 # Task log
 
+## MVP-001-C follow-up — 2026-08-26 — local launcher credential fallback
+
+- Goal: allow the documented local launcher to start for public `/v1` testing
+  when `.env` contains the required database configuration but no Bearer token.
+- Scope: `run-rockserver-local.ps1` and current-state documentation only.
+- Result: the launcher now creates a random process-local, non-production
+  credential when `ROCKSERVER_API_BEARER_TOKEN` is blank or absent. No value is
+  written to `.env` or printed. Legacy `/api/v1` and local admin routes remain
+  protected; release/production startup policy is unchanged.
+- Checks: PowerShell parser accepted `run-rockserver-local.ps1`; `cargo fmt --check`,
+  `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test`
+  passed. The five real-provider and two disposable-PostgreSQL tests remained
+  explicitly ignored; no server, external provider, or network call was made.
+- Status: **complete / passed**.
+
 ## OPS-001-A — 2026-08-25 — Production deployment design
 
 - Goal: define the safe single-VPS deployment boundary without creating infrastructure or a runnable
@@ -744,3 +759,51 @@
   Docker image build is therefore not claimed as passed. External actions remain unverified.
 - Status: **passed locally** pending the owner’s real VPS/DNS/firewall/backup-monitoring setup and a
   deliberate staging launch. A registry is not a staging prerequisite.
+
+## Station icons — шаг 0 — 2026-08-26 — Контракт и границы
+
+- Goal: зафиксировать совместимый RockServer-first контракт и границы station icons до реализации.
+- Scope: только документация в `docs/roadmap/station-icons.md` и текущие status/task records. Не
+  менялись Rust, SQL migrations, router, OpenAPI, фактическое HTTP-поведение или service diagram.
+- Result: roadmap теперь явно помечает будущий `GET /api/v1/stations/{id}/icon` и nullable
+  `faviconUrl` как planned state; внешний `source_url` остаётся внутренним. Зафиксированы приоритет
+  source URL → homepage favicon → отсутствует, запрет network I/O в migrations и request path,
+  v1 WebP/raster decision и лимиты, `200`/`304`/`404`, cache policy и безопасный rollout/rollback.
+- Checks: reviewed `AGENTS.md`, roadmap, architecture/status/tasks, current OpenAPI and service
+  diagram; current OpenAPI was confirmed not to expose the planned endpoint or `faviconUrl`.
+  Required-contract text and trailing-whitespace checks, `git diff --check`, and a no-index diff
+  check for the untracked roadmap file passed.
+- Status: **documentation step complete**; feature remains unimplemented and requires separately
+  approved roadmap steps.
+
+## MVP-001-A — 2026-08-26 — Public API contract and abuse model
+
+- Goal: define an approval-only anonymous public `/v1` contract and abuse model for the MVP-001
+  zero-config catalog/search/voice path.
+- Scope: `docs/mvp-001-a-public-api-contract.md`,
+  `docs/mvp-001-a-openapi.proposed.yaml`, and current status/task records only. Existing dirty
+  roadmap/status/task work was preserved. No Rust, runtime endpoint, current `api/openapi.yaml`,
+  RockCast/RockMobile, secret, network, live provider, commit or push was changed.
+- Result: the proposal names exactly five anonymous operations, bounds all request/audio/session/
+  concurrency resources, distinguishes `429` quota exhaustion from global `503` voice capacity,
+  fixes safe error/metric/logging fields and fail-closed protected endpoint families. It explicitly
+  rejects shared Bearer tokens and all client secrets as public-user authorization. It contains
+  acceptance criteria and five human-approval decisions before MVP-001-B.
+- Checks: reviewed `AGENTS.md`, current OpenAPI and MVP-001 roadmap/execution plan; Markdown
+  whitespace, proposed-OpenAPI structural/policy assertions (five anonymous operations, no
+  credential security scheme), current OpenAPI unchanged, and `git diff --check` passed. Cargo
+  checks are not applicable because no code or runtime behavior changed. The Graphify navigation
+  query left two confirmed helper processes; both were stopped and verified exited.
+- Status: **proposal complete; awaiting human approval**. No public endpoint is implemented or
+  declared current by this task.
+
+## MVP-001-B — 2026-08-26 — anonymous public endpoint policy
+
+- Goal: implement the approved anonymous `/v1` catalog/search/voice allowlist without a shared
+  release-client credential, while retaining Bearer protection for `/api/v1` aliases.
+- Result: bounded catalog/search/voice handlers, direct-peer fail-closed quotas, global voice
+  admission, safe error bodies and redacted public-path diagnostics were added. No client,
+  provider, secret, network, deployment, commit, or push was used.
+- Checks: `cargo fmt`, `cargo check`, and focused deterministic search, voice-command and
+  WebSocket tests passed. Full required Clippy/test and OpenAPI reconciliation remain pending.
+- Status: implementation in progress; no public rollout is authorized.
