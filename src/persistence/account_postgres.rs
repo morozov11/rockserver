@@ -5,9 +5,9 @@ use sqlx::{PgPool, postgres::PgPoolOptions};
 use uuid::Uuid;
 
 use crate::auth::{
-    NewBrowserSession, NewPairingRequest, NewSession, NewWebAuthnChallenge, OwnedDevice,
-    PairingCompletion, PairingPreview, RefreshError, RefreshRotation, SecretHash, WebAuthnCeremony,
-    is_safe_audit_event,
+    ActiveSession, NewBrowserSession, NewPairingRequest, NewPairingSession, NewSession,
+    NewWebAuthnChallenge, OwnedDevice, PairingCompletion, PairingPreview, RefreshError,
+    RefreshRotation, SecretHash, WebAuthnCeremony, is_safe_audit_event,
 };
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
@@ -84,6 +84,90 @@ impl PostgresAccountStore {
         .map(|row| row.map(Into::into))
     }
 
+    /// Resolves a non-expired access token hash to its active account/session owner.
+    pub async fn find_active_session_by_access_hash(
+        &self,
+        access_hash: &SecretHash,
+    ) -> Result<Option<ActiveSession>, sqlx::Error> {
+        sqlx::query_as::<_, ActiveSessionRow>(
+            "SELECT s.id AS session_id, s.user_id, s.device_id FROM sessions s \
+             JOIN users u ON u.id = s.user_id JOIN devices d ON d.id = s.device_id \
+             WHERE s.access_token_hash = $1 AND s.revoked_at IS NULL AND s.access_expires_at > now() \
+             AND u.status = 'active' AND d.revoked_at IS NULL",
+        )
+        .bind(access_hash.as_bytes())
+        .fetch_optional(&self.pool)
+        .await
+        .map(|row| row.map(Into::into))
+    }
+
+    /// Lists only active devices owned by the requested account.
+    pub async fn list_owned_devices(&self, user_id: Uuid) -> Result<Vec<OwnedDevice>, sqlx::Error> {
+        sqlx::query_as::<_, DeviceRow>(
+            "SELECT d.id, d.user_id, d.name, d.platform FROM devices d \
+             JOIN users u ON u.id = d.user_id WHERE d.user_id = $1 AND d.revoked_at IS NULL \
+             AND u.status = 'active' ORDER BY d.created_at, d.id",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await
+        .map(|rows| rows.into_iter().map(Into::into).collect())
+    }
+
+    /// Revokes one device and all native sessions/refresh tokens owned by it.
+    pub async fn revoke_owned_device(
+        &self,
+        user_id: Uuid,
+        device_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        let mut transaction = self.pool.begin().await?;
+        let updated = sqlx::query(
+            "UPDATE devices SET revoked_at = now() WHERE id = $1 AND user_id = $2 \
+             AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM users WHERE id = $2 AND status = 'active')",
+        )
+        .bind(device_id)
+        .bind(user_id)
+        .execute(&mut *transaction)
+        .await?;
+        if updated.rows_affected() == 0 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+        sqlx::query("UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND device_id = $2 AND revoked_at IS NULL")
+            .bind(user_id).bind(device_id).execute(&mut *transaction).await?;
+        sqlx::query("UPDATE refresh_tokens SET revoked_at = now() WHERE session_id IN (SELECT id FROM sessions WHERE user_id = $1 AND device_id = $2) AND revoked_at IS NULL")
+            .bind(user_id).bind(device_id).execute(&mut *transaction).await?;
+        audit(
+            &mut transaction,
+            Some(user_id),
+            Some(device_id),
+            "device_revoked",
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(true)
+    }
+
+    /// Revokes the caller's native session and its refresh-token family.
+    pub async fn revoke_session(
+        &self,
+        session_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        let mut transaction = self.pool.begin().await?;
+        let updated = sqlx::query("UPDATE sessions SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL")
+            .bind(session_id).bind(user_id).execute(&mut *transaction).await?;
+        if updated.rows_affected() == 0 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+        sqlx::query("UPDATE refresh_tokens SET revoked_at = now() WHERE session_id = $1 AND revoked_at IS NULL")
+            .bind(session_id).execute(&mut *transaction).await?;
+        audit(&mut transaction, Some(user_id), None, "logout").await?;
+        transaction.commit().await?;
+        Ok(true)
+    }
+
     /// Persists a desktop/native session and its first hashed refresh token in one transaction.
     pub async fn create_session(&self, session: NewSession<'_>) -> Result<bool, sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
@@ -155,6 +239,27 @@ impl PostgresAccountStore {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Confirms a live browser session with a recent passkey assertion for one account.
+    pub async fn browser_session_is_fresh_for_user(
+        &self,
+        user_id: Uuid,
+        session_token_hash: &SecretHash,
+        csrf_hash: &SecretHash,
+    ) -> Result<bool, sqlx::Error> {
+        let exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (SELECT 1 FROM browser_sessions b JOIN users u ON u.id = b.user_id \
+             WHERE b.user_id = $1 AND b.session_token_hash = $2 AND b.csrf_token_hash = $3 \
+             AND b.revoked_at IS NULL AND b.expires_at > now() \
+             AND b.passkey_reauthenticated_at > now() - interval '2 minutes' AND u.status = 'active')",
+        )
+        .bind(user_id)
+        .bind(session_token_hash.as_bytes())
+        .bind(csrf_hash.as_bytes())
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(exists)
     }
 
     /// Stores a verified passkey public key and rejects duplicate authenticator credentials.
@@ -475,8 +580,7 @@ impl PostgresAccountStore {
         &self,
         request_id: Uuid,
         desktop_token_hash: &SecretHash,
-        device_id: Uuid,
-        session: NewSession<'_>,
+        session: NewPairingSession<'_>,
     ) -> Result<Option<PairingCompletion>, sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
         let request = sqlx::query_as::<_, PairingRow>(
@@ -496,10 +600,6 @@ impl PostgresAccountStore {
             transaction.rollback().await?;
             return Ok(None);
         };
-        if session.user_id != user_id {
-            transaction.rollback().await?;
-            return Ok(None);
-        }
         // Serialize completions for one account so concurrent requests cannot bypass the device cap.
         sqlx::query("SELECT id FROM users WHERE id = $1 AND status = 'active' FOR UPDATE")
             .bind(user_id)
@@ -509,7 +609,7 @@ impl PostgresAccountStore {
             "INSERT INTO devices (id, user_id, name, platform, app_version) \
              SELECT $1, $2, $3, $4, $5 WHERE (SELECT COUNT(*) FROM devices WHERE user_id = $2 AND revoked_at IS NULL) < 10",
         )
-        .bind(device_id)
+        .bind(session.device_id)
         .bind(user_id)
         .bind(request.device_name)
         .bind(request.platform)
@@ -526,7 +626,7 @@ impl PostgresAccountStore {
         )
         .bind(session.session_id)
         .bind(user_id)
-        .bind(device_id)
+        .bind(session.device_id)
         .bind(session.access_hash.as_bytes())
         .bind(session.access_expires_at_rfc3339)
         .bind(family_id)
@@ -542,14 +642,14 @@ impl PostgresAccountStore {
         audit(
             &mut transaction,
             Some(user_id),
-            Some(device_id),
+            Some(session.device_id),
             "pairing_completed",
         )
         .await?;
         transaction.commit().await?;
         Ok(Some(PairingCompletion {
             user_id,
-            device_id,
+            device_id: session.device_id,
             session_id: session.session_id,
         }))
     }
@@ -606,6 +706,44 @@ impl PostgresAccountStore {
         replacement_hash: &SecretHash,
         replacement_expires_at_rfc3339: &str,
     ) -> Result<RefreshRotation, RefreshError> {
+        self.rotate_refresh_internal(
+            presented_hash,
+            replacement_id,
+            replacement_hash,
+            replacement_expires_at_rfc3339,
+            None,
+        )
+        .await
+    }
+
+    /// Atomically rotates refresh and replaces the session's short-lived access token.
+    pub async fn rotate_refresh_with_access(
+        &self,
+        presented_hash: &SecretHash,
+        replacement_id: Uuid,
+        replacement_hash: &SecretHash,
+        replacement_expires_at_rfc3339: &str,
+        access_hash: &SecretHash,
+        access_expires_at_rfc3339: &str,
+    ) -> Result<RefreshRotation, RefreshError> {
+        self.rotate_refresh_internal(
+            presented_hash,
+            replacement_id,
+            replacement_hash,
+            replacement_expires_at_rfc3339,
+            Some((access_hash, access_expires_at_rfc3339)),
+        )
+        .await
+    }
+
+    async fn rotate_refresh_internal(
+        &self,
+        presented_hash: &SecretHash,
+        replacement_id: Uuid,
+        replacement_hash: &SecretHash,
+        replacement_expires_at_rfc3339: &str,
+        replacement_access: Option<(&SecretHash, &str)>,
+    ) -> Result<RefreshRotation, RefreshError> {
         let mut transaction = self
             .pool
             .begin()
@@ -632,6 +770,20 @@ impl PostgresAccountStore {
             .bind(replacement_expires_at_rfc3339).execute(&mut *transaction).await.map_err(|_| RefreshError::Rejected)?;
         if inserted.rows_affected() != 1 {
             return Err(RefreshError::Rejected);
+        }
+        if let Some((access_hash, access_expires_at_rfc3339)) = replacement_access {
+            let updated = sqlx::query(
+                "UPDATE sessions SET access_token_hash = $2, access_expires_at = CASE WHEN $3 = 'db:15m' THEN now() + interval '15 minutes' ELSE $3::timestamptz END, last_seen_at = now() WHERE id = $1 AND revoked_at IS NULL",
+            )
+            .bind(token.session_id)
+            .bind(access_hash.as_bytes())
+            .bind(access_expires_at_rfc3339)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| RefreshError::Rejected)?;
+            if updated.rows_affected() != 1 {
+                return Err(RefreshError::Rejected);
+            }
         }
         sqlx::query("UPDATE refresh_tokens SET used_at = now(), replaced_by_id = $2 WHERE id = $1")
             .bind(token.id)
@@ -705,6 +857,23 @@ struct DeviceRow {
     user_id: Uuid,
     name: String,
     platform: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct ActiveSessionRow {
+    session_id: Uuid,
+    user_id: Uuid,
+    device_id: Uuid,
+}
+
+impl From<ActiveSessionRow> for ActiveSession {
+    fn from(row: ActiveSessionRow) -> Self {
+        Self {
+            session_id: row.session_id,
+            user_id: row.user_id,
+            device_id: row.device_id,
+        }
+    }
 }
 
 #[derive(sqlx::FromRow)]

@@ -120,6 +120,17 @@ pub struct RefreshRotation {
     pub session_id: Uuid,
 }
 
+/// Active native session owner resolved from a hashed access token.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ActiveSession {
+    /// Native session identifier.
+    pub session_id: Uuid,
+    /// Owning account identifier.
+    pub user_id: Uuid,
+    /// Device that owns the session.
+    pub device_id: Uuid,
+}
+
 /// Hashed material required to create one native session and its initial refresh token.
 pub struct NewSession<'a> {
     /// New session identifier.
@@ -127,6 +138,24 @@ pub struct NewSession<'a> {
     /// Account that owns the session.
     pub user_id: Uuid,
     /// Active device that owns the session.
+    pub device_id: Uuid,
+    /// Keyed hash of the opaque access token.
+    pub access_hash: &'a SecretHash,
+    /// Access expiry in PostgreSQL-validated RFC 3339 UTC form.
+    pub access_expires_at_rfc3339: &'a str,
+    /// New initial refresh-token identifier.
+    pub refresh_id: Uuid,
+    /// Keyed hash of the opaque refresh token.
+    pub refresh_hash: &'a SecretHash,
+    /// Refresh expiry in PostgreSQL-validated RFC 3339 UTC form.
+    pub refresh_expires_at_rfc3339: &'a str,
+}
+
+/// Hashed material for a desktop session whose account owner is derived from an approved pairing request.
+pub struct NewPairingSession<'a> {
+    /// New native session identifier.
+    pub session_id: Uuid,
+    /// New device identifier selected by the server.
     pub device_id: Uuid,
     /// Keyed hash of the opaque access token.
     pub access_hash: &'a SecretHash,

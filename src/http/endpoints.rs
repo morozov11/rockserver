@@ -18,7 +18,7 @@ use axum::{
     },
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{Html, IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use passkey_auth::{AuthenticationResponse, CredentialId, RegistrationResponse};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -30,7 +30,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::{
-        NewBrowserSession, NewPairingRequest, NewSession, NewWebAuthnChallenge, SecretHash,
+        NewBrowserSession, NewPairingRequest, NewPairingSession, NewWebAuthnChallenge, SecretHash,
         WebAuthnCeremony, webauthn,
     },
     persistence::PostgresAccountStore,
@@ -251,6 +251,12 @@ pub fn router_with_speech_recognizers_and_bearer_token(
             "/v1/pairing-requests/{request_id}/complete",
             post(complete_pairing_request),
         )
+        .route("/v1/auth/refresh", post(refresh_native_session))
+        .route("/v1/auth/logout", post(logout_native_session))
+        .route("/v1/account/profile", get(account_profile))
+        .route("/v1/account", delete(delete_account))
+        .route("/v1/devices", get(list_devices))
+        .route("/v1/devices/{device_id}", delete(revoke_device))
         .with_state(state)
         .layer(
             TraceLayer::new_for_http()
@@ -334,6 +340,12 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
             "/v1/pairing-requests/{request_id}/complete",
             post(complete_pairing_request),
         )
+        .route("/v1/auth/refresh", post(refresh_native_session))
+        .route("/v1/auth/logout", post(logout_native_session))
+        .route("/v1/account/profile", get(account_profile))
+        .route("/v1/account", delete(delete_account))
+        .route("/v1/devices", get(list_devices))
+        .route("/v1/devices/{device_id}", delete(revoke_device))
         .with_state(state)
         .layer(
             TraceLayer::new_for_http()
@@ -402,7 +414,6 @@ struct PairingApprovalDto {
 #[serde(deny_unknown_fields)]
 struct PairingCompletionDto {
     desktop_token: String,
-    user_id: Uuid,
 }
 
 #[derive(Serialize)]
@@ -412,6 +423,38 @@ struct PairingCompletionResponseDto {
     session_id: String,
     access_token: String,
     refresh_token: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RefreshRequestDto {
+    refresh_token: String,
+}
+
+#[derive(Serialize)]
+struct NativeTokenPairDto {
+    access_token: String,
+    refresh_token: String,
+}
+
+#[derive(Serialize)]
+struct AccountProfileDto {
+    user_id: String,
+    session_id: String,
+    device_id: String,
+}
+
+#[derive(Serialize)]
+struct DeviceDto {
+    device_id: String,
+    user_id: String,
+    name: String,
+    platform: String,
+}
+
+#[derive(Serialize)]
+struct DeviceListDto {
+    devices: Vec<DeviceDto>,
 }
 
 #[derive(Deserialize)]
@@ -666,6 +709,9 @@ async fn registration_verify(
     );
     response.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&format!("rockserver_browser={session_token}; Path=/; Max-Age=1800; HttpOnly; Secure; SameSite=Strict")).expect("generated cookie is valid"));
     response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 /// Starts an authentication ceremony for one account's registered passkeys.
@@ -918,6 +964,9 @@ async fn authentication_verify(
     );
     response.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&format!("rockserver_browser={session_token}; Path=/; Max-Age=1800; HttpOnly; Secure; SameSite=Strict")).expect("generated cookie is valid"));
     response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 /// Starts a short-lived desktop pairing request without disclosing its hashed server-side proofs.
@@ -1010,20 +1059,26 @@ async fn create_pairing_request(
         .create_pairing_request_for_minutes(request, PAIRING_LIFETIME_MINUTES)
         .await
     {
-        Ok(true) => with_request_id(
-            (
-                StatusCode::CREATED,
-                Json(CreatedPairingRequestDto {
-                    pairing_request_id: pairing_request_id.to_string(),
-                    desktop_token,
-                    approval_secret,
-                    short_code,
-                    verification_phrase,
-                }),
-            )
-                .into_response(),
-            &request_id,
-        ),
+        Ok(true) => {
+            let mut response = with_request_id(
+                (
+                    StatusCode::CREATED,
+                    Json(CreatedPairingRequestDto {
+                        pairing_request_id: pairing_request_id.to_string(),
+                        desktop_token,
+                        approval_secret,
+                        short_code,
+                        verification_phrase,
+                    }),
+                )
+                    .into_response(),
+                &request_id,
+            );
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            response
+        }
         Ok(false) | Err(_) => error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "pairing_unavailable",
@@ -1204,9 +1259,8 @@ async fn complete_pairing_request(
     let session_id = Uuid::new_v4();
     let access_hash = token_hash(&access_token);
     let refresh_hash = token_hash(&refresh_token);
-    let session = NewSession {
+    let session = NewPairingSession {
         session_id,
-        user_id: payload.user_id,
         device_id,
         access_hash: &access_hash,
         access_expires_at_rfc3339: "db:15m",
@@ -1215,25 +1269,26 @@ async fn complete_pairing_request(
         refresh_expires_at_rfc3339: "db:30d",
     };
     match store
-        .complete_pairing(
-            pairing_id,
-            &token_hash(&payload.desktop_token),
-            device_id,
-            session,
-        )
+        .complete_pairing(pairing_id, &token_hash(&payload.desktop_token), session)
         .await
     {
-        Ok(Some(result)) => with_request_id(
-            Json(PairingCompletionResponseDto {
-                user_id: result.user_id.to_string(),
-                device_id: result.device_id.to_string(),
-                session_id: result.session_id.to_string(),
-                access_token,
-                refresh_token,
-            })
-            .into_response(),
-            &request_id,
-        ),
+        Ok(Some(result)) => {
+            let mut response = with_request_id(
+                Json(PairingCompletionResponseDto {
+                    user_id: result.user_id.to_string(),
+                    device_id: result.device_id.to_string(),
+                    session_id: result.session_id.to_string(),
+                    access_token,
+                    refresh_token,
+                })
+                .into_response(),
+                &request_id,
+            );
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            response
+        }
         Ok(None) => error_response(
             StatusCode::UNAUTHORIZED,
             "pairing_rejected",
@@ -1249,6 +1304,309 @@ async fn complete_pairing_request(
             json!({}),
         ),
     }
+}
+
+/// Rotates a native refresh token and returns a fresh opaque access/refresh pair.
+async fn refresh_native_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    let request_id = request_id(&headers);
+    let payload: RefreshRequestDto = match parse_json_request(&headers, body, &request_id).await {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    if payload.refresh_token.len() < 16 || payload.refresh_token.len() > 512 {
+        return unauthorized_response(&request_id);
+    }
+    let Some(store) = state.account_store.clone() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        );
+    };
+    let access_token = Uuid::new_v4().simple().to_string();
+    let refresh_token = Uuid::new_v4().simple().to_string();
+    let result = store
+        .rotate_refresh_with_access(
+            &token_hash(&payload.refresh_token),
+            Uuid::new_v4(),
+            &token_hash(&refresh_token),
+            "db:30d",
+            &token_hash(&access_token),
+            "db:15m",
+        )
+        .await;
+    match result {
+        Ok(_) => {
+            let mut response = with_request_id(
+                Json(NativeTokenPairDto {
+                    access_token,
+                    refresh_token,
+                })
+                .into_response(),
+                &request_id,
+            );
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            response
+        }
+        Err(_) => unauthorized_response(&request_id),
+    }
+}
+
+/// Revokes the current native session and its refresh-token family.
+async fn logout_native_session(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let request_id = request_id(&headers);
+    let Some(store) = state.account_store.clone() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        );
+    };
+    let Some(token) = bearer_token(&headers) else {
+        return unauthorized_response(&request_id);
+    };
+    let session = match store
+        .find_active_session_by_access_hash(&token_hash(token))
+        .await
+    {
+        Ok(Some(session)) => session,
+        Ok(None) => return unauthorized_response(&request_id),
+        Err(_) => {
+            return error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "auth_unavailable",
+                "Account service is unavailable.",
+                &request_id,
+                json!({}),
+            );
+        }
+    };
+    match store
+        .revoke_session(session.session_id, session.user_id)
+        .await
+    {
+        Ok(true) => with_request_id(StatusCode::NO_CONTENT.into_response(), &request_id),
+        Ok(false) => unauthorized_response(&request_id),
+        Err(_) => error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        ),
+    }
+}
+
+/// Returns the caller's account and current device projection.
+async fn account_profile(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let request_id = request_id(&headers);
+    let Some(session) = match_native_session(&state, &headers, &request_id).await else {
+        return unauthorized_response(&request_id);
+    };
+    with_request_id(
+        Json(AccountProfileDto {
+            user_id: session.user_id.to_string(),
+            session_id: session.session_id.to_string(),
+            device_id: session.device_id.to_string(),
+        })
+        .into_response(),
+        &request_id,
+    )
+}
+
+/// Tombstones the account only after native authentication and fresh browser passkey proof.
+async fn delete_account(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let request_id = request_id(&headers);
+    if !is_trusted_browser_request(&headers)
+        || !trusted_proxy_header_matches(&headers, state.trusted_proxy_token.as_deref())
+    {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "untrusted_request",
+            "The request must originate from the trusted first-party proxy.",
+            &request_id,
+            json!({}),
+        );
+    }
+    let Some(store) = state.account_store.clone() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        );
+    };
+    let Some(session) = match_native_session(&state, &headers, &request_id).await else {
+        return unauthorized_response(&request_id);
+    };
+    let Some(cookie) = cookie_value(&headers, "rockserver_browser") else {
+        return unauthorized_response(&request_id);
+    };
+    let Some(csrf) = headers
+        .get("x-csrf-token")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty() && value.len() <= 256)
+    else {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "csrf_failed",
+            "A valid CSRF token is required.",
+            &request_id,
+            json!({}),
+        );
+    };
+    match store
+        .browser_session_is_fresh_for_user(session.user_id, &token_hash(cookie), &token_hash(csrf))
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => {
+            return error_response(
+                StatusCode::FORBIDDEN,
+                "reauthentication_required",
+                "A recent passkey assertion is required.",
+                &request_id,
+                json!({}),
+            );
+        }
+        Err(_) => {
+            return error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "auth_unavailable",
+                "Account service is unavailable.",
+                &request_id,
+                json!({}),
+            );
+        }
+    }
+    match store.delete_account(session.user_id).await {
+        Ok(true) => with_request_id(StatusCode::ACCEPTED.into_response(), &request_id),
+        Ok(false) => unauthorized_response(&request_id),
+        Err(_) => error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        ),
+    }
+}
+
+/// Lists active native devices owned by the authenticated account.
+async fn list_devices(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let request_id = request_id(&headers);
+    let Some(store) = state.account_store.clone() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        );
+    };
+    let Some(session) = match_native_session(&state, &headers, &request_id).await else {
+        return unauthorized_response(&request_id);
+    };
+    match store.list_owned_devices(session.user_id).await {
+        Ok(devices) => with_request_id(
+            Json(DeviceListDto {
+                devices: devices
+                    .into_iter()
+                    .map(|device| DeviceDto {
+                        device_id: device.id.to_string(),
+                        user_id: device.user_id.to_string(),
+                        name: device.name,
+                        platform: device.platform,
+                    })
+                    .collect(),
+            })
+            .into_response(),
+            &request_id,
+        ),
+        Err(_) => error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        ),
+    }
+}
+
+/// Revokes one device only when it belongs to the authenticated account.
+async fn revoke_device(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(device_id): Path<Uuid>,
+) -> Response {
+    let request_id = request_id(&headers);
+    let Some(store) = state.account_store.clone() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        );
+    };
+    let Some(session) = match_native_session(&state, &headers, &request_id).await else {
+        return unauthorized_response(&request_id);
+    };
+    match store.revoke_owned_device(session.user_id, device_id).await {
+        Ok(true) => with_request_id(StatusCode::NO_CONTENT.into_response(), &request_id),
+        Ok(false) => error_response(
+            StatusCode::NOT_FOUND,
+            "device_not_found",
+            "Device is unavailable.",
+            &request_id,
+            json!({}),
+        ),
+        Err(_) => error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        ),
+    }
+}
+
+async fn match_native_session(
+    state: &AppState,
+    headers: &HeaderMap,
+    request_id: &str,
+) -> Option<crate::auth::ActiveSession> {
+    let token = bearer_token(headers)?;
+    let store = state.account_store.as_ref()?;
+    match store
+        .find_active_session_by_access_hash(&token_hash(token))
+        .await
+    {
+        Ok(value) => value,
+        Err(_) => {
+            tracing::warn!(%request_id, "native session lookup failed");
+            None
+        }
+    }
+}
+
+fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .filter(|value| !value.is_empty() && value.len() <= 512)
 }
 
 fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
@@ -2829,6 +3187,23 @@ mod tests {
             serde_json::from_slice::<serde_json::Value>(&body).unwrap()["code"],
             "auth_unavailable"
         );
+    }
+
+    #[tokio::test]
+    async fn pairing_completion_rejects_a_client_supplied_owner() {
+        let response = router()
+            .oneshot(
+                Request::post("/v1/pairing-requests/00000000-0000-0000-0000-000000000000/complete")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"desktop_token":"0123456789abcdef","user_id":"00000000-0000-0000-0000-000000000000"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[test]

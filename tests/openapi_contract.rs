@@ -21,6 +21,12 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
     for path in [
         "/health/live",
         "/health/ready",
+        "/v1/auth/refresh",
+        "/v1/auth/logout",
+        "/v1/account/profile",
+        "/v1/account",
+        "/v1/devices",
+        "/v1/devices/{device_id}",
         "/v1/search",
         "/api/v1/voice/command",
         "/v1/voice/command",
@@ -41,6 +47,26 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
             .and_then(|search| search.get("post"))
             .is_some(),
         "search path must define POST"
+    );
+    let completion = value_at(&document, "paths")
+        .and_then(|paths| paths.get("/v1/pairing-requests/{request_id}/complete"))
+        .and_then(|path| path.get("post"))
+        .and_then(|operation| operation.get("requestBody"))
+        .and_then(|body| body.get("content"))
+        .and_then(|content| content.get("application/json"))
+        .and_then(|json| json.get("schema"))
+        .expect("pairing completion must define a JSON schema");
+    let required = completion
+        .get("required")
+        .and_then(Value::as_sequence)
+        .expect("pairing completion must require its desktop proof");
+    assert_eq!(required, &vec![Value::String("desktop_token".to_owned())]);
+    assert!(
+        completion
+            .get("properties")
+            .and_then(|properties| properties.get("user_id"))
+            .is_none(),
+        "pairing completion must derive the owner server-side"
     );
     let voice = value_at(&document, "paths")
         .and_then(|paths| paths.get("/api/v1/voice/command"))
@@ -130,6 +156,10 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         "NormalizedQuery",
         "StationResult",
         "ErrorResponse",
+        "RefreshRequest",
+        "TokenPair",
+        "AccountProfile",
+        "DeviceList",
     ] {
         assert!(
             schemas.contains_key(Value::String(schema.to_owned())),

@@ -78,6 +78,91 @@ paths:
         "200": { description: Browser session cookie and CSRF token were created. }
         "401": { description: Assertion, challenge or sign counter was rejected. }
         "403": { description: Direct or wrong-origin requests are rejected. }
+  /v1/auth/refresh:
+    post:
+      operationId: refreshNativeSession
+      summary: Rotate a native refresh token and issue a new access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: New opaque native credentials; never cache or log.
+          headers:
+            Cache-Control: { schema: { type: string, example: no-store } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenPair" }
+        "401": { $ref: "#/components/responses/AuthenticationRequired" }
+  /v1/auth/logout:
+    post:
+      operationId: logoutNativeSession
+      summary: Revoke the current native session and refresh family
+      security:
+        - RockserverBearer: []
+      responses:
+        "204": { description: Session revoked. }
+        "401": { $ref: "#/components/responses/AuthenticationRequired" }
+  /v1/account/profile:
+    get:
+      operationId: getAccountProfile
+      summary: Read the caller's account and current device projection
+      security:
+        - RockserverBearer: []
+      responses:
+        "200":
+          description: Caller-owned account projection.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountProfile" }
+        "401": { $ref: "#/components/responses/AuthenticationRequired" }
+  /v1/account:
+    delete:
+      operationId: deleteAccount
+      summary: Tombstone the caller's account after fresh browser passkey proof
+      security:
+        - RockserverBearer: []
+          RockserverBrowserCookie: []
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "202": { description: Account credentials and devices were revoked. }
+        "401": { $ref: "#/components/responses/AuthenticationRequired" }
+        "403": { description: Trusted proxy, CSRF, or recent passkey proof is missing. }
+  /v1/devices:
+    get:
+      operationId: listOwnedDevices
+      summary: List active native devices owned by the caller
+      security:
+        - RockserverBearer: []
+      responses:
+        "200":
+          description: Caller-owned active devices.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceList" }
+        "401": { $ref: "#/components/responses/AuthenticationRequired" }
+  /v1/devices/{device_id}:
+    delete:
+      operationId: revokeOwnedDevice
+      summary: Revoke one caller-owned device and its native sessions
+      security:
+        - RockserverBearer: []
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Device revoked. }
+        "401": { $ref: "#/components/responses/AuthenticationRequired" }
+        "404": { description: Device is unknown or belongs to another account. }
   /v1/pairing-requests:
     post:
       operationId: createPairingRequest
@@ -159,13 +244,12 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [desktop_token, user_id]
+              required: [desktop_token]
               properties:
                 desktop_token: { type: string, minLength: 16, maxLength: 128 }
-                user_id: { type: string, format: uuid }
       responses:
         "200": { description: Native access and refresh credentials were issued once. }
-        "401": { description: Proof is invalid, expired, consumed or owner-mismatched. }
+        "401": { description: Proof is invalid, expired or consumed. The owner is derived server-side. }
         "503": { description: Account persistence is unavailable. }
   /admin:
     get:
@@ -635,6 +719,11 @@ components:
       description: >-
         Required for all application routes. Until persisted, revocable per-client credentials are
         implemented, the service uses the fixed local bootstrap credential shared with RockMobile.
+    RockserverBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Short-lived opaque native session access token issued by pairing.
   responses:
     AuthenticationRequired:
       description: A required Bearer credential was absent, malformed, or invalid.
@@ -653,6 +742,44 @@ components:
             request_id: req_01AUTH401
             details: {}
   schemas:
+    RefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string, minLength: 16, maxLength: 512, writeOnly: true }
+    TokenPair:
+      type: object
+      additionalProperties: false
+      required: [access_token, refresh_token]
+      properties:
+        access_token: { type: string, minLength: 16, maxLength: 128, writeOnly: true }
+        refresh_token: { type: string, minLength: 16, maxLength: 128, writeOnly: true }
+    AccountProfile:
+      type: object
+      additionalProperties: false
+      required: [user_id, session_id, device_id]
+      properties:
+        user_id: { type: string, format: uuid }
+        session_id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid }
+    Device:
+      type: object
+      additionalProperties: false
+      required: [device_id, user_id, name, platform]
+      properties:
+        device_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        name: { type: string }
+        platform: { type: string }
+    DeviceList:
+      type: object
+      additionalProperties: false
+      required: [devices]
+      properties:
+        devices:
+          type: array
+          items: { $ref: "#/components/schemas/Device" }
     HealthResponse:
       type: object
       additionalProperties: false

@@ -7,8 +7,8 @@ use axum::{body::Body, http::Request};
 use http_body_util::BodyExt;
 use rockserver::{
     auth::{
-        NewBrowserSession, NewPairingRequest, NewSession, NewWebAuthnChallenge, OwnedDevice,
-        RefreshError, SecretHash, WebAuthnCeremony,
+        NewBrowserSession, NewPairingRequest, NewPairingSession, NewSession, NewWebAuthnChallenge,
+        OwnedDevice, RefreshError, SecretHash, WebAuthnCeremony,
     },
     catalog::{
         CatalogImportError, CatalogImportProvider, CatalogImporter, ImportLimits, ImportPage,
@@ -177,38 +177,113 @@ async fn postgres_b2_browser_pairing_webauthn_and_rate_limits() {
             .await
             .unwrap()
     );
-    let device_id = Uuid::new_v4();
-    let session_id = Uuid::new_v4();
     assert!(
         store
             .complete_pairing(
                 request_id,
-                &SecretHash::new([3; 32]),
-                device_id,
-                NewSession {
-                    session_id,
-                    user_id,
-                    device_id,
-                    access_hash: &SecretHash::new([6; 32]),
+                &SecretHash::new([99; 32]),
+                NewPairingSession {
+                    session_id: Uuid::new_v4(),
+                    device_id: Uuid::new_v4(),
+                    access_hash: &SecretHash::new([98; 32]),
                     access_expires_at_rfc3339: "2035-01-01T00:10:00Z",
                     refresh_id: Uuid::new_v4(),
-                    refresh_hash: &SecretHash::new([7; 32]),
+                    refresh_hash: &SecretHash::new([97; 32]),
                     refresh_expires_at_rfc3339: "2035-02-01T00:00:00Z",
                 },
             )
             .await
             .unwrap()
-            .is_some()
+            .is_none(),
+        "a wrong desktop proof must not consume the approved request"
     );
+    let expired_request_id = Uuid::new_v4();
+    assert!(
+        store
+            .create_pairing_request(NewPairingRequest {
+                request_id: expired_request_id,
+                desktop_token_hash: &SecretHash::new([12; 32]),
+                approval_secret_hash: &SecretHash::new([13; 32]),
+                short_code_hash: &SecretHash::new([14; 32]),
+                verification_phrase: "SILVER-STAR",
+                device_name: "Expired desktop",
+                platform: "rockcast_windows",
+                app_version: None,
+                expires_at_rfc3339: "2035-01-01T00:00:00Z",
+            })
+            .await
+            .unwrap()
+    );
+    assert!(
+        store
+            .approve_pairing_request(
+                expired_request_id,
+                user_id,
+                browser_session_id,
+                &SecretHash::new([13; 32]),
+                "SILVER-STAR",
+            )
+            .await
+            .unwrap()
+    );
+    let expiry_pool = repository_pool(&database_url).await;
+    sqlx::query(
+        "UPDATE pairing_requests SET created_at = now() - interval '2 minutes', \
+         expires_at = now() - interval '1 minute' WHERE id = $1",
+    )
+    .bind(expired_request_id)
+    .execute(&expiry_pool)
+    .await
+    .unwrap();
+    expiry_pool.close().await;
+    assert!(
+        store
+            .complete_pairing(
+                expired_request_id,
+                &SecretHash::new([12; 32]),
+                NewPairingSession {
+                    session_id: Uuid::new_v4(),
+                    device_id: Uuid::new_v4(),
+                    access_hash: &SecretHash::new([15; 32]),
+                    access_expires_at_rfc3339: "2035-01-01T00:10:00Z",
+                    refresh_id: Uuid::new_v4(),
+                    refresh_hash: &SecretHash::new([16; 32]),
+                    refresh_expires_at_rfc3339: "2035-02-01T00:00:00Z",
+                },
+            )
+            .await
+            .unwrap()
+            .is_none(),
+        "an expired approved request must not issue a session"
+    );
+    let device_id = Uuid::new_v4();
+    let session_id = Uuid::new_v4();
+    let completion = store
+        .complete_pairing(
+            request_id,
+            &SecretHash::new([3; 32]),
+            NewPairingSession {
+                session_id,
+                device_id,
+                access_hash: &SecretHash::new([6; 32]),
+                access_expires_at_rfc3339: "2035-01-01T00:10:00Z",
+                refresh_id: Uuid::new_v4(),
+                refresh_hash: &SecretHash::new([7; 32]),
+                refresh_expires_at_rfc3339: "2035-02-01T00:00:00Z",
+            },
+        )
+        .await
+        .unwrap()
+        .expect("approved request must derive its owner");
+    assert_eq!(completion.user_id, user_id);
+    assert_eq!(completion.device_id, device_id);
     assert!(
         store
             .complete_pairing(
                 request_id,
                 &SecretHash::new([3; 32]),
-                Uuid::new_v4(),
-                NewSession {
+                NewPairingSession {
                     session_id: Uuid::new_v4(),
-                    user_id,
                     device_id: Uuid::new_v4(),
                     access_hash: &SecretHash::new([8; 32]),
                     access_expires_at_rfc3339: "2035-01-01T00:10:00Z",

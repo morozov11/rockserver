@@ -613,8 +613,8 @@ unauthenticated; production startup policy is unchanged.
 ## RM-011-C — unified web shell and auth runtime (current snapshot)
 
 Итоговый отчёт текущего прогона: [`docs/rm-011-c-report.md`](rm-011-c-report.md). RM-011-C
-остаётся частично закрытой: deterministic checks проходят, но live PostgreSQL/E2E security gates
-и native session routes ещё не закрыты.
+имеет статус **RM-011-C server/browser implementation verified**. Full real-client staging E2E
+явно перенесён в RM-011-D/E и не является prerequisite этой серверной задачи.
 
 The chosen single first-party frontend/admin stack is **TypeScript + Vite + Preact** in `web/`.
 It has one shared same-origin API client and types, passkey registration/authentication, pairing
@@ -624,26 +624,38 @@ and health routes to RockServer, injecting a deployment-only proxy proof header 
 requests fail closed. The Rust routes include registration and authentication options/verify with
 cryptographic WebAuthn checks, Secure/HttpOnly/SameSite cookies, CSRF/origin checks, PostgreSQL
 rate limits, and desktop pairing completion with one-time native access/refresh issuance.
-The remaining UI limitation is that the native desktop client must call the completion endpoint;
-the browser shows approval success but does not receive native tokens.
+The browser never receives native tokens; the desktop completion client belongs to RM-011-E.
 
 The runtime now also creates a ten-minute desktop pairing request at `POST /v1/pairing-requests`
 and resolves pending short codes at `GET /v1/pairing-requests/lookup?code=...`. PostgreSQL supplies
 the expiry clock and persists only SHA-256 proof hashes; lookup exposes only device metadata and the
 verification phrase. Approval, completion and request throttling are implemented; the browser UI
 executes approval, while the native desktop client remains responsible for calling completion.
+Completion accepts only the desktop proof; PostgreSQL derives the owner from the approved request
+inside the same transaction, so native clients never need or submit an account UUID.
 
 The approve endpoint is now present at `POST /v1/pairing-requests/{request_id}/approve`; it
 requires an `HttpOnly` browser cookie proof, the `X-CSRF-Token` double-submit header, exact
 first-party HTTPS origin, and the configured Caddy proxy proof. A new nullable cookie-hash column
 keeps old B2 rows readable while all newly created browser sessions bind an opaque cookie hash.
 
+Native session/account management is now exposed through `POST /v1/auth/refresh`,
+`POST /v1/auth/logout`, `GET /v1/account/profile`, `GET /v1/devices`, and
+`DELETE /v1/devices/{device_id}`. Access-token lookup and device revocation are owner-scoped in
+PostgreSQL; refresh rotation replaces the access token in the same transaction and replay revokes
+the refresh family.
+
 Verification on this snapshot: `cargo fmt --check`, `cargo clippy --all-targets --all-features --jobs 1
--- -D warnings`, `cargo test --jobs 1` (92 unit/library tests plus regular integration suites), web
+-- -D warnings`, `cargo test --jobs 1` (93 unit/library tests plus regular integration suites), web
 `tsc --noEmit`, and a direct Vite production build with the bundled Node runtime all pass.
-PostgreSQL integration tests remain opt-in and were not run in this workspace; the convenience
-`pnpm run build` wrapper cannot find the host Node executable, while the Caddy image build uses its
-own Node toolchain.
+All four opt-in PostgreSQL integration tests passed sequentially against a disposable local
+`pgvector/pgvector:pg17` container. Both Caddyfiles validated in Caddy 2.10 containers with test
+environment values. Web dependencies were installed with the bundled pnpm runtime; `pnpm typecheck`,
+`pnpm lint`, and `pnpm build` passed with the bundled Node path (the unconfigured host PATH still
+has no `node` command).
+
+RM-011-C is complete at its server/browser boundary. Real-client staging pairing and mobile/native
+session UX are explicitly deferred to RM-011-D/E.
 
 ## HTTP transport refactor
 
@@ -655,5 +667,5 @@ Verification after the refactor: `cargo fmt --check`, `cargo clippy --all-target
 -- -D warnings`, and `cargo test` passed (92 unit tests plus regular integration suites; external
 PostgreSQL, LLM, SpeechKit, and ONNX cases remain ignored behind their explicit gates).
 
-Local Cargo concurrency is capped at one job via `.cargo/config.toml` to reduce CPU and memory
-pressure during builds, checks, Clippy, and tests.
+Local Cargo concurrency is capped at two jobs via `.cargo/config.toml` to reduce CPU and memory
+pressure during builds; acceptance checks in this run used explicit `--jobs 1` sequentially.

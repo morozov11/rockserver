@@ -240,9 +240,12 @@
   криптографическая WebAuthn-проверка с RP/origin/challenge и sign-count guard, browser cookie/CSRF,
   PostgreSQL rate limits, QR/short-code pairing approval/completion и proxy proof от Caddy.
   Единый Preact bundle прошёл TypeScript и Vite production build; native completion по-прежнему
-  вызывается RockCast после browser approval, а disposable PostgreSQL прогон остаётся внешним gate.
-  Итоговый отчёт `docs/rm-011-c-report.md` фиксирует, что RM-011-C пока частично закрыта: live
-  PostgreSQL/E2E security verification и расширенные native session routes остаются незавершёнными.
+  вызывается RockCast после browser approval и принимает только desktop proof: владельца сервер
+  атомарно выводит из approved pairing request. Добавлены native refresh/logout/profile/device
+  routes с owner-scoped access и transactional refresh rotation. Disposable PostgreSQL integration
+  tests and both Caddyfile validations passed locally. **RM-011-C server/browser implementation
+  is verified and complete**; real-client staging E2E and client session UX are deferred to
+  RM-011-D/E rather than gating this server task.
 
 ### RM-011-D — RockMobile: account and secure session UX
 

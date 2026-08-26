@@ -955,16 +955,35 @@
   desktop completion, and a shared Preact UI with passkey controls, short-code lookup, device and
   verification-phrase display, and in-memory QR rendering are implemented. Native access/refresh
   tokens are returned only by the desktop completion endpoint; the browser does not persist them.
-- Checks: `cargo fmt --check`, strict Clippy with `--jobs 1`, `cargo test --jobs 1` (92 tests passed;
-  four PostgreSQL suites ignored without `TEST_DATABASE_URL`), and web `tsc --noEmit` passed.
-  A direct Vite production build with the bundled Node runtime also passed. The `pnpm run build`
-  wrapper cannot find the host Node executable; the Caddy image has its own Node toolchain. No git
-  push was performed.
-- Status: **implemented locally with documented limitation**: end-to-end native completion still
-  requires the RockCast client to call the existing `/v1/pairing-requests/{request_id}/complete`
-  endpoint, no live disposable PostgreSQL run was available in this workspace, and native
-  refresh/logout/device-management routes from the extended proposal remain outside this slice.
-  Final evidence is recorded in `docs/rm-011-c-report.md`; RM-011-C is not fully closed.
+- Checks: `cargo fmt --check`, strict Clippy with `--jobs 1`, `cargo test --jobs 1` (93 tests passed),
+  OpenAPI contract tests, and all four opt-in PostgreSQL integration tests against a disposable
+  `pgvector/pgvector:pg17` container passed sequentially.
+  `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm lint`, and `pnpm build` passed with
+  the bundled Node runtime. No git push was performed.
+- Status: **complete — RM-011-C server/browser implementation verified**. The first-party UI and
+  server API are validated autonomously; real-client RockCast/RockMobile staging E2E is deferred
+  to RM-011-D/E and is not a prerequisite for this task.
+
+## RM-011-C — 2026-08-26 — native session and device HTTP surface
+
+- Goal: expose the B2 native-session persistence primitives through owner-scoped HTTP routes.
+- Scope: added refresh rotation with transactional access-token replacement, logout/family
+  revocation, account profile projection, active-device listing, and owner-checked device revoke;
+  updated both router constructors and `api/openapi.yaml`.
+- Checks: `cargo fmt`, `cargo check --all-targets --all-features --jobs 1`, strict Clippy, full
+  `cargo test --all-targets --all-features --jobs 1` (93 passed), OpenAPI contract tests, and all
+  four PostgreSQL integration tests against a disposable pgvector container passed.
+- Status: **complete** at the RM-011-C server/browser boundary; real-client E2E is deferred to
+  RM-011-D/E.
+
+## RM-011-C — 2026-08-26 — completion owner derivation
+
+- Goal: remove the impossible native requirement to know a browser-approved account UUID.
+- Result: completion request payload is now only `{ "desktop_token": "…" }`; the locked approved
+  pairing request is the sole source of owner identity for the device/session transaction.
+- Checks: PostgreSQL integration asserts completion returns the approved owner and rejects a replay;
+  strict JSON schema rejects an extra forged `user_id` field at the HTTP boundary.
+- Status: **complete**.
 
 ## HTTP transport refactor — 2026-08-26
 
@@ -981,7 +1000,8 @@
 ## Limit local Cargo build parallelism — 2026-08-26
 
 - Goal: prevent Cargo builds from consuming the whole workstation.
-- Scope: added `.cargo/config.toml` with `[build] jobs = 1`.
-- Result: project-local Cargo commands now use one compilation job by default.
+- Scope: added `.cargo/config.toml` with `[build] jobs = 2`.
+- Result: project-local Cargo commands now use two compilation jobs by default; acceptance checks
+  explicitly used `--jobs 1` for sequential execution.
 - Checks: configuration is valid TOML; no source behavior changed.
 - Status: **complete locally**.
