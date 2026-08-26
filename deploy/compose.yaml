@@ -28,6 +28,7 @@ services:
       ROCKSERVER_LOG_RETENTION_DAYS: ${ROCKSERVER_LOG_RETENTION_DAYS:-14}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be injected outside Git}
       ROCKSERVER_API_BEARER_TOKEN: ${ROCKSERVER_API_BEARER_TOKEN:?ROCKSERVER_API_BEARER_TOKEN must be injected outside Git}
+      ROCKSERVER_TRUSTED_PROXY_TOKEN: ${ROCKSERVER_TRUSTED_PROXY_TOKEN:?ROCKSERVER_TRUSTED_PROXY_TOKEN must be injected outside Git}
       RUST_LOG: ${RUST_LOG:-info}
       YANDEX_AI_API_KEY: ${YANDEX_AI_API_KEY:-}
       YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:-}
@@ -77,10 +78,11 @@ services:
       - database
 
   caddy:
-    image: caddy:2.10.0-alpine@sha256:ae4458638da8e1a91aafffb231c5f8778e964bca650c8a8cb23a7e8ac557aa3c
+    image: ${ROCKSERVER_CADDY_IMAGE:-rockserver-caddy:local}
     restart: unless-stopped
     environment:
       ROCKSERVER_DOMAIN: ${ROCKSERVER_DOMAIN:-localhost}
+      ROCKSERVER_TRUSTED_PROXY_TOKEN: ${ROCKSERVER_TRUSTED_PROXY_TOKEN:?ROCKSERVER_TRUSTED_PROXY_TOKEN must be injected outside Git}
     depends_on:
       rockserver:
         condition: service_healthy

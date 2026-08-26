@@ -1,0 +1,307 @@
+openapi: 3.1.0
+info:
+  title: RockServer Passkey and Desktop Pairing API — RM-011-A proposal
+  version: 0.3.0-proposed
+  description: >-
+    Approval-only design, not current runtime behavior. Email, passwords, SMS and required
+    RockMobile installation are deliberately absent. A passkey can create an account directly in
+    a first-party mobile browser; desktop QR/short-code pairing is an optional later device flow.
+servers:
+  - url: https://api.example.invalid
+paths:
+  /v1/pairing-requests:
+    post:
+      operationId: createDesktopPairingRequest
+      summary: Create an unapproved desktop pairing request
+      security: []
+      x-rate-limit: { key: direct_or_trusted_proxy_ip, requests_per_hour: 6 }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/NewDeviceMetadata' } } }
+      responses:
+        '201': { $ref: '#/components/responses/DesktopPairingRequest' }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '413': { $ref: '#/components/responses/RequestTooLarge' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/pairing-requests/{pairing_request_id}/complete:
+    post:
+      operationId: completeDesktopPairingRequest
+      summary: Consume an approved request and receive this desktop's token pair
+      security: []
+      x-rate-limit: { key: ip_and_pairing_request_when_known, requests_per_15_minutes_per_ip: 30, requests_per_request: 10 }
+      parameters: [ { $ref: '#/components/parameters/PairingRequestId' } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DesktopCompletionRequest' } } }
+      responses:
+        '200': { $ref: '#/components/responses/TokenPair' }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '401': { $ref: '#/components/responses/InvalidPairingProof' }
+        '409': { $ref: '#/components/responses/PairingNotApproved' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/auth/passkeys/registration/options:
+    post:
+      operationId: createPasskeyRegistrationOptions
+      summary: Start phone-first or pairing-continuation WebAuthn registration
+      security: []
+      x-web-authn: { ceremony: registration, validate_rp_id_origin_and_challenge: true }
+      responses:
+        '200': { $ref: '#/components/responses/WebAuthnOptions' }
+        '409': { $ref: '#/components/responses/PasskeyRegistrationNotAllowed' }
+  /v1/auth/passkeys/registration/verify:
+    post:
+      operationId: verifyPasskeyRegistration
+      summary: Verify phone-first or continuation registration and establish browser session
+      security: []
+      x-web-authn: { ceremony: registration, validate_rp_id_origin_and_challenge: true }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/WebAuthnCredentialResponse' } } }
+      responses:
+        '204': { description: Passkey registered and secure HttpOnly browser cookie established; no credential material is returned. }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '422': { $ref: '#/components/responses/WebAuthnVerificationFailed' }
+  /v1/auth/passkeys/authentication/options:
+    post:
+      operationId: createPasskeyAuthenticationOptions
+      summary: Start a discoverable WebAuthn authentication ceremony for the mobile browser
+      security: []
+      x-rate-limit: { key: ip, requests_per_15_minutes: 10 }
+      x-web-authn: { ceremony: authentication, validate_rp_id_origin_and_challenge: true }
+      responses:
+        '200': { $ref: '#/components/responses/WebAuthnOptions' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/auth/passkeys/authentication/verify:
+    post:
+      operationId: verifyPasskeyAuthentication
+      summary: Verify a passkey assertion and establish a first-party browser session
+      security: []
+      x-rate-limit: { key: ip, requests_per_15_minutes: 10 }
+      x-web-authn: { ceremony: authentication, validate_rp_id_origin_and_challenge: true }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/WebAuthnCredentialResponse' } } }
+      responses:
+        '204': { description: Secure HttpOnly first-party browser cookie established. }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '422': { $ref: '#/components/responses/WebAuthnVerificationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/pairing-requests/{pairing_request_id}/approve:
+    post:
+      operationId: approveDesktopPairingRequest
+      summary: Explicitly bind a visible desktop request to the mobile browser's user
+      security: [ { MobileBrowserSession: [] } ]
+      x-rate-limit: { key: browser_session, requests_per_15_minutes: 5 }
+      x-requires-fresh-passkey-assertion: true
+      parameters: [ { $ref: '#/components/parameters/PairingRequestId' } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PairingApprovalRequest' } } }
+      responses:
+        '204': { description: Pairing approved; the desktop must separately complete with its proof. }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '401': { $ref: '#/components/responses/BrowserAuthenticationRequired' }
+        '409': { $ref: '#/components/responses/PairingNotApprovable' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/auth/refresh:
+    post:
+      operationId: refreshDesktopSession
+      summary: Rotate one desktop refresh token
+      security: []
+      x-rate-limit: { key: ip_and_session_when_known, requests_per_15_minutes_per_ip: 30, requests_per_15_minutes_per_session: 20 }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RefreshRequest' } } }
+      responses:
+        '200': { $ref: '#/components/responses/TokenPair' }
+        '401': { $ref: '#/components/responses/InvalidRefreshToken' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/auth/logout:
+    post:
+      operationId: logoutDesktopSession
+      summary: Revoke the caller's current desktop session and refresh family
+      security: [ { AccountBearer: [session:write] } ]
+      responses:
+        '204': { description: Session revoked. }
+        '401': { $ref: '#/components/responses/AuthenticationRequired' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+  /v1/account/profile:
+    get:
+      operationId: getAccountProfile
+      summary: Read the caller's contact-free profile projection
+      security: [ { AccountBearer: [profile:read] } ]
+      responses:
+        '200': { $ref: '#/components/responses/UserProfile' }
+        '401': { $ref: '#/components/responses/AuthenticationRequired' }
+  /v1/account:
+    delete:
+      operationId: deleteAccount
+      summary: Begin account deletion after fresh passkey reauthentication
+      security: [ { AccountBearer: [account:delete] } ]
+      x-requires-fresh-passkey-assertion: true
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DeleteAccountRequest' } } }
+      responses:
+        '202': { $ref: '#/components/responses/AccountDeletionAccepted' }
+        '401': { $ref: '#/components/responses/AuthenticationRequired' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/devices:
+    get:
+      operationId: listOwnedDevices
+      summary: List caller-owned native desktop devices
+      security: [ { AccountBearer: [device:read] } ]
+      responses:
+        '200': { $ref: '#/components/responses/DeviceList' }
+        '401': { $ref: '#/components/responses/AuthenticationRequired' }
+  /v1/devices/{device_id}:
+    delete:
+      operationId: revokeOwnedDevice
+      summary: Revoke one caller-owned device and all of its sessions
+      security: [ { AccountBearer: [device:revoke] } ]
+      parameters: [ { $ref: '#/components/parameters/DeviceId' } ]
+      responses:
+        '204': { description: Device revoked. }
+        '401': { $ref: '#/components/responses/AuthenticationRequired' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '404': { $ref: '#/components/responses/DeviceNotFound' }
+components:
+  securitySchemes:
+    AccountBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Short-lived opaque desktop access token; not shared and not used by MVP-001 anonymous routes.
+    MobileBrowserSession:
+      type: apiKey
+      in: cookie
+      name: rs_mobile_session
+      description: Secure, HttpOnly, SameSite first-party browser session; never a desktop bearer token.
+x-future-auth-extension:
+  current_authenticator: passkey_only
+  account_identity_boundary: >-
+    Future explicit login UI and optional verified email, phone, password or external identities
+    attach to the same user_id through AccountIdentity. They require separate approval and do not
+    change pairing request, device, session or anonymous MVP-001 routes.
+  parameters:
+    PairingRequestId: { name: pairing_request_id, in: path, required: true, schema: { type: string, format: uuid } }
+    DeviceId: { name: device_id, in: path, required: true, schema: { type: string, format: uuid } }
+  responses:
+    DesktopPairingRequest:
+      description: Render QR and code once; client must keep desktop_token only in secure session memory/storage.
+      headers: { Cache-Control: { schema: { type: string }, example: no-store } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/DesktopPairingRequestResponse' } } }
+    TokenPair:
+      description: New desktop credentials; never cache or log.
+      headers: { Cache-Control: { schema: { type: string }, example: no-store } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/TokenPair' } } }
+    WebAuthnOptions: { description: Server-generated WebAuthn publicKey options; challenge is single-use and origin/RP-bound. }
+    UserProfile: { description: Caller-owned contact-free profile., content: { application/json: { schema: { $ref: '#/components/schemas/UserProfile' } } } }
+    DeviceList: { description: Caller-owned device projections only., content: { application/json: { schema: { $ref: '#/components/schemas/DeviceListResponse' } } } }
+    AccountDeletionAccepted: { description: Credentials are immediately revoked; retention/purge follows approved policy. }
+    AuthenticationRequired: { description: Missing, malformed, expired or revoked access bearer., headers: { WWW-Authenticate: { schema: { type: string }, example: Bearer } } }
+    BrowserAuthenticationRequired: { description: A valid first-party mobile browser session is required. }
+    InsufficientScope: { description: Valid bearer lacks required scope. }
+    InvalidPairingProof: { description: Neutral response for unknown, expired, used or invalid desktop proof. }
+    PairingNotApproved: { description: Request is not yet approved, expired, revoked or already consumed. }
+    PairingNotApprovable: { description: Request is unknown, expired, used, revoked or already approved. }
+    InvalidRefreshToken: { description: Neutral response for unknown, used, expired or revoked refresh token; reuse revokes its family. }
+    DeviceNotFound: { description: Same response for missing and foreign device identifiers. }
+    PasskeyRegistrationNotAllowed: { description: Registration is not permitted in this browser continuation. }
+    WebAuthnVerificationFailed: { description: Safe WebAuthn verification failure; never identify a credential/account. }
+    MalformedRequest: { description: Invalid HTTP or JSON; safe ErrorResponse only. }
+    RequestTooLarge: { description: Request body exceeds endpoint bound; safe ErrorResponse only. }
+    ValidationFailed: { description: Safe validation failure without confirming account/request existence. }
+    RateLimited: { description: Quota exhausted before sensitive work where possible., headers: { Retry-After: { schema: { type: integer, minimum: 1 } } } }
+  schemas:
+    NewDeviceMetadata:
+      type: object
+      additionalProperties: false
+      required: [name, platform]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        platform: { type: string, const: rockcast_windows }
+        app_version: { type: [string, 'null'], maxLength: 64 }
+    DesktopPairingRequestResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, pairing_request_id, approval_uri, short_code, verification_phrase, expires_at, desktop_token]
+      properties:
+        request_id: { type: string }
+        pairing_request_id: { type: string, format: uuid }
+        approval_uri: { type: string, format: uri, maxLength: 2048, writeOnly: true }
+        short_code: { type: string, pattern: '^[A-HJ-NP-Z2-9]{8}$', writeOnly: true }
+        verification_phrase: { type: string, minLength: 1, maxLength: 64 }
+        expires_at: { type: string, format: date-time }
+        desktop_token: { type: string, minLength: 43, maxLength: 512, writeOnly: true }
+    DesktopCompletionRequest:
+      type: object
+      additionalProperties: false
+      required: [desktop_token]
+      properties:
+        desktop_token: { type: string, minLength: 43, maxLength: 512, writeOnly: true }
+    PairingApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [verification_phrase]
+      properties:
+        verification_phrase: { type: string, minLength: 1, maxLength: 64 }
+    WebAuthnCredentialResponse:
+      type: object
+      description: Browser-supplied WebAuthn JSON. Server validates ceremony-specific fields strictly and never logs it.
+      additionalProperties: true
+    RefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties: { refresh_token: { type: string, minLength: 43, maxLength: 512, writeOnly: true } }
+    DeleteAccountRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmation]
+      properties: { confirmation: { type: string, const: DELETE } }
+    TokenPair:
+      type: object
+      additionalProperties: false
+      required: [request_id, access_token, access_token_expires_at, refresh_token, refresh_token_expires_at, session]
+      properties:
+        request_id: { type: string }
+        access_token: { type: string, writeOnly: true }
+        access_token_expires_at: { type: string, format: date-time }
+        refresh_token: { type: string, writeOnly: true }
+        refresh_token_expires_at: { type: string, format: date-time }
+        session: { $ref: '#/components/schemas/Session' }
+    UserProfile:
+      type: object
+      additionalProperties: false
+      required: [id, created_at]
+      properties: { id: { type: string, format: uuid }, created_at: { type: string, format: date-time } }
+    Session:
+      type: object
+      additionalProperties: false
+      required: [id, device_id, created_at, access_expires_at, scopes]
+      properties:
+        id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        access_expires_at: { type: string, format: date-time }
+        scopes: { type: array, uniqueItems: true, items: { type: string, enum: [profile:read, session:write, device:read, device:revoke, account:delete, device:connect] } }
+    Device:
+      type: object
+      additionalProperties: false
+      required: [id, name, platform, created_at, last_seen_at, is_current]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 64 }
+        platform: { type: string, const: rockcast_windows }
+        app_version: { type: [string, 'null'], maxLength: 64 }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: [string, 'null'], format: date-time }
+        is_current: { type: boolean }
+    DeviceListResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, devices]
+      properties: { request_id: { type: string }, devices: { type: array, maxItems: 50, items: { $ref: '#/components/schemas/Device' } } }

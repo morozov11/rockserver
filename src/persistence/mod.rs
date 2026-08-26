@@ -1,11 +1,13 @@
 //! Persistent catalog implementations and environment-driven backend selection.
 
+mod account_postgres;
 mod embedding_postgres;
 mod import_postgres;
 mod postgres;
 
 use std::{env, io, sync::Arc};
 
+pub use account_postgres::PostgresAccountStore;
 pub use embedding_postgres::PostgresEmbeddingStore;
 pub use import_postgres::{OwnedCatalogReplacement, PostgresImportStore};
 pub use postgres::PostgresStationRepository;

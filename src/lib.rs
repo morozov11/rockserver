@@ -1,3 +1,5 @@
+/// Passkey-only account, device, and native-session domain boundaries.
+pub mod auth;
 /// Catalog domain and controlled import orchestration.
 pub mod catalog;
 /// Service configuration loaded from the process environment.

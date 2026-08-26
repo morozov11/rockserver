@@ -9,8 +9,10 @@ services:
       - /home/rockserver/logs:/var/log/rockserver
 
   caddy:
+    image: ${ROCKSERVER_CADDY_IMAGE:?ROCKSERVER_CADDY_IMAGE must point to the approved immutable UI image}
     environment:
       ROCKSERVER_DOMAIN: ${ROCKSERVER_DOMAIN:?ROCKSERVER_DOMAIN must be the real owned domain}
+      ROCKSERVER_TRUSTED_PROXY_TOKEN: ${ROCKSERVER_TRUSTED_PROXY_TOKEN:?ROCKSERVER_TRUSTED_PROXY_TOKEN must be injected outside Git}
     ports:
       - "80:80"
       - "443:443"

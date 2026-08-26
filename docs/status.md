@@ -2,6 +2,65 @@
 
 Last updated: 2026-08-26
 
+## RM-011-B2 — browser/pairing persistence implementation (2026-08-26)
+
+Владелец разблокировал проектирование и реализацию `RM-011-B2`, приняв рекомендуемые значения:
+WebAuthn RP ID и first-party origin — `alex.vault57.ru`; синхронизированные passkey разрешены;
+автоматического восстановления после потери всех passkey нет; максимум 10 устройств на аккаунт;
+audit retention — 90 дней. Также приняты рекомендованные сроки access/refresh/browser/pairing
+сессий, лимиты короткого кода, несколько passkey на аккаунт и clone/sign-count policy.
+Единственный trusted proxy — Caddy; прямые подключения fail-closed; состояние rate limits — в
+PostgreSQL.
+
+Реализованы migration `0013`, browser sessions, pairing requests, одноразовые WebAuthn challenges,
+атомарные PostgreSQL rate-limit buckets, passkey sign-count advancement и транзакционное
+approve/complete pairing с лимитом 10 устройств. Добавлены нейтральные WebAuthn context/sign-count
+проверки и детерминированные unit/integration tests. Полный cryptographic WebAuthn verifier и HTTP
+routes остаются частью RM-011-C; B2 не меняет публичный runtime API.
+
+Проверка: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
+`cargo test` (88 unit/library tests и обычные integration suites) и отдельный disposable
+PostgreSQL B2 integration test прошли. Исходный compose PostgreSQL был остановлен после проверки;
+его persistent volume не изменялся.
+
+## RM-011-B — approved persistence subset (2026-08-26)
+
+На момент выполнения B1 были реализованы только persistence boundaries, не выбирающие policy: a
+passkey-only user schema, reserved but unused account-identity boundary, owner-scoped devices,
+hashed native access/refresh-token records, atomic refresh rotation/replay family revocation, and
+safe-classification audit events. Raw credentials, passwords, email/phone identities,
+cryptographic WebAuthn verification, HTTP routes и client UI оставались вне B1; browser/pairing
+и rate-limit persistence добавлены последующей B2. Migration `0012_add_account_session_persistence.sql` contains no plaintext
+secret columns; the Rust store accepts only opaque fixed-size secret hashes.
+
+Deterministic unit coverage verifies hash-debug redaction and the audit vocabulary. An opt-in
+PostgreSQL integration test covers duplicate users, ownership isolation, refresh rotate/replay,
+and account deletion revocation when `TEST_DATABASE_URL` names a disposable database. Its live run
+remains pending that explicitly provided database; B2 has its own disposable PostgreSQL verification.
+
+## RM-011-A — account/device contract and threat model (2026-08-26)
+
+Approval-only design is recorded in `docs/rm-011-a-auth-device-contract.md` with the separate
+`docs/rm-011-a-openapi.proposed.yaml`. It defines passkey/WebAuthn mobile-browser approval of a
+desktop QR/short-code pairing request, opaque short-lived access bearer and rotating refresh-token
+families, account deletion, and owner-scoped device list/revoke. Email, password, SMS and required
+RockMobile installation are deliberately absent.
+MVP-001 anonymous `/v1` endpoints remain separate: no shared token, credential or changed behavior
+is proposed for them. The current runtime `api/openapi.yaml`, Rust code, database migrations,
+clients, deployment, secrets and external services were not changed.
+
+The entry records owner confirmation of MVP-001 and RM-007-D as supplied task context, and records
+that OPS-001 staging exists; it does not overwrite the historical RM-007-D technical evidence.
+RM-011-A contract/threat model was **approved by the owner on 2026-08-26**. The owner subsequently
+selected the RM-011-B2 values recorded above. Trusted-proxy CIDRs, deployment wiring and the live
+PostgreSQL test environment remain operational prerequisites and must be configured fail-closed;
+RM-011-C must wait for B2 review and runtime OpenAPI reconciliation.
+
+The proposal separately records phone-first browser registration: a passkey may create an account
+before any desktop/device exists. It reserves an additive `AccountIdentity` boundary so a later
+explicit login page or optional verified email/phone/password method can attach to the same user
+without changing user/device/session ownership; none of those methods is currently proposed.
+
 ## MVP-001-A — public API contract and abuse model (2026-08-26)
 
 Added approval-only `docs/mvp-001-a-public-api-contract.md` and a separate proposed OpenAPI
@@ -408,9 +467,9 @@ RM-011-A through F; RM-012-A through F; then ESP-001 and ESP-002 when hardware e
 task has repository boundaries, dependency, recommended model/reasoning effort, scope and
 acceptance gate. The plan itself is not an approval to implement any task.
 
-## RM-007-D cross-client review
+## RM-007-D cross-client review (historical evidence, 2026-08-25)
 
-RM-007-D is **not passed**. The evidence-based review in
+At the time of this evidence-based review, RM-007-D was **not passed**. The review in
 `docs/rm-007-d-cross-client-review.md` confirmed the shared baseline release and the clients'
 offline local-catalog paths, but found four unresolved High issues: RockMobile's persisted JSON is
 not the portable RM-007-A profile shape; its read/init path can replace corrupt or unsupported data
@@ -430,8 +489,10 @@ process-local `-Duser.home=C:\Users\alex`; lint is not claimed as passed and its
 known errors remain unresolved/unverified in this run. No network, production service, secret,
 live database, device test, product code or catalog data was changed.
 
-OPS-001-A remains independently available as design-only work. RM-011-A remains blocked on a
-passed RM-007-D and must not treat the current client stores as a compatible sync basis.
+OPS-001-A remained independently available as design-only work. The owner later manually
+confirmed RM-007-D for the limited purpose of proceeding with RM-011-A proposal work on
+2026-08-26; this historical review remains evidence and must not be reinterpreted as a passed
+client verification or a compatible-sync guarantee.
 
 ## OPS-001-A production deployment design
 
@@ -485,9 +546,10 @@ The four original High findings were remediated in client source: RockMobile now
 v1 profile/timestamp shape with checked persistence, fail-closed reads, legacy backup/journal,
 explicit rollback and wired baseline lifecycle resolution; RockCast now preserves canonical server
 IDs for search/voice personal records and completes dedup/journal/rollback behavior. RockCast fmt,
-strict Clippy and full tests pass after remediation. Android targeted unit and lint commands remain
-blocked before compilation by the inaccessible Gradle wrapper lock, so RM-007-D remains not passed
-as a verification gate and RM-011-A remains blocked.
+strict Clippy and full tests pass after remediation. Android targeted unit and lint commands
+remained blocked before compilation by the inaccessible Gradle wrapper lock. The owner later
+manually confirmed RM-007-D for RM-011-A proposal work; that decision does not claim the blocked
+Android verification as passed.
 
 ## OPS-001-C CI image, release, backup and rollback runbook
 
@@ -547,3 +609,51 @@ omits `ROCKSERVER_API_BEARER_TOKEN`. It generates a random, non-production,
 process-local development credential only for the legacy protected `/api/v1`
 and local admin access gate. The anonymous `/v1` allowlist remains
 unauthenticated; production startup policy is unchanged.
+
+## RM-011-C — unified web shell and auth runtime (current snapshot)
+
+Итоговый отчёт текущего прогона: [`docs/rm-011-c-report.md`](rm-011-c-report.md). RM-011-C
+остаётся частично закрытой: deterministic checks проходят, но live PostgreSQL/E2E security gates
+и native session routes ещё не закрыты.
+
+The chosen single first-party frontend/admin stack is **TypeScript + Vite + Preact** in `web/`.
+It has one shared same-origin API client and types, passkey registration/authentication, pairing
+lookup/approval, and local QR presentation; it never stores a bearer, refresh, browser-session or
+pairing secret in localStorage. Caddy serves the static bundle and proxies only `/v1`, `/api/v1`,
+and health routes to RockServer, injecting a deployment-only proxy proof header so direct browser
+requests fail closed. The Rust routes include registration and authentication options/verify with
+cryptographic WebAuthn checks, Secure/HttpOnly/SameSite cookies, CSRF/origin checks, PostgreSQL
+rate limits, and desktop pairing completion with one-time native access/refresh issuance.
+The remaining UI limitation is that the native desktop client must call the completion endpoint;
+the browser shows approval success but does not receive native tokens.
+
+The runtime now also creates a ten-minute desktop pairing request at `POST /v1/pairing-requests`
+and resolves pending short codes at `GET /v1/pairing-requests/lookup?code=...`. PostgreSQL supplies
+the expiry clock and persists only SHA-256 proof hashes; lookup exposes only device metadata and the
+verification phrase. Approval, completion and request throttling are implemented; the browser UI
+executes approval, while the native desktop client remains responsible for calling completion.
+
+The approve endpoint is now present at `POST /v1/pairing-requests/{request_id}/approve`; it
+requires an `HttpOnly` browser cookie proof, the `X-CSRF-Token` double-submit header, exact
+first-party HTTPS origin, and the configured Caddy proxy proof. A new nullable cookie-hash column
+keeps old B2 rows readable while all newly created browser sessions bind an opaque cookie hash.
+
+Verification on this snapshot: `cargo fmt --check`, `cargo clippy --all-targets --all-features --jobs 1
+-- -D warnings`, `cargo test --jobs 1` (92 unit/library tests plus regular integration suites), web
+`tsc --noEmit`, and a direct Vite production build with the bundled Node runtime all pass.
+PostgreSQL integration tests remain opt-in and were not run in this workspace; the convenience
+`pnpm run build` wrapper cannot find the host Node executable, while the Caddy image build uses its
+own Node toolchain.
+
+## HTTP transport refactor
+
+The HTTP module is now a thin public facade. Route handlers and transport logic live in
+`src/http/endpoints.rs`, while shared application state and anonymous admission controls live in
+`src/http/state.rs`. Runtime behavior and the public API are unchanged.
+
+Verification after the refactor: `cargo fmt --check`, `cargo clippy --all-targets --all-features
+-- -D warnings`, and `cargo test` passed (92 unit tests plus regular integration suites; external
+PostgreSQL, LLM, SpeechKit, and ONNX cases remain ignored behind their explicit gates).
+
+Local Cargo concurrency is capped at one job via `.cargo/config.toml` to reduce CPU and memory
+pressure during builds, checks, Clippy, and tests.

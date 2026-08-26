@@ -11,8 +11,162 @@ info:
     PostgreSQL may use provenance-compatible semantic ranking; metadata fallback preserves
     the same schemas when embeddings are absent or unavailable.
 servers:
+  - url: https://alex.vault57.ru
   - url: http://127.0.0.1:3000
 paths:
+  /v1/auth/passkeys/registration/options:
+    post:
+      operationId: startPasskeyRegistration
+      summary: Start a first-party passkey registration
+      responses:
+        "200": { description: WebAuthn creation options and server challenge identifier. }
+        "403": { description: Direct or wrong-origin requests are rejected. }
+        "503": { description: Authentication persistence is unavailable. }
+  /v1/auth/passkeys/registration/verify:
+    post:
+      operationId: finishPasskeyRegistration
+      summary: Verify a passkey registration and create a browser session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              required: [challenge_id, id, attestationObject, clientDataJSON]
+              properties:
+                challenge_id: { type: string, format: uuid }
+                id: { type: string }
+                attestationObject: { type: string }
+                clientDataJSON: { type: string }
+      responses:
+        "200": { description: Browser session cookie and CSRF token were created. }
+        "401": { description: Challenge or WebAuthn response was rejected. }
+        "403": { description: Direct or wrong-origin requests are rejected. }
+        "409": { description: Credential already exists. }
+        "503": { description: Authentication persistence is unavailable. }
+  /v1/auth/passkeys/authentication/options:
+    post:
+      operationId: startPasskeyAuthentication
+      summary: Start passkey authentication for an account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [user_id]
+              properties: { user_id: { type: string, format: uuid } }
+      responses:
+        "200": { description: WebAuthn request options and server challenge identifier. }
+        "401": { description: Account has no active passkey. }
+        "403": { description: Direct or wrong-origin requests are rejected. }
+  /v1/auth/passkeys/authentication/verify:
+    post:
+      operationId: finishPasskeyAuthentication
+      summary: Verify a passkey assertion and create a browser session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              required: [challenge_id, user_id, id, authenticatorData, signature, clientDataJSON]
+      responses:
+        "200": { description: Browser session cookie and CSRF token were created. }
+        "401": { description: Assertion, challenge or sign counter was rejected. }
+        "403": { description: Direct or wrong-origin requests are rejected. }
+  /v1/pairing-requests:
+    post:
+      operationId: createPairingRequest
+      summary: Start a short-lived desktop pairing request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [device_name, platform]
+              properties:
+                device_name: { type: string, minLength: 1, maxLength: 128 }
+                platform: { type: string, minLength: 1, maxLength: 64 }
+                app_version: { type: string, maxLength: 64 }
+      responses:
+        "201": { description: Desktop-only proof, browser approval proof and short code were created. }
+        "422": { description: Device metadata is invalid. }
+        "503": { description: Account persistence is unavailable. }
+  /v1/pairing-requests/lookup:
+    get:
+      operationId: lookupPairingRequest
+      summary: Resolve a pairing short code to non-secret device information
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 8, pattern: "^[A-Fa-f0-9]{8}$" }
+      responses:
+        "200": { description: A pending pairing request was found. }
+        "404": { description: The code is unknown, expired, used or revoked. }
+        "503": { description: Account persistence is unavailable. }
+  /v1/pairing-requests/{request_id}/approve:
+    post:
+      operationId: approvePairingRequest
+      summary: Approve a pairing request from a fresh browser session
+      security:
+        - RockserverBrowserCookie: []
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [approval_secret, verification_phrase]
+              properties:
+                approval_secret: { type: string, minLength: 1, maxLength: 128 }
+                verification_phrase: { type: string, minLength: 1, maxLength: 64 }
+      responses:
+        "204": { description: Pairing request approved. }
+        "401": { description: Browser session cookie is absent or invalid. }
+        "403": { description: CSRF proof is absent or invalid. }
+        "409": { description: Pairing request is expired, consumed or otherwise not approvable. }
+        "503": { description: Account persistence is unavailable. }
+  /v1/pairing-requests/{request_id}/complete:
+    post:
+      operationId: completePairingRequest
+      summary: Complete an approved desktop pairing request
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [desktop_token, user_id]
+              properties:
+                desktop_token: { type: string, minLength: 16, maxLength: 128 }
+                user_id: { type: string, format: uuid }
+      responses:
+        "200": { description: Native access and refresh credentials were issued once. }
+        "401": { description: Proof is invalid, expired, consumed or owner-mismatched. }
+        "503": { description: Account persistence is unavailable. }
   /admin:
     get:
       operationId: getAdminConsolePreview
@@ -466,6 +620,14 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 components:
   securitySchemes:
+    RockserverBrowserCookie:
+      type: apiKey
+      in: cookie
+      name: rockserver_browser
+      description: >-
+        Secure, HttpOnly, SameSite browser session cookie issued after a verified passkey ceremony.
+        State-changing browser requests also require the X-CSRF-Token header and the trusted Caddy
+        proxy proof; those transport checks are enforced outside the bearer scheme.
     RockCastBearer:
       type: http
       scheme: bearer

@@ -1,8 +1,9 @@
-use std::{error::Error, sync::Arc};
+use std::{env, error::Error, sync::Arc};
 
 use rockserver::{
     config::Config,
-    persistence::repository_from_env,
+    http::TRUSTED_PROXY_TOKEN_ENV,
+    persistence::{DATABASE_URL_ENV, PostgresAccountStore, repository_from_env},
     providers::embedding_provider_from_env,
     providers::yandex_llm::YandexLlmProvider,
     providers::yandex_speechkit::YandexSpeechKitRecognizer,
@@ -23,6 +24,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let config = Config::from_env()?;
     let repository = repository_from_env().await?;
+    let database_url = env::var(DATABASE_URL_ENV)?;
+    let trusted_proxy_token = env::var(TRUSTED_PROXY_TOKEN_ENV)?;
+    let account_store = PostgresAccountStore::connect(&database_url).await?;
     let embedding_provider = embedding_provider_from_env()?;
     let language_classifier = match (&embedding_provider, semantic_language_filters_enabled()?) {
         (Some(provider), true) if provider.supports_semantic_intent_filters() => {
@@ -72,7 +76,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .unwrap_or(unavailable);
     serve(
         listener,
-        rockserver::http::router_with_speech_recognizers_and_bearer_token(
+        rockserver::http::router_with_speech_recognizers_bearer_account_store_and_proxy(
             search_service,
             rockserver::voice::SpeechRecognizers::new(
                 buffered_speech_recognizer,
@@ -80,6 +84,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             ),
             rockserver::http::DEFAULT_VOICE_COMMAND_TIMEOUT,
             config.api_bearer_token,
+            account_store,
+            trusted_proxy_token,
         ),
         shutdown_signal(),
     )

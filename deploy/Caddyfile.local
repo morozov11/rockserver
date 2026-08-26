@@ -1,3 +1,19 @@
 :80 {
-    reverse_proxy rockserver:3000
+    encode gzip
+    header {
+        Content-Security-Policy "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; img-src 'self' data:"
+        Referrer-Policy "same-origin"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
+    @api path /v1/* /api/v1/* /health/*
+    reverse_proxy @api rockserver:3000 {
+        header_up X-Forwarded-Proto https
+        header_up X-Rockserver-Proxy {$ROCKSERVER_TRUSTED_PROXY_TOKEN}
+    }
+    root * /srv
+    try_files {path} /index.html
+    file_server
 }

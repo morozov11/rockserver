@@ -1,5 +1,8 @@
 # Rust build output
 /target/
+**/node_modules/
+**/.pnpm-store/
+/web/dist/
 
 # IntelliJ IDEA / RustRover project files
 /.idea/

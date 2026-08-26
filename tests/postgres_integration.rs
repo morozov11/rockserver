@@ -6,13 +6,17 @@ use async_trait::async_trait;
 use axum::{body::Body, http::Request};
 use http_body_util::BodyExt;
 use rockserver::{
+    auth::{
+        NewBrowserSession, NewPairingRequest, NewSession, NewWebAuthnChallenge, OwnedDevice,
+        RefreshError, SecretHash, WebAuthnCeremony,
+    },
     catalog::{
         CatalogImportError, CatalogImportProvider, CatalogImporter, ImportLimits, ImportPage,
         ImportedStation, ImportedStream, PinnedSharedCatalog,
     },
     http::{HealthResponse, HealthStatus, router_with_repository, router_with_search_service},
     persistence::{
-        OwnedCatalogReplacement, PostgresEmbeddingStore, PostgresImportStore,
+        OwnedCatalogReplacement, PostgresAccountStore, PostgresEmbeddingStore, PostgresImportStore,
         PostgresStationRepository,
     },
     providers::radio_browser::SOURCE,
@@ -27,6 +31,319 @@ use sha2::Digest;
 use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
+
+/// Covers the approved passkey-only account persistence invariants against PostgreSQL.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL pointing to a disposable PostgreSQL database"]
+async fn postgres_b2_browser_pairing_webauthn_and_rate_limits() {
+    let database_url = env::var("TEST_DATABASE_URL")
+        .expect("set TEST_DATABASE_URL to an isolated PostgreSQL database");
+    let store = PostgresAccountStore::connect(&database_url)
+        .await
+        .expect("account migrations must succeed");
+    let user_id = Uuid::new_v4();
+    store.create_user(user_id).await.unwrap();
+
+    assert!(
+        store
+            .create_passkey_credential(
+                Uuid::new_v4(),
+                user_id,
+                b"credential-id",
+                b"public-key",
+                0,
+                &[],
+            )
+            .await
+            .unwrap()
+    );
+    assert!(
+        store
+            .advance_passkey_sign_count(b"credential-id", 1)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !store
+            .advance_passkey_sign_count(b"credential-id", 0)
+            .await
+            .unwrap()
+    );
+
+    let browser_session_id = Uuid::new_v4();
+    assert!(
+        store
+            .create_browser_session(NewBrowserSession {
+                session_id: browser_session_id,
+                user_id,
+                session_token_hash: &SecretHash::new([11; 32]),
+                csrf_hash: &SecretHash::new([1; 32]),
+                passkey_reauthenticated_at_rfc3339: "2035-01-01T00:00:00Z",
+                expires_at_rfc3339: "2035-02-01T00:00:00Z",
+            })
+            .await
+            .unwrap()
+    );
+
+    let challenge_id = Uuid::new_v4();
+    let challenge_hash = SecretHash::new([2; 32]);
+    assert!(
+        store
+            .create_webauthn_challenge(NewWebAuthnChallenge {
+                challenge_id,
+                challenge_hash: &challenge_hash,
+                state_blob: b"{}",
+                ceremony: WebAuthnCeremony::Authentication,
+                rp_id: "alex.vault57.ru",
+                origin: "https://alex.vault57.ru",
+                expires_at_rfc3339: "2035-01-01T00:00:00Z",
+                user_id: Some(user_id),
+                browser_session_id: Some(browser_session_id),
+                pairing_request_id: None,
+            })
+            .await
+            .unwrap()
+    );
+    assert!(
+        store
+            .consume_webauthn_challenge(
+                challenge_id,
+                &challenge_hash,
+                WebAuthnCeremony::Authentication,
+                "https://alex.vault57.ru",
+                "alex.vault57.ru",
+            )
+            .await
+            .unwrap()
+    );
+    assert!(
+        !store
+            .consume_webauthn_challenge(
+                challenge_id,
+                &challenge_hash,
+                WebAuthnCeremony::Authentication,
+                "https://alex.vault57.ru",
+                "alex.vault57.ru",
+            )
+            .await
+            .unwrap()
+    );
+
+    let request_id = Uuid::new_v4();
+    assert!(
+        store
+            .create_pairing_request(NewPairingRequest {
+                request_id,
+                desktop_token_hash: &SecretHash::new([3; 32]),
+                approval_secret_hash: &SecretHash::new([4; 32]),
+                short_code_hash: &SecretHash::new([5; 32]),
+                verification_phrase: "BLUE-MOON",
+                device_name: "Test desktop",
+                platform: "rockcast_windows",
+                app_version: Some("test"),
+                expires_at_rfc3339: "2035-01-01T00:00:00Z",
+            })
+            .await
+            .unwrap()
+    );
+    assert!(
+        store
+            .lookup_pairing_request(&SecretHash::new([5; 32]))
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        !store
+            .approve_pairing_request(
+                request_id,
+                user_id,
+                browser_session_id,
+                &SecretHash::new([99; 32]),
+                "BLUE-MOON",
+            )
+            .await
+            .unwrap()
+    );
+    assert!(
+        store
+            .approve_pairing_request(
+                request_id,
+                user_id,
+                browser_session_id,
+                &SecretHash::new([4; 32]),
+                "BLUE-MOON",
+            )
+            .await
+            .unwrap()
+    );
+    let device_id = Uuid::new_v4();
+    let session_id = Uuid::new_v4();
+    assert!(
+        store
+            .complete_pairing(
+                request_id,
+                &SecretHash::new([3; 32]),
+                device_id,
+                NewSession {
+                    session_id,
+                    user_id,
+                    device_id,
+                    access_hash: &SecretHash::new([6; 32]),
+                    access_expires_at_rfc3339: "2035-01-01T00:10:00Z",
+                    refresh_id: Uuid::new_v4(),
+                    refresh_hash: &SecretHash::new([7; 32]),
+                    refresh_expires_at_rfc3339: "2035-02-01T00:00:00Z",
+                },
+            )
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        store
+            .complete_pairing(
+                request_id,
+                &SecretHash::new([3; 32]),
+                Uuid::new_v4(),
+                NewSession {
+                    session_id: Uuid::new_v4(),
+                    user_id,
+                    device_id: Uuid::new_v4(),
+                    access_hash: &SecretHash::new([8; 32]),
+                    access_expires_at_rfc3339: "2035-01-01T00:10:00Z",
+                    refresh_id: Uuid::new_v4(),
+                    refresh_hash: &SecretHash::new([9; 32]),
+                    refresh_expires_at_rfc3339: "2035-02-01T00:00:00Z",
+                },
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    let rate_key = SecretHash::new([10; 32]);
+    assert!(
+        store
+            .consume_rate_limit(&rate_key, "2035-01-01T00:00:00Z", "2035-01-01T00:15:00Z", 1,)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !store
+            .consume_rate_limit(&rate_key, "2035-01-01T00:00:00Z", "2035-01-01T00:15:00Z", 1,)
+            .await
+            .unwrap()
+    );
+    store.delete_account(user_id).await.unwrap();
+    let inspection = repository_pool(&database_url).await;
+    let browser_revoked = sqlx::query_scalar::<_, bool>(
+        "SELECT revoked_at IS NOT NULL FROM browser_sessions WHERE id = $1",
+    )
+    .bind(browser_session_id)
+    .fetch_one(&inspection)
+    .await
+    .unwrap();
+    assert!(
+        browser_revoked,
+        "account deletion must revoke browser sessions"
+    );
+    inspection.close().await;
+    store.close().await;
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL pointing to a disposable PostgreSQL database"]
+async fn postgres_account_session_rotation_deletion_and_ownership() {
+    let database_url = env::var("TEST_DATABASE_URL")
+        .expect("set TEST_DATABASE_URL to an isolated PostgreSQL database");
+    let store = PostgresAccountStore::connect(&database_url)
+        .await
+        .expect("account migrations must succeed");
+    let owner = Uuid::new_v4();
+    let foreign_user = Uuid::new_v4();
+    store.create_user(owner).await.expect("first user inserts");
+    assert!(
+        store.create_user(owner).await.is_err(),
+        "duplicate account is rejected"
+    );
+    store
+        .create_user(foreign_user)
+        .await
+        .expect("second user inserts");
+    let device = OwnedDevice {
+        id: Uuid::new_v4(),
+        user_id: owner,
+        name: "Desktop".into(),
+        platform: "windows".into(),
+    };
+    assert!(
+        store
+            .create_device(&device)
+            .await
+            .expect("owner device inserts")
+    );
+    assert_eq!(
+        store
+            .find_owned_device(foreign_user, device.id)
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        store.find_owned_device(owner, device.id).await.unwrap(),
+        Some(device.clone())
+    );
+
+    let session = Uuid::new_v4();
+    let first_refresh = Uuid::new_v4();
+    assert!(
+        store
+            .create_session(NewSession {
+                session_id: session,
+                user_id: owner,
+                device_id: device.id,
+                access_hash: &SecretHash::new([1; 32]),
+                access_expires_at_rfc3339: "2035-01-01T00:00:00Z",
+                refresh_id: first_refresh,
+                refresh_hash: &SecretHash::new([2; 32]),
+                refresh_expires_at_rfc3339: "2035-01-02T00:00:00Z",
+            })
+            .await
+            .unwrap()
+    );
+    let rotation = store
+        .rotate_refresh(
+            &SecretHash::new([2; 32]),
+            Uuid::new_v4(),
+            &SecretHash::new([3; 32]),
+            "2035-01-03T00:00:00Z",
+        )
+        .await
+        .unwrap();
+    assert_eq!(rotation.session_id, session);
+    assert_eq!(
+        store
+            .rotate_refresh(
+                &SecretHash::new([2; 32]),
+                Uuid::new_v4(),
+                &SecretHash::new([4; 32]),
+                "2035-01-04T00:00:00Z"
+            )
+            .await,
+        Err(RefreshError::Rejected)
+    );
+    assert!(store.delete_account(owner).await.unwrap());
+    assert_eq!(
+        store.find_owned_device(owner, device.id).await.unwrap(),
+        None
+    );
+    let inspection = repository_pool(&database_url).await;
+    let state = sqlx::query_as::<_, (String, bool, bool)>("SELECT u.status, EXISTS(SELECT 1 FROM sessions s WHERE s.user_id = u.id AND s.revoked_at IS NULL), EXISTS(SELECT 1 FROM refresh_tokens r JOIN sessions s ON s.id = r.session_id WHERE s.user_id = u.id AND r.revoked_at IS NULL) FROM users u WHERE u.id = $1")
+        .bind(owner).fetch_one(&inspection).await.unwrap();
+    assert_eq!(state, ("deleted".to_owned(), false, false));
+    inspection.close().await;
+}
 
 /// Exercises migrations, seed data, search semantics, and live database readiness.
 #[tokio::test]

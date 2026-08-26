@@ -1,6 +1,7 @@
 # Исполнимый план интернет-беты
 
-**Статус:** все задачи ниже запланированы; реализация не начата.  
+**Статус:** ниже сохранён план задач; MVP-001-A и RM-011-A contract/threat-model одобрены
+владельцем. Реализация account/device API не начата.
 **Основание:** [общий roadmap](shared-product-roadmap.md).  
 **Правило:** одна задача Codex — один ограниченный результат. Не запускать задачи параллельно,
 если не указано обратное. Перед каждой задачей прочитать `AGENTS.md` целевого репозитория,
@@ -132,6 +133,8 @@
   проверить offline-first, миграцию и отсутствие сетевой зависимости.
 - **Готово, когда:** нет incompatible local data shape и результат записан в docs.
 - **Зависимости:** RM-007-B, RM-007-C.
+- **Статус:** подтверждена владельцем для перехода к RM-011-A 2026-08-26. Исторический
+  технический report и его evidence остаются в `rm-007-d-cross-client-review.md`.
 
 ## OPS-001 — Основа безопасного интернет-развёртывания
 
@@ -189,21 +192,36 @@
 
 - **Репозиторий:** RockServer; docs/OpenAPI proposal only.
 - **Модель:** `gpt-5.6-sol`, `high`.
-- **Работа:** определить account/session/device schemas, password hashing policy, access/refresh
-  lifecycle, token revocation/rotation, rate limits, error semantics, user enumeration protection,
-  delete-account and device-pairing protocol.
+- **Работа:** определить account/session/device/passkey schemas, WebAuthn policy, access/refresh
+  lifecycle, token revocation/rotation, rate limits, safe error semantics, delete-account and
+  desktop QR/short-code pairing through an optional mobile browser.
 - **Готово, когда:** OpenAPI proposal, migration and security review checklist approved человеком.
 - **Зависимости:** RM-007-D, OPS-001-B.
+- **Статус:** approved владельцем 2026-08-26: contract/threat model recorded in
+  `rm-011-a-auth-device-contract.md` and `rm-011-a-openapi.proposed.yaml`. Explicit alternatives
+  for recovery, retention and operations remain RM-011-B implementation decisions until separately
+  selected; runtime/OpenAPI and implementation unchanged.
 
 ### RM-011-B — RockServer: account and session persistence
 
 - **Репозиторий:** RockServer.
 - **Модель:** `gpt-5.6-terra`, `high`.
-- **Работа:** migrations and domain/persistence for users, password hashes, sessions, refresh-token
-  rotation/revocation, device ownership and audit-safe events.
-- **Готово, когда:** deterministic unit/PostgreSQL tests cover registration, duplicate email,
-  login failure, token revoke/rotate, account deletion and ownership isolation.
+- **Работа:** migrations and domain/persistence for users, passkey credentials, browser/desktop
+  sessions, refresh-token rotation/revocation, pairing requests, device ownership and audit-safe events.
+- **Готово, когда:** deterministic unit/PostgreSQL tests cover WebAuthn validation, QR/code
+  approval/expiry/replay, token revoke/rotate, account deletion and ownership isolation.
 - **Зависимости:** RM-011-A approval.
+- **Уточнение:** задача разделена на `RM-011-B1` (уже выполненный безопасный persistence-subset)
+  и `RM-011-B2` (полная WebAuthn/browser-session/pairing persistence). Владелец одобрил
+  implementation policy для B2 2026-08-26: RP ID и first-party origin `alex.vault57.ru`,
+  синхронизированные passkey разрешены, автоматического recovery после потери всех passkey нет,
+  максимум 10 устройств на аккаунт, audit retention 90 дней; также приняты рекомендованные
+  сроки access/refresh/browser/pairing и rate-limit значения из RM-011-A.
+- **Operational policy:** владелец подтвердил, что доверенным proxy является только Caddy;
+  прямые подключения fail-closed, а состояние rate limits хранится в PostgreSQL.
+- **Статус:** persistence-часть B2 реализована и проверена unit-тестами и disposable PostgreSQL;
+  cryptographic WebAuthn verifier и HTTP API остаются в RM-011-C. Публичный runtime API B2 не
+  изменяет.
 
 ### RM-011-C — RockServer: public auth and device API
 
@@ -211,16 +229,27 @@
 - **Модель:** `gpt-5.6-terra`, `high`.
 - **Работа:** implement approved `/v1` OpenAPI endpoints, rate limits and request-safe logging;
   include QR/short-code pairing issuance and redemption without ESP32 firmware.
-- **Готово, когда:** API/integration tests pass; tokens and passwords never appear in logs/errors;
+- **Готово, когда:** API/integration tests pass; tokens and WebAuthn/QR/code secrets never appear in logs/errors;
   anonymous radio endpoints remain compatible.
-- **Зависимости:** RM-011-B.
+- **Зависимости:** `RM-011-B2` review passed, применённые миграции и reconciled runtime
+  `api/openapi.yaml`. Частичный `RM-011-B1` сам по себе не является достаточной зависимостью.
+- **Frontend decision (2026-08-26):** один first-party bundle на TypeScript + Vite + Preact
+  обслуживает и passkey/pairing, и будущую админку; общие API-клиент, типы и компоненты живут в
+  `web/`. Caddy раздаёт build как статику, а `/v1` и `/api/v1` проксирует в RockServer.
+- **Статус реализации (2026-08-26):** локально добавлены passkey registration/authentication,
+  криптографическая WebAuthn-проверка с RP/origin/challenge и sign-count guard, browser cookie/CSRF,
+  PostgreSQL rate limits, QR/short-code pairing approval/completion и proxy proof от Caddy.
+  Единый Preact bundle прошёл TypeScript и Vite production build; native completion по-прежнему
+  вызывается RockCast после browser approval, а disposable PostgreSQL прогон остаётся внешним gate.
+  Итоговый отчёт `docs/rm-011-c-report.md` фиксирует, что RM-011-C пока частично закрыта: live
+  PostgreSQL/E2E security verification и расширенные native session routes остаются незавершёнными.
 
 ### RM-011-D — RockMobile: account and secure session UX
 
 - **Репозиторий:** RockMobile.
 - **Модель:** `gpt-5.6-terra`, `medium`.
-- **Работа:** registration/login/logout, secure platform token storage, account/profile state and
-  device list/revoke UI; preserve anonymous and offline flows.
+- **Работа:** optional passkey/browser onboarding, logout, secure platform token storage,
+  account/profile state and device list/revoke UI; preserve anonymous and offline flows.
 - **Готово, когда:** no token in ordinary app storage/logs; logout clears session; unreachable
   server never blocks radio.
 - **Зависимости:** RM-011-C, GATE-001.
@@ -229,8 +258,8 @@
 
 - **Репозиторий:** RockCast.
 - **Модель:** `gpt-5.6-terra`, `medium`.
-- **Работа:** equivalent login/session/device management using OS-appropriate secure storage; do
-  not put secrets into config files or CLI output.
+- **Работа:** desktop QR/short-code pairing, passkey/browser approval handoff, session/device
+  management using OS-appropriate secure storage; do not put secrets into config files or CLI output.
 - **Готово, когда:** same contract tests and anonymous fallback guarantees as RockMobile.
 - **Зависимости:** RM-011-C.
 

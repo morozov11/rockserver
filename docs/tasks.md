@@ -807,3 +807,181 @@
 - Checks: `cargo fmt`, `cargo check`, and focused deterministic search, voice-command and
   WebSocket tests passed. Full required Clippy/test and OpenAPI reconciliation remain pending.
 - Status: implementation in progress; no public rollout is authorized.
+
+## RM-011-A — 2026-08-26 — account/device contract and threat model
+
+- Goal: prepare the smallest secure approval-only account, session, device and future pairing
+  contract after the owner-confirmed RM-007-D/MVP-001 gates, without implementing authentication.
+- Scope: `docs/rm-011-a-auth-device-contract.md`,
+  `docs/rm-011-a-openapi.proposed.yaml`, and factual roadmap/status/task records only. Existing
+  unrelated changes were preserved. No runtime OpenAPI, Rust, PostgreSQL migration, client UI,
+  email/SMS, production secret, network, provider, commit or push was used.
+- Result: revised by owner direction to remove email/password/SMS and require no RockMobile
+  installation. The proposal now uses a passkey in a first-party mobile browser to approve a
+  desktop-originated QR/short-code request; the desktop alone receives its distinct opaque
+  10-minute access/30-day rotating-refresh session. The threat model fixes separate desktop and
+  approval proofs, safe errors, rate-limit keys, redacted logs and minimum audit events. It lists
+  eight owner decisions plus WebAuthn/migration prerequisites for RM-011-B/C. Phone-first browser
+  registration is explicit, and an additive `AccountIdentity` boundary preserves a future optional
+  email or explicit-login method without redesigning user/device/session ownership.
+- Checks: new proposal Markdown heading/whitespace check passed; a temporary no-runtime Rust test parsed the
+  revised proposed OpenAPI and asserted phone-first passkey registration plus QR/short-code pairing,
+  removal of the old register/login routes and email/password fields, opaque desktop bearer,
+  browser-cookie scheme and reserved additive-identity boundary (1 passed), then was removed.
+  `cargo fmt --check`,
+  strict all-target/all-feature Clippy, `cargo test` (84 library + 18 regular integration tests;
+  7 configured external/PostgreSQL tests ignored), and `git diff --check` passed. Current
+  `api/openapi.yaml` was inspected and deliberately left unchanged because it has no matching
+  runtime behavior.
+- Status: **proposal approved by the owner on 2026-08-26**. No account/device endpoint is current.
+  The proposal intentionally preserves explicit recovery/retention/operational alternatives; the
+  relevant option and listed RM-011-B/C prerequisites require approval before implementation.
+
+## RM-011-B — 2026-08-26 — approved account/session persistence subset
+
+- Goal: implement only RM-011-A persistence boundaries that do not require selecting unresolved
+  recovery, retention, WebAuthn-operation, proxy, browser or credential policy.
+- Scope: migration `0012`, passkey-only account/device/session domain and PostgreSQL store, plus
+  deterministic unit and opt-in PostgreSQL integration coverage. No password/email identity,
+  browser/pairing, WebAuthn verification, rate limit, HTTP endpoint, client, external provider,
+  secret, deployment, commit or push was added.
+- Result: users/devices/sessions/refresh-token chains and audit classifications persist hashes
+  only; a used refresh token revokes its session family atomically. Account deletion tombstones the
+  user and revokes active devices, sessions, refresh tokens and passkeys. The reserved identity
+  table is unused and does not introduce login behavior.
+- Checks: `cargo fmt --check`, offline compile, strict Clippy and full tests were run locally;
+  the PostgreSQL integration test is deliberately ignored unless `TEST_DATABASE_URL` points to a
+  disposable database. No live database was provided by this task.
+- Status: **approved subset complete locally**. RM-011-C remains blocked until RM-011-B2 review and
+  runtime OpenAPI reconciliation; this historical B1 entry does not claim those later gates.
+
+## RM-011-B2 — 2026-08-26 — browser, pairing, WebAuthn-boundary and rate-limit persistence
+
+- Goal: implement the approved second persistence boundary without adding public HTTP routes or
+  client UI: browser sessions, one-time pairing requests, WebAuthn challenge context/sign-count
+  guards, and PostgreSQL-backed rate-limit buckets.
+- Scope: migration `0013_add_browser_pairing_and_rate_limits.sql`, `src/auth/mod.rs`,
+  `src/persistence/account_postgres.rs`, deterministic auth unit tests and an opt-in PostgreSQL
+  integration test. No raw token, QR/code, cookie, WebAuthn assertion, password, email, HTTP route,
+  runtime OpenAPI or client change was added.
+- Result: browser approval requires a live, recently reauthenticated session; pairing approval and
+  completion are single-use and transactional; completion enforces the ten-device cap; challenges
+  are origin/RP/ceremony-bound and single-use; sign-count rollback is rejected; rate-limit buckets
+  increment atomically in PostgreSQL. Existing account deletion revokes the new browser sessions;
+  pairing/challenge records remain server-only.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
+  `cargo test` (88 unit/library tests and regular integration suites), and the disposable PostgreSQL
+  test `postgres_b2_browser_pairing_webauthn_and_rate_limits -- --ignored --nocapture` passed. The
+  normal compose volume was not modified; a temporary disposable container was removed afterward.
+- Status: **B2 persistence boundary complete locally**. Cryptographic WebAuthn signature provider,
+  HTTP routes and runtime OpenAPI reconciliation remain RM-011-C prerequisites.
+
+## RM-011-C — 2026-08-26 — unified first-party web shell (partial)
+
+- Goal: establish the agreed single frontend/admin technology and static delivery boundary.
+- Scope: added `web/` TypeScript + Vite + Preact project with shared API client/types and pairing
+  presentation, plus a Caddy image that builds and serves it while proxying API routes.
+- Result: `/admin` is no longer a separate public frontend when accessed through Caddy; it is
+  handled by the same SPA bundle. No secret is bundled or persisted by the UI.
+- Checks: TypeScript `tsc --noEmit` passed using the installed dependency runtime. Vite production
+  build is blocked locally because the environment's package policy refuses esbuild's required
+  install script; it must be run in CI/container with the approved dependency-build policy.
+- Status: **partial**. No RM-011-C auth API, WebAuthn verifier, session cookie/CSRF handling or
+  runtime OpenAPI update is claimed by this UI-only increment.
+
+## RM-011-C — 2026-08-26 — pairing request and lookup runtime slice (partial)
+
+- Scope: production startup now supplies the existing PostgreSQL account store to the HTTP router;
+  added pairing-request creation and neutral short-code lookup, with the corresponding runtime
+  OpenAPI paths.
+- Result: request proofs are UUID-derived opaque values sent only to the desktop initiator and
+  persisted as SHA-256 hashes; PostgreSQL calculates the ten-minute expiry. Lookup returns only
+  the non-secret preview already defined by B2.
+- Checks: `cargo fmt --check`, strict Clippy, `cargo test` (88 tests), and `git diff --check`
+  passed. Disposable PostgreSQL integration tests remain opt-in and were not run.
+- Status: **partial**. No approval/completion route, rate-limit use, trusted-proxy validation,
+  WebAuthn, browser cookie/CSRF boundary, or end-to-end pairing claim is made.
+
+## RM-011-C — 2026-08-26 — browser-proof approval slice (partial)
+
+- Scope: migration `0014_add_browser_session_cookie_hash.sql`, browser-proof persistence method,
+  `POST /v1/pairing-requests/{request_id}/approve`, CSRF header/cookie checks and OpenAPI entry.
+- Result: approval no longer accepts a bare/guessable browser session ID; the persistence query
+  requires the opaque cookie hash, CSRF hash, active session and fresh passkey timestamp.
+- Checks: offline cargo check, strict Clippy and targeted API test passed.
+- Status: **partial**. Browser session issuance still requires WebAuthn registration/authentication;
+  trusted-proxy enforcement and desktop completion remain outstanding.
+
+## RM-011-C — 2026-08-26 — pure-Rust WebAuthn browser ceremonies (partial)
+
+- Scope: added `passkey-auth` with fixed RP ID/origin policy, registration and authentication
+  options/verify routes, PostgreSQL opaque challenge state blobs, credential lookup and atomic
+  sign-counter advancement, plus Secure/HttpOnly/SameSite browser cookie issuance.
+- Result: registration and authentication verification now perform cryptographic client-data,
+  RP-ID, challenge, user-verification and signature checks; replay/rollback is rejected by the
+  existing B2 challenge and counter guards. No OpenSSL dependency is required.
+- Checks: sequential offline `cargo check` passed after dependency download. Full Clippy/test
+  rerun is pending after this slice; no disposable PostgreSQL run was performed.
+- Status: **partial**. Pairing completion, trusted proxy secret binding and full web UI ceremony
+  wiring remain outstanding.
+
+## RM-011-C — 2026-08-26 — desktop pairing completion slice (partial)
+
+- Scope: added `POST /v1/pairing-requests/{request_id}/complete`; it delegates to B2's atomic
+  approval/consumption transaction, enforces the owner UUID, ten-device cap and one-time desktop
+  proof, and issues short-lived native access plus rotating refresh credentials.
+- Result: access expires after 15 minutes and refresh after 30 days using PostgreSQL's clock; raw
+  credentials are returned only in the response and never logged.
+- Checks: sequential offline `cargo check` passed; full test and Clippy rerun remains pending.
+- Status: **partial**. End-to-end browser UI wiring and final security review remain.
+
+## RM-011-C — 2026-08-26 — browser ceremony UI wiring (partial)
+
+- Scope: enabled the Preact UI's real `navigator.credentials.create()` path, strict base64url
+  serialization of attestation data, registration verify call, in-memory CSRF token and pairing
+  approval button. QR links may carry the approval secret without persisting it.
+- Result: the browser can register a passkey and approve a looked-up device from the same origin;
+  no token is written to localStorage or bundled into the frontend.
+- Checks: source changes are complete; TypeScript build must run in the Caddy image because the host
+  package policy blocks esbuild's install script.
+- Status: **superseded by the current RM-011-C snapshot below**.
+
+## RM-011-C — 2026-08-26 — unified auth/pairing delivery and verification (current snapshot)
+
+- Goal: finish the first-party browser API/UI slice on the approved B2 persistence boundary using
+  one TypeScript + Vite + Preact stack for user and admin surfaces.
+- Result: cryptographic passkey registration and authentication, cookie/CSRF/origin checks,
+  authenticated Caddy proxy proof, PostgreSQL-backed pairing/rate-limit usage, pairing approval,
+  desktop completion, and a shared Preact UI with passkey controls, short-code lookup, device and
+  verification-phrase display, and in-memory QR rendering are implemented. Native access/refresh
+  tokens are returned only by the desktop completion endpoint; the browser does not persist them.
+- Checks: `cargo fmt --check`, strict Clippy with `--jobs 1`, `cargo test --jobs 1` (92 tests passed;
+  four PostgreSQL suites ignored without `TEST_DATABASE_URL`), and web `tsc --noEmit` passed.
+  A direct Vite production build with the bundled Node runtime also passed. The `pnpm run build`
+  wrapper cannot find the host Node executable; the Caddy image has its own Node toolchain. No git
+  push was performed.
+- Status: **implemented locally with documented limitation**: end-to-end native completion still
+  requires the RockCast client to call the existing `/v1/pairing-requests/{request_id}/complete`
+  endpoint, no live disposable PostgreSQL run was available in this workspace, and native
+  refresh/logout/device-management routes from the extended proposal remain outside this slice.
+  Final evidence is recorded in `docs/rm-011-c-report.md`; RM-011-C is not fully closed.
+
+## HTTP transport refactor — 2026-08-26
+
+- Goal: reduce the `src/http/mod.rs` god object without changing HTTP behavior.
+- Scope: moved the public facade to `src/http/mod.rs`, route and DTO implementation to
+  `src/http/endpoints.rs`, and shared `AppState`/anonymous admission controls to
+  `src/http/state.rs`.
+- Result: `mod.rs` is now a 10-line export surface; endpoint behavior, route registration, and
+  existing test boundaries remain unchanged.
+- Checks: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test` passed;
+  92 unit tests and all non-ignored integration tests passed.
+- Status: **complete locally**.
+
+## Limit local Cargo build parallelism — 2026-08-26
+
+- Goal: prevent Cargo builds from consuming the whole workstation.
+- Scope: added `.cargo/config.toml` with `[build] jobs = 1`.
+- Result: project-local Cargo commands now use one compilation job by default.
+- Checks: configuration is valid TOML; no source behavior changed.
+- Status: **complete locally**.

@@ -1,0 +1,21 @@
+{
+  "name": "rockserver-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "preact": "^10.26.4",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.1",
+    "@types/qrcode": "^1.5.6",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0"
+  }
+}
