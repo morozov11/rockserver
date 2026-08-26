@@ -67,6 +67,7 @@ function Write-Ops001DOwnerEnvironmentFile {
     $lines.Add("ROCKSERVER_DOMAIN=$Domain")
     $lines.Add("OPS001D_CATALOG_VERSION=$($Catalog.Version)")
     $lines.Add("OPS001D_CATALOG_COUNT=$($Catalog.Count)")
+    $lines.Add("OPS001D_CATALOG_SHA256=$($Catalog.Sha256)")
     if ($OnnxEnabled) {
         $lines.Add('ROCKSERVER_SEMANTIC_PROVIDER=onnx-e5-local')
         $lines.Add('ROCKSERVER_ONNX_ASSET_DIR=/opt/rockserver/assets/onnx')

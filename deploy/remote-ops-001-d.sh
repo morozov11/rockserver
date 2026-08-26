@@ -71,7 +71,7 @@ install_owner_files() {
   for file in compose.yaml compose.production.yaml Caddyfile.production.template owner.env onnx-assets.json; do
     [ -f "$stage/$file" ] && [ ! -L "$stage/$file" ] || fail "deployment bundle is missing $file"
   done
-  if grep -Ev '^(ROCKSERVER_DOMAIN|OPS001D_CATALOG_VERSION|OPS001D_CATALOG_COUNT|ROCKSERVER_SEMANTIC_PROVIDER|ROCKSERVER_ONNX_ASSET_DIR|ROCKSERVER_ONNX_MODEL_PATH|ROCKSERVER_ONNX_TOKENIZER_PATH|ORT_DYLIB_PATH|YANDEX_AI_API_KEY|YANDEX_FOLDER_ID|YANDEX_SPEECHKIT_API_KEY|YANDEX_SPEECHKIT_FOLDER_ID)=[^[:cntrl:]]*$' "$stage/owner.env" | grep -q .; then
+  if grep -Ev '^(ROCKSERVER_DOMAIN|OPS001D_CATALOG_VERSION|OPS001D_CATALOG_COUNT|OPS001D_CATALOG_SHA256|ROCKSERVER_SEMANTIC_PROVIDER|ROCKSERVER_ONNX_ASSET_DIR|ROCKSERVER_ONNX_MODEL_PATH|ROCKSERVER_ONNX_TOKENIZER_PATH|ORT_DYLIB_PATH|YANDEX_AI_API_KEY|YANDEX_FOLDER_ID|YANDEX_SPEECHKIT_API_KEY|YANDEX_SPEECHKIT_FOLDER_ID)=[^[:cntrl:]]*$' "$stage/owner.env" | grep -q .; then
     fail 'owner.env contains a non-allowlisted or malformed entry'
   fi
   [ "$(wc -l < "$stage/owner.env")" -ge 3 ] || fail 'owner.env entries are not newline-separated'
@@ -81,7 +81,7 @@ install_owner_files() {
   install -m 0600 "$stage/onnx-assets.json" "$release_root/onnx-assets.json"
   touch "$env_file"; chmod 0600 "$env_file"
   clean="$(mktemp "$release_root/.release.env.XXXXXX")"
-  awk -F= '!/^(ROCKSERVER_DOMAIN|OPS001D_CATALOG_VERSION|OPS001D_CATALOG_COUNT|ROCKSERVER_SEMANTIC_PROVIDER|ROCKSERVER_ONNX_ASSET_DIR|ROCKSERVER_ONNX_MODEL_PATH|ROCKSERVER_ONNX_TOKENIZER_PATH|ORT_DYLIB_PATH|YANDEX_AI_API_KEY|YANDEX_FOLDER_ID|YANDEX_SPEECHKIT_API_KEY|YANDEX_SPEECHKIT_FOLDER_ID)=/' "$env_file" > "$clean"
+  awk -F= '!/^(ROCKSERVER_DOMAIN|OPS001D_CATALOG_VERSION|OPS001D_CATALOG_COUNT|OPS001D_CATALOG_SHA256|ROCKSERVER_SEMANTIC_PROVIDER|ROCKSERVER_ONNX_ASSET_DIR|ROCKSERVER_ONNX_MODEL_PATH|ROCKSERVER_ONNX_TOKENIZER_PATH|ORT_DYLIB_PATH|YANDEX_AI_API_KEY|YANDEX_FOLDER_ID|YANDEX_SPEECHKIT_API_KEY|YANDEX_SPEECHKIT_FOLDER_ID)=/' "$env_file" > "$clean"
   cat "$stage/owner.env" >> "$clean"
   chmod 0600 "$clean"; mv "$clean" "$env_file"
 }
@@ -197,6 +197,40 @@ for item in assets:
     os.chmod(path, 0o755 if name == 'libonnxruntime.so' else 0o644)
 PY
 }
+catalog_marker_metadata() {
+  local version count checksum
+  version="$(sed -n 's/^OPS001D_CATALOG_VERSION=//p' "$env_file" | head -n1)"
+  count="$(sed -n 's/^OPS001D_CATALOG_COUNT=//p' "$env_file" | head -n1)"
+  checksum="$(sed -n 's/^OPS001D_CATALOG_SHA256=//p' "$env_file" | head -n1)"
+  [[ "$version" =~ ^[A-Za-z0-9._-]{1,120}$ ]] || fail 'catalog version in protected env is invalid'
+  [[ "$count" =~ ^[1-9][0-9]*$ ]] || fail 'catalog count in protected env is invalid'
+  [[ "$checksum" =~ ^[0-9a-f]{64}$ ]] || fail 'catalog checksum in protected env is invalid'
+  printf '%s|%s|%s\n' "$version" "$count" "$checksum"
+}
+catalog_marker_path() {
+  local version="$1"
+  printf '%s/releases/catalog-%s.ready' "$release_root" "$version"
+}
+catalog_seed_is_current() {
+  local compose="$1" image="$2" metadata version count checksum marker actual_counts
+  metadata="$(catalog_marker_metadata)"
+  IFS='|' read -r version count checksum <<< "$metadata"
+  marker="$(catalog_marker_path "$version")"
+  [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+  grep -Fx "catalog_version=$version" "$marker" >/dev/null || return 1
+  grep -Fx "catalog_count=$count" "$marker" >/dev/null || return 1
+  grep -Fx "catalog_sha256=$checksum" "$marker" >/dev/null || return 1
+  actual_counts="$(ROCKSERVER_IMAGE="$image" $compose exec -T postgres sh -c 'psql -Atq -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT (SELECT count(*) FROM stations), (SELECT count(*) FROM station_embeddings);"')"
+  [ "$actual_counts" = "$count|$count" ]
+}
+write_catalog_marker() {
+  local metadata version count checksum marker
+  metadata="$(catalog_marker_metadata)"
+  IFS='|' read -r version count checksum <<< "$metadata"
+  marker="$(catalog_marker_path "$version")"
+  printf 'catalog_version=%s\ncatalog_count=%s\ncatalog_sha256=%s\n' "$version" "$count" "$checksum" > "$marker"
+  chmod 0600 "$marker"
+}
 deploy_internal() {
   local stage="${1:?stage required}" image="${2:?image required}" commit="${3:?commit required}" archive_hash
   # Accept the former five-argument form while an older root-owned operator
@@ -225,8 +259,16 @@ deploy_internal() {
   docker cp "${container}:/tmp/ops001d.dump" "$backup"
   ROCKSERVER_IMAGE="$image" $compose exec -T postgres rm -f /tmp/ops001d.dump
   backup_hash="$(sha256sum "$backup" | awk '{print $1}')"
-  # The pinned importer first applies embedded migrations, then transactionally activates the full catalog.
-  ROCKSERVER_IMAGE="$image" $compose run --rm catalog_seed >/dev/null
+  # A full release replacement deletes/rebuilds derived vectors.  Skip that
+  # costly operation only when the exact pinned release was already completed
+  # and PostgreSQL still contains every station and every embedding.
+  if catalog_seed_is_current "$compose" "$image"; then
+    printf '%s\n' 'catalog seed skipped: exact pinned catalog and embeddings are already ready'
+  else
+    # The pinned importer first applies embedded migrations, then transactionally activates the full catalog.
+    ROCKSERVER_IMAGE="$image" $compose run --rm catalog_seed >/dev/null
+    write_catalog_marker
+  fi
   ROCKSERVER_IMAGE="$image" $compose up --detach --no-build --wait rockserver caddy
   domain="$(sed -n 's/^ROCKSERVER_DOMAIN=//p' "$env_file" | head -n1)"
   curl --fail --silent --show-error --max-time 30 "https://${domain}/health/ready" >/dev/null

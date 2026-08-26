@@ -30,11 +30,11 @@ try {
     $safe = Format-Ops001DSafeSummary -Environment $env -Commit 'safe' -ImageId 'safe' -Readiness 'passed'
     if ($safe -match 'secret|folder|speech|nope') { throw 'safe summary exposed a secret value' }
 
-    $catalog = [pscustomobject]@{ Version = 'v1-test'; Count = 41 }
+    $catalog = [pscustomobject]@{ Version = 'v1-test'; Count = 41; Sha256 = ('a' * 64) }
     $ownerPath = Join-Path $temp 'owner.env'
     Write-Ops001DOwnerEnvironmentFile -Path $ownerPath -Domain 'api.example.test' -Catalog $catalog -Yandex $env -OnnxEnabled $false
     $ownerLines = [IO.File]::ReadAllLines($ownerPath)
-    if ($ownerLines.Count -ne 6 -or $ownerLines[0] -ne 'ROCKSERVER_DOMAIN=api.example.test' -or $ownerLines[1] -ne 'OPS001D_CATALOG_VERSION=v1-test' -or $ownerLines[2] -ne 'OPS001D_CATALOG_COUNT=41') { throw 'owner.env entries were not serialized as distinct correct lines' }
+    if ($ownerLines.Count -ne 7 -or $ownerLines[0] -ne 'ROCKSERVER_DOMAIN=api.example.test' -or $ownerLines[1] -ne 'OPS001D_CATALOG_VERSION=v1-test' -or $ownerLines[2] -ne 'OPS001D_CATALOG_COUNT=41' -or $ownerLines[3] -ne ('OPS001D_CATALOG_SHA256=' + ('a' * 64))) { throw 'owner.env entries were not serialized as distinct correct lines' }
     if (($ownerLines -join "`n") -match 'UNRELATED_SECRET|nope') { throw 'owner.env included a non-allowlisted value' }
     $ownerBytes = [IO.File]::ReadAllBytes($ownerPath)
     if ($ownerBytes -contains [byte]13) { throw 'owner.env must use Linux LF line endings for remote shell parsing' }
@@ -83,6 +83,7 @@ try {
     if ($remote -notmatch 'ensure_low_memory_swap' -or $remote -notmatch 'fallocate -l 2G /swapfile' -or $remote -notmatch '/swapfile none swap sw 0 0') { throw 'low-memory ONNX swap provisioning is missing' }
     if ($remote -notmatch 'nohup.*deploy-worker' -or $remote -notmatch 'write_deploy_status.*running' -or $remote -notmatch 'write_deploy_status.*succeeded' -or $remote -notmatch 'write_deploy_status.*failed' -or $remote -notmatch 'reattached=true') { throw 'remote deploy worker is not resilient to a lost SSH session' }
     if ($remote -notmatch 'status \*' -or $launcher -notmatch 'statusCommand' -or $launcher -notmatch 'connection-retrying' -or $launcher -notmatch 'AddMinutes\(90\)') { throw 'launcher cannot reconnect to a detached remote deploy worker' }
+    if ($remote -notmatch 'catalog_seed_is_current' -or $remote -notmatch 'catalog seed skipped' -or $remote -notmatch 'OPS001D_CATALOG_SHA256' -or $remote -notmatch 'station_embeddings') { throw 'unchanged full catalog cannot skip redundant ONNX backfill' }
     $backupAt = $remote.IndexOf('pg_dump --format=custom')
     $seedAt = $remote.IndexOf('run --rm catalog_seed')
     $readyAt = $remote.IndexOf('/health/ready')
