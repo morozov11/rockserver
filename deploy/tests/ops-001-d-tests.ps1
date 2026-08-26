@@ -81,6 +81,8 @@ try {
     if ($remote -notmatch 'os\.chmod\(root, 0o755\)') { throw 'ONNX asset directory is not traversable by the container user' }
     if (($remote -notmatch 'tarfile\.open') -or ($remote -notmatch 'for _ in range\(8\)') -or ($remote -notmatch 'member\.issym\(\)') -or ($remote -notmatch 'member\.islnk\(\)')) { throw 'ONNX runtime symlink archive extraction is not safe' }
     if ($remote -notmatch 'ensure_low_memory_swap' -or $remote -notmatch 'fallocate -l 2G /swapfile' -or $remote -notmatch '/swapfile none swap sw 0 0') { throw 'low-memory ONNX swap provisioning is missing' }
+    if ($remote -notmatch 'nohup.*deploy-worker' -or $remote -notmatch 'write_deploy_status.*running' -or $remote -notmatch 'write_deploy_status.*succeeded' -or $remote -notmatch 'write_deploy_status.*failed' -or $remote -notmatch 'reattached=true') { throw 'remote deploy worker is not resilient to a lost SSH session' }
+    if ($remote -notmatch 'status \*' -or $launcher -notmatch 'statusCommand' -or $launcher -notmatch 'connection-retrying' -or $launcher -notmatch 'AddMinutes\(90\)') { throw 'launcher cannot reconnect to a detached remote deploy worker' }
     $backupAt = $remote.IndexOf('pg_dump --format=custom')
     $seedAt = $remote.IndexOf('run --rm catalog_seed')
     $readyAt = $remote.IndexOf('/health/ready')

@@ -6,13 +6,28 @@ action="${1:?action required}"
 release_root="/opt/rockserver"
 env_file="$release_root/release.env"
 host_log_dir="/home/rockserver/logs"
+deploy_lock="$release_root/.deploy.lock"
 
 fail() { printf '%s\n' "$1" >&2; exit 1; }
 require_root() { [ "$(id -u)" -eq 0 ] || fail 'remote operation must run through sudo'; }
+validate_commit() {
+  [[ "$1" =~ ^[0-9a-f]{40}$ ]] || fail 'commit must be a full lowercase SHA'
+}
 validate_stage() {
   local stage="$1"
   [[ "$stage" =~ ^/tmp/rockserver-ops001d-[0-9a-f]{32}$ ]] || fail 'unsafe remote staging path'
   [ -d "$stage" ] && [ ! -L "$stage" ] || fail 'remote staging directory is missing or unsafe'
+}
+deploy_status_path() {
+  printf '%s/releases/deploy-%s.status' "$release_root" "$1"
+}
+write_deploy_status() {
+  local commit="$1" state="$2" status_path
+  validate_commit "$commit"
+  case "$state" in queued|running|succeeded|failed) ;; *) fail 'unsafe deployment status';; esac
+  status_path="$(deploy_status_path "$commit")"
+  printf 'status=%s commit=%s log=%s/deploy-%s.log\n' "$state" "$commit" "$host_log_dir" "$commit" > "$status_path"
+  chmod 0600 "$status_path"
 }
 install_docker_if_requested() {
   if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then return; fi
@@ -87,7 +102,7 @@ bootstrap() {
   fi
   install -m 0750 "$stage/remote-ops-001-d.sh" "$release_root/remote-ops-001-d.sh"
   rule="$(mktemp /etc/sudoers.d/rockserver-deploy.XXXXXX)"
-  printf '%s ALL=(root) NOPASSWD: %s deploy *\n' "$deploy_user" "$release_root/remote-ops-001-d.sh" > "$rule"
+  printf '%s ALL=(root) NOPASSWD: %s deploy *, %s status *\n' "$deploy_user" "$release_root/remote-ops-001-d.sh" "$release_root/remote-ops-001-d.sh" > "$rule"
   chmod 0440 "$rule"
   visudo -cf "$rule" >/dev/null || fail 'generated least-privilege sudo rule failed validation'
   mv "$rule" /etc/sudoers.d/rockserver-deploy
@@ -182,7 +197,7 @@ for item in assets:
     os.chmod(path, 0o755 if name == 'libonnxruntime.so' else 0o644)
 PY
 }
-deploy() {
+deploy_internal() {
   local stage="${1:?stage required}" image="${2:?image required}" commit="${3:?commit required}" archive_hash
   # Accept the former five-argument form while an older root-owned operator
   # script may still be installed on the VPS. The fourth value was its local
@@ -223,8 +238,74 @@ deploy() {
   printf 'deployed commit=%s image_id=%s catalog=%s count=%s readiness=passed\n' "$commit" "$loaded_id" "$catalog_version" "$catalog_count"
 }
 
+# The initial ONNX backfill can take many minutes on a small VPS.  It must not
+# be tied to a caller's SSH session: a lost laptop/network connection must not
+# leave a loaded image and seeded database without starting the web service.
+submit_deploy() {
+  local stage="${1:?stage required}" image="${2:?image required}" commit="${3:?commit required}"
+  local existing_commit worker_log pid
+  require_root; validate_stage "$stage"; validate_commit "$commit"
+  [ -f "$env_file" ] || fail 'bootstrap has not provisioned the protected runtime env-file'
+  install -d -m 0750 "$release_root/releases"
+  ensure_host_log_dir
+  worker_log="$host_log_dir/deploy-$commit.log"
+  if ! mkdir "$deploy_lock" 2>/dev/null; then
+    existing_commit="$(cat "$deploy_lock/commit" 2>/dev/null || true)"
+    if [ "$existing_commit" = "$commit" ]; then
+      # A caller may safely rerun the PowerShell command after an SSH loss.
+      # The original worker still owns its trusted staging directory; discard
+      # only this newly uploaded, validated temporary bundle.
+      rm -rf -- "$stage"
+      write_deploy_status "$commit" running
+      printf 'status=running commit=%s reattached=true\n' "$commit"
+      return
+    fi
+    fail 'another deployment is already running; wait for it to finish before submitting a different commit'
+  fi
+  printf '%s\n' "$commit" > "$deploy_lock/commit"
+  write_deploy_status "$commit" queued
+  # nohup detaches the worker from SSH's SIGHUP.  All output goes to a
+  # protected host log, while the status file contains only safe metadata.
+  nohup "$release_root/remote-ops-001-d.sh" deploy-worker "$@" > "$worker_log" 2>&1 < /dev/null &
+  pid="$!"
+  printf '%s\n' "$pid" > "$deploy_lock/pid"
+  printf 'status=queued commit=%s pid=%s\n' "$commit" "$pid"
+}
+
+deploy_worker() {
+  local stage="${1:?stage required}" commit="${3:?commit required}" exit_code=0
+  require_root; validate_stage "$stage"; validate_commit "$commit"
+  [ -d "$deploy_lock" ] || fail 'deployment worker lock is missing'
+  write_deploy_status "$commit" running
+  # Run the actual deployment in a fresh shell so its `set -e` behavior stays
+  # fail-closed even though this wrapper needs to record an outcome.
+  if "$release_root/remote-ops-001-d.sh" deploy-internal "$@"; then
+    write_deploy_status "$commit" succeeded
+  else
+    exit_code="$?"
+    write_deploy_status "$commit" failed
+    rm -rf -- "$stage"
+  fi
+  rm -rf -- "$deploy_lock"
+  return "$exit_code"
+}
+
+deploy_status() {
+  local commit="${1:?commit required}" status_path
+  require_root; validate_commit "$commit"
+  status_path="$(deploy_status_path "$commit")"
+  if [ -f "$status_path" ] && [ ! -L "$status_path" ]; then
+    cat "$status_path"
+    return
+  fi
+  printf 'status=unknown commit=%s\n' "$commit"
+}
+
 case "$action" in
   bootstrap) shift; bootstrap "$@" ;;
-  deploy) shift; deploy "$@" ;;
+  deploy) shift; submit_deploy "$@" ;;
+  deploy-worker) shift; deploy_worker "$@" ;;
+  deploy-internal) shift; deploy_internal "$@" ;;
+  status) shift; deploy_status "$@" ;;
   *) fail 'unsupported action' ;;
 esac

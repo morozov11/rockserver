@@ -124,14 +124,59 @@ try {
         Write-Host 'The VPS may now prompt interactively for sudo. The password is entered only into the remote TTY and is never stored or logged.'
         $remoteCommand = "sudo env OPS001D_INSTALL_DOCKER=$([int][bool]$InstallDocker) bash '$remoteStage/remote-ops-001-d.sh' bootstrap '$remoteStage' '$($inventory.SshUser)'"
         $sshArgs = Get-Ops001DSshCommand -Action bootstrap -KeyPath $key -Target $target -RemoteCommand $remoteCommand
+        & ssh @sshArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Remote bootstrap failed.'
+        }
     } else {
+        # The VPS immediately acknowledges a detached worker.  The worker is
+        # independent of this SSH connection, so losing Wi-Fi or closing this
+        # PowerShell window cannot interrupt a long first-run ONNX backfill.
         $remoteCommand = "sudo -n /opt/rockserver/remote-ops-001-d.sh deploy '$remoteStage' '$image' '$commit' '$portableImageId' '$archiveHash'"
         $sshArgs = Get-Ops001DSshCommand -Action deploy -KeyPath $key -Target $target -RemoteCommand $remoteCommand
-    }
-    & ssh @sshArgs
-    if ($LASTEXITCODE -ne 0) {
-        if ($Action -eq 'deploy') { throw 'Remote deploy failed. If sudo reported that a password is required, rerun the documented bootstrap command interactively to install/repair the least-privilege deploy rule.' }
-        throw 'Remote bootstrap failed.'
+        $submitOutput = @(& ssh @sshArgs 2>&1)
+        $submitExitCode = $LASTEXITCODE
+        if ($submitOutput.Count -gt 0) { $submitOutput | ForEach-Object { Write-Host $_ } }
+
+        $deadline = [DateTime]::UtcNow.AddMinutes(90)
+        $lastStatus = ''
+        $deploymentFinished = $false
+        while ([DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Seconds 5
+            $statusCommand = "sudo -n /opt/rockserver/remote-ops-001-d.sh status '$commit'"
+            $statusOutput = @(& ssh -i $key @nonInteractiveSshOptions $target $statusCommand 2>&1)
+            $statusExitCode = $LASTEXITCODE
+            if ($statusExitCode -ne 0) {
+                # The worker is already detached.  Retry status checks rather
+                # than treating a transient SSH outage as a deployment failure.
+                if ($lastStatus -ne 'connection-retrying') {
+                    Write-Host 'SSH status check was interrupted; the VPS worker continues and this script will retry.'
+                    $lastStatus = 'connection-retrying'
+                }
+                continue
+            }
+            $statusText = (($statusOutput | ForEach-Object { [string]$_ }) -join "`n").Trim()
+            if ($statusText -ne $lastStatus) {
+                if (-not [string]::IsNullOrWhiteSpace($statusText)) { Write-Host $statusText }
+                $lastStatus = $statusText
+            }
+            if ($statusText -match '(^|\n)status=succeeded\b') {
+                $deploymentFinished = $true
+                break
+            }
+            if ($statusText -match '(^|\n)status=failed\b') {
+                throw 'Remote deploy worker failed. Inspect its protected VPS deploy log, then rerun the same deploy command after correcting the reported cause.'
+            }
+            if ($statusText -match '(^|\n)status=unknown\b') {
+                if ($submitExitCode -ne 0) {
+                    throw 'Could not submit the remote deploy worker. If the bootstrap sudo rule was changed, rerun bootstrap once interactively to refresh it.'
+                }
+                throw 'Remote deploy worker acknowledgement was missing; rerun the deploy command to submit or reattach safely.'
+            }
+        }
+        if (-not $deploymentFinished) {
+            throw 'Timed out waiting for the remote deploy worker. The VPS worker continues safely; rerun the same deploy command later to reattach and read its status.'
+        }
     }
     Write-Host (Format-Ops001DSafeSummary -Environment $yandex -Commit $commit -ImageId $imageId -Readiness $(if ($Action -eq 'deploy') { 'passed' } else { 'bootstrap-only' }))
 } finally {
