@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-27
 
-## RM-011-F P0 blocker fix — username-less discoverable passkey login (in progress, 2026-08-27)
+## RM-011-F P0 blocker fix — username-less discoverable passkey login (deployed, 2026-08-27)
 
 The browser login flow now starts WebAuthn authentication without an account UUID and sends an
 empty `allowCredentials` list, so the browser/OS can offer a saved discoverable passkey for the
@@ -20,10 +20,12 @@ a generic server error without exposing internal details.
 
 Local verification passed: `cargo fmt --check`, strict all-target/all-feature Clippy, `cargo test`
 (97 regular tests; four disposable-PostgreSQL tests remain ignored), and web `typecheck`, `lint`,
-and production `build`. The new local bundle was inspected in the browser and has no UUID field;
-the current staging page was checked read-only and still serves the prior UUID-based bundle. No
-staging deploy, account creation, or passkey assertion was performed because the standard deploy
-script correctly requires a clean immutable Git worktree and this requested change is uncommitted.
+and production `build`. The standard deploy completed successfully for commit
+`7b4f306635e95297ac3cd8b2d99063500d90bc0f`; the deploy worker reported image
+`sha256:531f1d5051260a3e008f36c96c2dfd3ce84bcc8158d8ccc5c7d09fa7f7f63de8`, two Yandex keys,
+and `readiness=passed`. A read-only staging browser inspection shows no UUID field and the
+discoverable-login buttons; no staging account was created and no passkey assertion was made.
+The remaining acceptance item is a manual physical-device passkey smoke test.
 
 ## RM-011-F — staging security acceptance (in progress, 2026-08-27)
 

@@ -1,6 +1,6 @@
 # Task log
 
-## RM-011-F P0 blocker fix — 2026-08-27 — username-less discoverable passkey login (in progress)
+## RM-011-F P0 blocker fix — 2026-08-27 — username-less discoverable passkey login (deployed)
 
 - Goal: remove the unusable UUID prerequisite from existing-account browser login while keeping
   WebAuthn and pairing security boundaries unchanged.
@@ -16,12 +16,13 @@
   user-facing statuses. Existing registered credentials remain in the same credential table and
   use the same registration user-handle bytes for owner-scoped lookup.
 - Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
-  `cargo test`, and web `pnpm typecheck`, `pnpm lint`, `pnpm build` passed. Browser inspection of
-  the local built page showed no UUID field; read-only staging inspection still showed the old
-  UUID-based page. The four PostgreSQL integration tests remain explicitly ignored without a
-  disposable `TEST_DATABASE_URL`.
-- Status: **local implementation complete; staging deploy blocked by the required clean immutable
-  worktree**.
+  `cargo test`, and web `pnpm typecheck`, `pnpm lint`, `pnpm build` passed. Read-only browser
+  inspection of both the local and deployed staging page showed no UUID field. The four
+  PostgreSQL integration tests remain explicitly ignored without a disposable `TEST_DATABASE_URL`.
+  The standard deploy reported commit `7b4f306635e95297ac3cd8b2d99063500d90bc0f`, image
+  `sha256:531f1d5051260a3e008f36c96c2dfd3ce84bcc8158d8ccc5c7d09fa7f7f63de8`, and
+  `readiness=passed`.
+- Status: **F1 implementation deployed; manual physical-device passkey smoke test remains.**
 
 ## RM-011-F — 2026-08-27 — staging authorization security acceptance (in progress)
 
