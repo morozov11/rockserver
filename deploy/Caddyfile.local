@@ -9,11 +9,15 @@
         -Server
     }
     @api path /v1/* /api/v1/* /health/*
-    reverse_proxy @api rockserver:3000 {
-        header_up X-Forwarded-Proto https
-        header_up X-Rockserver-Proxy {$ROCKSERVER_TRUSTED_PROXY_TOKEN}
+    handle @api {
+        reverse_proxy rockserver:3000 {
+            header_up X-Forwarded-Proto https
+            header_up X-Rockserver-Proxy {$ROCKSERVER_TRUSTED_PROXY_TOKEN}
+        }
     }
-    root * /srv
-    try_files {path} /index.html
-    file_server
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
 }

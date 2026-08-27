@@ -14,6 +14,10 @@ fn caddy_disables_referrers_for_pairing_approval_urls() {
             contents.contains("Referrer-Policy \"no-referrer\""),
             "{caddyfile} must not expose a QR approval secret as a request referrer"
         );
+        assert!(
+            contents.contains("handle @api {"),
+            "{caddyfile} must proxy API routes before the SPA fallback"
+        );
     }
 }
 

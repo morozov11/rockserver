@@ -38,6 +38,10 @@ the lockfile and dependency set are unchanged.
 The Caddy Docker build also now sets `CI=true` only for its pnpm build command, so its clean,
 non-interactive image build cannot wait for a modules-directory prompt after source copy.
 
+Post-deploy probing found that Caddy's SPA `try_files` rewrite was taking precedence over the
+API matcher, returning the static page for `/health/*` and `/v1/*`. Both Caddyfiles now use an
+exclusive API `handle` before the static fallback; the regression test requires that order.
+
 ## RM-011-B2 — browser/pairing persistence implementation (2026-08-26)
 
 Владелец разблокировал проектирование и реализацию `RM-011-B2`, приняв рекомендуемые значения:

@@ -28,6 +28,9 @@
 - Container build follow-up: pnpm requested an interactive module-directory confirmation after the
   source copy. `Dockerfile.caddy` now sets `CI=true` only for that build command, preserving a
   reproducible non-interactive release build.
+- Post-deploy probing found the SPA fallback rewrote `/health/*` and `/v1/*` before proxying,
+  producing `405` instead of API responses. Both Caddyfiles now use an exclusive API `handle`
+  before the static fallback; the regression test covers the required routing boundary.
 - Checks: RockServer `cargo fmt --check`, strict Clippy, and `cargo test` passed; RockCast format
   and 85 library tests passed; RockMobile debug unit tests and `assembleDebug` passed; both
   Caddyfiles validated. Physical-device passkey/Keystore evidence remains required.
