@@ -31,6 +31,13 @@ while the script neither transferred the built web bundle nor supplied the requi
 Caddy image tagged with the same source commit as RockServer. Bootstrap must install this updated
 root-side deploy script before the final retry.
 
+The first clean Caddy image build also exposed an unfinished pnpm allowlist value for `esbuild`.
+It is now explicitly `true`, allowing only that already locked build dependency in the container;
+the lockfile and dependency set are unchanged.
+
+The Caddy Docker build also now sets `CI=true` only for its pnpm build command, so its clean,
+non-interactive image build cannot wait for a modules-directory prompt after source copy.
+
 ## RM-011-B2 — browser/pairing persistence implementation (2026-08-26)
 
 Владелец разблокировал проектирование и реализацию `RM-011-B2`, приняв рекомендуемые значения:

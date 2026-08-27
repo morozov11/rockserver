@@ -4,7 +4,7 @@ RUN corepack enable
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml web/.npmrc ./
 RUN pnpm install --frozen-lockfile
 COPY web ./
-RUN pnpm run build
+RUN CI=true pnpm run build
 
 FROM caddy:2.10.0-alpine@sha256:ae4458638da8e1a91aafffb231c5f8778e964bca650c8a8cb23a7e8ac557aa3c
 COPY --from=web-builder /build/web/dist /srv

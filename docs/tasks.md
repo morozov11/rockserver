@@ -22,6 +22,12 @@
   only the upstream base Caddy container. The rollout now transfers a commit-labelled Caddy web
   bundle alongside RockServer and verifies both archive hashes and revision labels before starting
   either service. This prevents a healthy server image from being paired with a stale/no-UI proxy.
+- Caddy image build follow-up: the pnpm workspace retained its placeholder `esbuild` build-policy
+  value, so a clean container correctly refused the script. It now explicitly allowlists only
+  locked `esbuild`; no package, lockfile, or broader lifecycle-script permission was added.
+- Container build follow-up: pnpm requested an interactive module-directory confirmation after the
+  source copy. `Dockerfile.caddy` now sets `CI=true` only for that build command, preserving a
+  reproducible non-interactive release build.
 - Checks: RockServer `cargo fmt --check`, strict Clippy, and `cargo test` passed; RockCast format
   and 85 library tests passed; RockMobile debug unit tests and `assembleDebug` passed; both
   Caddyfiles validated. Physical-device passkey/Keystore evidence remains required.

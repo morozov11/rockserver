@@ -45,3 +45,25 @@ fn deploy_transfers_a_commit_bound_caddy_image() {
     assert!(launcher.contains("rockserver-caddy-image.tar"));
     assert!(remote.contains("validate_caddy_artifact"));
 }
+
+/// Ensures the clean Caddy image build permits only the bundled esbuild binary script.
+#[test]
+fn web_build_policy_allows_esbuild() {
+    let policy = std::fs::read_to_string(format!(
+        "{}/web/pnpm-workspace.yaml",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("web build policy must be present");
+    assert!(policy.contains("esbuild: true"));
+}
+
+/// Ensures the clean Caddy image build never waits for an interactive pnpm prompt.
+#[test]
+fn caddy_image_build_is_non_interactive() {
+    let dockerfile = std::fs::read_to_string(format!(
+        "{}/deploy/Dockerfile.caddy",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("Caddy Dockerfile must be present");
+    assert!(dockerfile.contains("RUN CI=true pnpm run build"));
+}
