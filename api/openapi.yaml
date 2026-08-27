@@ -48,19 +48,9 @@ paths:
   /v1/auth/passkeys/authentication/options:
     post:
       operationId: startPasskeyAuthentication
-      summary: Start passkey authentication for an account
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [user_id]
-              properties: { user_id: { type: string, format: uuid } }
+      summary: Start username-less discoverable passkey authentication
       responses:
-        "200": { description: WebAuthn request options and server challenge identifier. }
-        "401": { description: Account has no active passkey. }
+        "200": { description: WebAuthn request options with an empty allowCredentials list and server challenge identifier. }
         "403": { description: Direct or wrong-origin requests are rejected. }
   /v1/auth/passkeys/authentication/verify:
     post:
@@ -72,8 +62,15 @@ paths:
           application/json:
             schema:
               type: object
-              additionalProperties: true
-              required: [challenge_id, user_id, id, authenticatorData, signature, clientDataJSON]
+              additionalProperties: false
+              required: [challenge_id, id, authenticatorData, signature, clientDataJSON, userHandle]
+              properties:
+                challenge_id: { type: string, format: uuid }
+                id: { type: string }
+                authenticatorData: { type: string }
+                signature: { type: string }
+                clientDataJSON: { type: string }
+                userHandle: { type: string }
       responses:
         "200": { description: Browser session cookie and CSRF token were created. }
         "401": { description: Assertion, challenge or sign counter was rejected. }

@@ -2,6 +2,29 @@
 
 Last updated: 2026-08-27
 
+## RM-011-F P0 blocker fix — username-less discoverable passkey login (in progress, 2026-08-27)
+
+The browser login flow now starts WebAuthn authentication without an account UUID and sends an
+empty `allowCredentials` list, so the browser/OS can offer a saved discoverable passkey for the
+fixed `alex.vault57.ru` RP ID. The server requires the assertion's `userHandle`, decodes it as the
+16-byte account UUID used during registration, checks any legacy challenge owner binding, and
+loads the credential only within that derived owner. The client-supplied `user_id` field is no
+longer accepted by authentication verify, and no account identifier is rendered by the UI.
+
+The existing registration, Secure/HttpOnly/SameSite browser cookie, CSRF, trusted-Caddy proxy,
+WebAuthn origin/RP checks, rate limits, audit/device policy, and pairing completion contract are
+unchanged. Native tokens remain outside the browser flow. Missing/invalid handles, unknown or
+cross-account credentials, and invalid assertions receive the same neutral rejection; the UI
+reports a missing-or-cancelled passkey, user cancellation where the browser distinguishes it, or
+a generic server error without exposing internal details.
+
+Local verification passed: `cargo fmt --check`, strict all-target/all-feature Clippy, `cargo test`
+(97 regular tests; four disposable-PostgreSQL tests remain ignored), and web `typecheck`, `lint`,
+and production `build`. The new local bundle was inspected in the browser and has no UUID field;
+the current staging page was checked read-only and still serves the prior UUID-based bundle. No
+staging deploy, account creation, or passkey assertion was performed because the standard deploy
+script correctly requires a clean immutable Git worktree and this requested change is uncommitted.
+
 ## RM-011-F — staging security acceptance (in progress, 2026-08-27)
 
 Local acceptance has verified the RockServer, RockCast, and RockMobile security boundaries and

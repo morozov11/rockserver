@@ -16,8 +16,9 @@ pub const ORIGIN: &str = "https://alex.vault57.ru";
 /// Authentication state persisted with the account owner to prevent cross-account assertions.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AuthenticationStateContext {
-    /// Account whose credential allow-list was used to create the challenge.
-    pub user_id: Uuid,
+    /// Legacy account binding, retained only so in-flight pre-discovery states deserialize.
+    #[serde(default)]
+    pub user_id: Option<Uuid>,
     /// Verifier state produced by `passkey-auth`.
     pub state: AuthenticationState,
 }
@@ -49,13 +50,32 @@ pub fn finish_registration(
         .map_err(|error| error.to_string())
 }
 
-/// Starts an authentication ceremony for registered credential IDs.
-pub fn start_authentication(
-    user_id: Uuid,
-    ids: &[CredentialId],
-) -> (AuthenticationChallenge, AuthenticationStateContext) {
-    let (challenge, state) = verifier().start_authentication(ids);
-    (challenge, AuthenticationStateContext { user_id, state })
+/// Starts a discoverable, username-less authentication ceremony.
+pub fn start_authentication() -> (AuthenticationChallenge, AuthenticationStateContext) {
+    let (challenge, state) = verifier().start_authentication(&[]);
+    (
+        challenge,
+        AuthenticationStateContext {
+            user_id: None,
+            state,
+        },
+    )
+}
+
+/// Errors raised when a discoverable assertion does not carry a usable account handle.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UserHandleError {
+    /// The authenticator omitted the handle required to identify the account.
+    Missing,
+    /// The handle was not the exact 16-byte UUID encoded by RockServer.
+    Invalid,
+}
+
+/// Resolves the account owner from the WebAuthn user handle, never from client account input.
+pub fn user_id_from_handle(user_handle: Option<&str>) -> Result<Uuid, UserHandleError> {
+    let user_handle = user_handle.ok_or(UserHandleError::Missing)?;
+    let bytes = CredentialId::from_b64url(user_handle).map_err(|_| UserHandleError::Invalid)?;
+    Uuid::from_slice(bytes.as_bytes()).map_err(|_| UserHandleError::Invalid)
 }
 
 /// Verifies a browser assertion, including origin, RP ID, challenge and signature.
@@ -77,4 +97,45 @@ pub fn encode_state<T: Serialize>(state: &T) -> Result<Vec<u8>, serde_json::Erro
 /// Restores server-only ceremony state and rejects malformed or client-substituted values.
 pub fn decode_state<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T, serde_json::Error> {
     serde_json::from_slice(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discoverable_authentication_has_no_account_or_allow_list() {
+        let (challenge, state) = start_authentication();
+
+        assert!(challenge.allow_credentials.is_empty());
+        assert!(state.user_id.is_none());
+        assert!(state.state.allow_credentials.is_empty());
+        assert_eq!(challenge.rp_id, RP_ID);
+    }
+
+    #[test]
+    fn user_handle_resolves_only_a_uuid() {
+        let user_id = Uuid::new_v4();
+        let handle = CredentialId(user_id.as_bytes().to_vec()).to_b64url();
+
+        assert_eq!(user_id_from_handle(Some(&handle)), Ok(user_id));
+        assert_eq!(user_id_from_handle(None), Err(UserHandleError::Missing));
+        assert_eq!(
+            user_id_from_handle(Some("bm90LWEtdXVpZA")),
+            Err(UserHandleError::Invalid)
+        );
+    }
+
+    #[test]
+    fn legacy_authentication_state_still_deserializes() {
+        let state = start_authentication().1.state;
+        let legacy = serde_json::json!({
+            "user_id": Uuid::new_v4(),
+            "state": state,
+        });
+
+        let decoded: AuthenticationStateContext =
+            serde_json::from_value(legacy).expect("legacy state shape remains readable");
+        assert!(decoded.user_id.is_some());
+    }
 }

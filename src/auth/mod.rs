@@ -311,10 +311,24 @@ mod tests {
             client_data_type: "webauthn.get",
         };
         assert_eq!(validate_webauthn_client_data(&valid), Ok(()));
-        let mut wrong_origin = valid;
-        wrong_origin.origin = "https://evil.example";
+        let wrong_origin = WebAuthnClientData {
+            ceremony: WebAuthnCeremony::Authentication,
+            challenge: "challenge",
+            expected_challenge: "challenge",
+            origin: "https://evil.example",
+            expected_origin: "https://alex.vault57.ru",
+            rp_id: "alex.vault57.ru",
+            expected_rp_id: "alex.vault57.ru",
+            client_data_type: "webauthn.get",
+        };
         assert_eq!(
             validate_webauthn_client_data(&wrong_origin),
+            Err(WebAuthnValidationError::ClientDataMismatch)
+        );
+        let mut wrong_rp = valid;
+        wrong_rp.rp_id = "evil.example";
+        assert_eq!(
+            validate_webauthn_client_data(&wrong_rp),
             Err(WebAuthnValidationError::ClientDataMismatch)
         );
     }

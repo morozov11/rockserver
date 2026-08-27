@@ -1,5 +1,28 @@
 # Task log
 
+## RM-011-F P0 blocker fix — 2026-08-27 — username-less discoverable passkey login (in progress)
+
+- Goal: remove the unusable UUID prerequisite from existing-account browser login while keeping
+  WebAuthn and pairing security boundaries unchanged.
+- Scope: discoverable WebAuthn begin/verify flow, server-side credential owner resolution from the
+  assertion `userHandle`, neutral negative handling, frontend login UI/statuses, OpenAPI, and
+  focused tests/documentation. No new frontend, migration, account lookup, secret, token, or
+  pairing-model change.
+- Result: authentication options now create a challenge with an empty `allowCredentials` list and
+  no account input. Verify requires a valid UUID-shaped `userHandle`, derives the owner from it,
+  checks legacy in-flight challenge bindings when present, and performs owner-scoped credential
+  lookup. Client `user_id` spoofing is rejected by the strict DTO. The UI no longer renders or
+  submits an account identifier and maps browser no-key/cancel and server failures to safe
+  user-facing statuses. Existing registered credentials remain in the same credential table and
+  use the same registration user-handle bytes for owner-scoped lookup.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
+  `cargo test`, and web `pnpm typecheck`, `pnpm lint`, `pnpm build` passed. Browser inspection of
+  the local built page showed no UUID field; read-only staging inspection still showed the old
+  UUID-based page. The four PostgreSQL integration tests remain explicitly ignored without a
+  disposable `TEST_DATABASE_URL`.
+- Status: **local implementation complete; staging deploy blocked by the required clean immutable
+  worktree**.
+
 ## RM-011-F — 2026-08-27 — staging authorization security acceptance (in progress)
 
 - Goal: perform the final integration/security acceptance of RM-011 browser/native authorization

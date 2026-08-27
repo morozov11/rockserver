@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RM-011 — регистрация и привязка устройств</title>
+  <style>
+    :root { color-scheme: dark; --bg:#15110f; --panel:#211914; --line:#604632; --text:#f7e8d5; --muted:#c7a98c; --orange:#ed782c; --green:#79c77b; --blue:#79b9de; --red:#e87869; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main { max-width:1180px; margin:auto; padding:36px 24px 64px; }
+    h1 { margin:0 0 6px; font-size:clamp(28px,5vw,46px); line-height:1.1; color:var(--orange); }
+    h2 { margin:40px 0 12px; font-size:24px; }
+    h3 { margin:0 0 8px; font-size:17px; }
+    p { margin:8px 0; } .lead { color:var(--muted); font-size:18px; max-width:800px; }
+    .tag { display:inline-block; margin:14px 6px 0 0; padding:4px 10px; border:1px solid var(--line); border-radius:999px; color:var(--muted); font-size:13px; }
+    .diagram { overflow-x:auto; background:linear-gradient(135deg,#211914,#18120f); border:1px solid var(--line); border-radius:14px; padding:18px; }
+    svg { display:block; width:100%; min-width:780px; height:auto; } svg text { font-family:system-ui,-apple-system,"Segoe UI",sans-serif; fill:var(--text); }
+    .node { fill:#2b1f18; stroke:#8b603f; stroke-width:2; } .node.green { stroke:var(--green); } .node.blue { stroke:var(--blue); } .node.red { stroke:var(--red); }
+    .arrow { fill:none; stroke:#c89a72; stroke-width:2.5; marker-end:url(#arrow); } .dashed { stroke-dasharray:7 6; }
+    .small { fill:var(--muted); font-size:13px; } .title { font-weight:700; font-size:16px; } .step { fill:var(--orange); font-weight:700; }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; } .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
+    .card p { color:var(--muted); font-size:14px; } .ok { color:var(--green); } .no { color:var(--red); }
+    ol { padding-left:22px; } li { margin:8px 0; } code { color:#ffd7a7; }
+    .foot { margin-top:38px; color:var(--muted); font-size:13px; }
+    @media (max-width:720px) { main { padding:24px 14px 48px; } .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>RM-011: регистрация без геморроя</h1>
+  <p class="lead">Человек подтверждает себя через passkey в браузере. RockCast и RockMobile получают отдельную привязанную сессию — без ручного ввода токенов, без пароля в приложении и без остановки радио, если сервер временно недоступен.</p>
+  <span class="tag">Passkey</span><span class="tag">QR pairing</span><span class="tag">RockCast</span><span class="tag">RockMobile</span><span class="tag">RockServer + Caddy</span>
+
+  <h2>1. Кто за что отвечает</h2>
+  <div class="diagram">
+    <svg viewBox="0 0 1060 350" role="img" aria-label="Архитектура регистрации и привязки устройств">
+      <defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L8,4.5 L0,9z" fill="#c89a72"/></marker></defs>
+      <rect class="node blue" x="32" y="44" width="225" height="92" rx="12"/><text class="title" x="52" y="78">Телефон + браузер</text><text class="small" x="52" y="104">passkey, cookie-сессия</text><text class="small" x="52" y="124">подтверждает привязку</text>
+      <rect class="node" x="405" y="40" width="238" height="100" rx="12"/><text class="title" x="426" y="76">Caddy</text><text class="small" x="426" y="102">HTTPS, статика, reverse proxy</text><text class="small" x="426" y="122">единственный trusted proxy</text>
+      <rect class="node green" x="792" y="40" width="230" height="100" rx="12"/><text class="title" x="812" y="76">RockServer</text><text class="small" x="812" y="102">WebAuthn, pairing, API</text><text class="small" x="812" y="122">выдаёт нативную сессию</text>
+      <path class="arrow" d="M258 90 H402"/><text class="small" x="285" y="78">HTTPS</text><path class="arrow" d="M644 90 H789"/><text class="small" x="668" y="78">trusted proxy proof</text>
+      <rect class="node green" x="792" y="214" width="230" height="92" rx="12"/><text class="title" x="812" y="248">PostgreSQL</text><text class="small" x="812" y="274">пользователи, устройства,</text><text class="small" x="812" y="294">хэши секретов, аудит</text>
+      <path class="arrow" d="M907 142 V211"/>
+      <rect class="node blue" x="32" y="214" width="225" height="92" rx="12"/><text class="title" x="52" y="248">RockCast / RockMobile</text><text class="small" x="52" y="274">создаёт pairing request</text><text class="small" x="52" y="294">получает native session</text>
+      <path class="arrow" d="M258 260 H789"/><text class="small" x="398" y="248">API: pairing, refresh, logout, devices</text>
+    </svg>
+  </div>
+
+  <h2>2. Как пользователь создаёт аккаунт или входит</h2>
+  <div class="diagram">
+    <svg viewBox="0 0 1060 300" role="img" aria-label="Последовательность регистрации через passkey">
+      <defs><marker id="arrow2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L8,4.5 L0,9z" fill="#c89a72"/></marker></defs>
+      <line x1="120" y1="54" x2="120" y2="280" stroke="#604632"/><line x1="390" y1="54" x2="390" y2="280" stroke="#604632"/><line x1="660" y1="54" x2="660" y2="280" stroke="#604632"/><line x1="930" y1="54" x2="930" y2="280" stroke="#604632"/>
+      <text class="title" x="56" y="28">Пользователь</text><text class="title" x="348" y="28">Браузер</text><text class="title" x="622" y="28">Caddy</text><text class="title" x="882" y="28">RockServer</text>
+      <path d="M122 84 H382" stroke="#c89a72" stroke-width="2" marker-end="url(#arrow2)"/><text class="step" x="190" y="76">1. Открывает сайт</text>
+      <path d="M392 126 H922" stroke="#c89a72" stroke-width="2" marker-end="url(#arrow2)"/><text class="step" x="520" y="118">2. Запрашивает WebAuthn challenge</text>
+      <path d="M922 168 H400" stroke="#c89a72" stroke-width="2" marker-end="url(#arrow2)"/><text class="step" x="520" y="160">3. Challenge + проверка passkey</text>
+      <path d="M392 210 H130" stroke="#c89a72" stroke-width="2" marker-end="url(#arrow2)"/><text class="step" x="178" y="202">4. Face ID / PIN / отпечаток</text>
+      <path d="M392 252 H922" stroke="#79c77b" stroke-width="2" marker-end="url(#arrow2)"/><text x="540" y="244" fill="#79c77b">5. Browser cookie-сессия готова</text>
+    </svg>
+  </div>
+  <p><strong>Важно:</strong> passkey не является паролем, который надо где-то хранить. Его проверяет ОС/браузер. Браузер получает только защищённую cookie-сессию; нативные токены RockCast/RockMobile ему не выдаются.</p>
+
+  <h2>3. Как ПК или приложение привязываются к аккаунту</h2>
+  <div class="diagram">
+    <svg viewBox="0 0 1060 410" role="img" aria-label="Последовательность QR pairing между приложением, телефоном и сервером">
+      <defs><marker id="arrow3" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L8,4.5 L0,9z" fill="#c89a72"/></marker></defs>
+      <line x1="120" y1="58" x2="120" y2="386" stroke="#604632"/><line x1="430" y1="58" x2="430" y2="386" stroke="#604632"/><line x1="720" y1="58" x2="720" y2="386" stroke="#604632"/><line x1="960" y1="58" x2="960" y2="386" stroke="#604632"/>
+      <text class="title" x="42" y="30">RockCast / Mobile</text><text class="title" x="376" y="30">RockServer</text><text class="title" x="670" y="30">Телефон в браузере</text><text class="title" x="910" y="30">PostgreSQL</text>
+      <path d="M122 90 H422" stroke="#c89a72" stroke-width="2" marker-end="url(#arrow3)"/><text class="step" x="185" y="82">1. create pairing</text>
+      <path d="M432 130 H710" stroke="#c89a72" stroke-width="2" marker-end="url(#arrow3)"/><text class="step" x="488" y="122">2. QR / link / code / phrase</text>
+      <path d="M722 172 H430" stroke="#c89a72" stroke-width="2" marker-end="url(#arrow3)"/><text class="step" x="500" y="164">3. passkey + approve</text>
+      <path d="M432 214 H952" stroke="#79c77b" stroke-width="2" marker-end="url(#arrow3)"/><text x="560" y="206" fill="#79c77b">4. В БД: request approved, owner найден на сервере</text>
+      <path d="M122 258 H422" stroke="#c89a72" stroke-width="2" marker-end="url(#arrow3)"/><text class="step" x="172" y="250">5. poll completion: только device proof</text>
+      <path d="M432 300 H122" stroke="#79c77b" stroke-width="2" marker-end="url(#arrow3)"/><text x="180" y="292" fill="#79c77b">6. access + rotating refresh</text>
+      <path d="M122 342 H230" stroke="#79c77b" stroke-width="2" marker-end="url(#arrow3)"/><text x="145" y="370" fill="#79c77b">7. Keystore / DPAPI</text>
+    </svg>
+  </div>
+  <p>Приложение не передаёт <code>user_id</code> для завершения привязки. Сервер сам берёт владельца из уже одобренного pairing request — подменить чужого пользователя нельзя.</p>
+
+  <h2>4. Где что хранится — и где точно не хранится</h2>
+  <div class="grid">
+    <section class="card"><h3>Браузер телефона</h3><p><span class="ok">Есть:</span> защищённая cookie-сессия для сайта и подтверждения pairing.</p><p><span class="no">Нет:</span> native access/refresh токенов.</p></section>
+    <section class="card"><h3>RockCast / RockMobile</h3><p><span class="ok">Есть:</span> access token и rotating refresh token после одобрения.</p><p>Windows: DPAPI. Android: Android Keystore + encrypted private storage.</p></section>
+    <section class="card"><h3>RockServer + PostgreSQL</h3><p><span class="ok">Есть:</span> состояние pairing, пользователи, устройства, хэши секретов, аудит.</p><p><span class="no">Нет:</span> plaintext токенов в логах или конфигурации.</p></section>
+  </div>
+
+  <h2>5. Что если сервер упал?</h2>
+  <div class="grid">
+    <section class="card"><h3>Радио не ломается</h3><p>Анонимный режим и базовое воспроизведение остаются рабочими. RockServer добавляет аккаунтные и AI-возможности, но не является обязательным для радио.</p></section>
+    <section class="card"><h3>Когда сервер вернулся</h3><p>Клиент может обновить сессию через refresh token. Если устройство отозвано или сессия истекла — клиент спокойно возвращается в anonymous mode.</p></section>
+    <section class="card"><h3>Пользователь управляет доступом</h3><p>Можно увидеть устройства, отозвать лишнее, выйти из клиента. Лимит — до 10 устройств на аккаунт; аудит хранится 90 дней.</p></section>
+  </div>
+
+  <h2>Один живой сценарий</h2>
+  <ol>
+    <li>В RockCast или RockMobile нажать «Подключить аккаунт».</li>
+    <li>Открыть QR-ссылку на телефоне и создать/подтвердить passkey.</li>
+    <li>Сверить код или phrase и одобрить устройство.</li>
+    <li>Приложение само переходит в статус «Подключено»; вручную токен вводить не надо.</li>
+    <li>После перезапуска сессия восстанавливается. Logout или revoke устройства снова переводит клиента в анонимный режим.</li>
+  </ol>
+  <p class="foot">RM-011: схема для эксплуатации и приёмки. Актуальна для текущей архитектуры RockServer, RockCast и RockMobile.</p>
+</main>
+</body>
+</html>

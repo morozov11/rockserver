@@ -43,6 +43,8 @@ async fn postgres_b2_browser_pairing_webauthn_and_rate_limits() {
         .expect("account migrations must succeed");
     let user_id = Uuid::new_v4();
     store.create_user(user_id).await.unwrap();
+    let other_user_id = Uuid::new_v4();
+    store.create_user(other_user_id).await.unwrap();
 
     assert!(
         store
@@ -62,6 +64,27 @@ async fn postgres_b2_browser_pairing_webauthn_and_rate_limits() {
             .advance_passkey_sign_count(b"credential-id", 1)
             .await
             .unwrap()
+    );
+    assert!(
+        store
+            .find_passkey_credential_for_user(user_id, b"credential-id")
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        store
+            .find_passkey_credential_for_user(other_user_id, b"credential-id")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        store
+            .find_passkey_credential(other_user_id.as_bytes())
+            .await
+            .unwrap()
+            .is_none()
     );
     assert!(
         !store

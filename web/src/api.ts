@@ -13,7 +13,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   registrationOptions() { return request<RegistrationOptions>("/v1/auth/passkeys/registration/options", { method: "POST", body: "{}" }); },
   registrationVerify(payload: unknown) { return request<{ user_id: string; csrf_token: string }>("/v1/auth/passkeys/registration/verify", { method: "POST", body: JSON.stringify(payload) }); },
-  authenticationOptions(userId: string) { return request<AuthenticationOptions>("/v1/auth/passkeys/authentication/options", { method: "POST", body: JSON.stringify({ user_id: userId }) }); },
+  authenticationOptions() { return request<AuthenticationOptions>("/v1/auth/passkeys/authentication/options", { method: "POST", body: "{}" }); },
   authenticationVerify(payload: unknown) { return request<{ csrf_token: string }>("/v1/auth/passkeys/authentication/verify", { method: "POST", body: JSON.stringify(payload) }); },
   pairing(code: string) { return request<PairingPreview>(`/v1/pairing-requests/lookup?code=${encodeURIComponent(code)}`); },
   approvePairing(requestId: string, approvalSecret: string, verificationPhrase: string, csrfToken: string) {

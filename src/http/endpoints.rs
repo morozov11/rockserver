@@ -471,12 +471,6 @@ struct RegistrationOptionsDto {
     options: passkey_auth::RegistrationChallenge,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AuthenticationOptionsDto {
-    user_id: Uuid,
-}
-
 #[derive(Serialize)]
 struct AuthenticationOptionsResponseDto {
     challenge_id: Uuid,
@@ -487,7 +481,6 @@ struct AuthenticationOptionsResponseDto {
 #[serde(deny_unknown_fields)]
 struct AuthenticationVerifyDto {
     challenge_id: Uuid,
-    user_id: Uuid,
     #[serde(flatten)]
     response: AuthenticationResponse,
 }
@@ -714,12 +707,8 @@ async fn registration_verify(
     response
 }
 
-/// Starts an authentication ceremony for one account's registered passkeys.
-async fn authentication_options(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(payload): Json<AuthenticationOptionsDto>,
-) -> Response {
+/// Starts a discoverable authentication ceremony without requiring an account identifier.
+async fn authentication_options(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let request_id = request_id(&headers);
     if !is_trusted_browser_request(&headers)
         || !trusted_proxy_header_matches(&headers, state.trusted_proxy_token.as_deref())
@@ -741,28 +730,7 @@ async fn authentication_options(
             json!({}),
         );
     };
-    let ids = match store.list_passkey_credential_ids(payload.user_id).await {
-        Ok(ids) if !ids.is_empty() => ids,
-        Ok(_) => {
-            return error_response(
-                StatusCode::UNAUTHORIZED,
-                "authentication_required",
-                "No active passkey is registered for this account.",
-                &request_id,
-                json!({}),
-            );
-        }
-        Err(_) => {
-            return error_response(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "auth_unavailable",
-                "Authentication service is temporarily unavailable.",
-                &request_id,
-                json!({}),
-            );
-        }
-    };
-    let (options, state_blob) = webauthn::start_authentication(payload.user_id, &ids);
+    let (options, state_blob) = webauthn::start_authentication();
     let encoded = match webauthn::encode_state(&state_blob) {
         Ok(value) => value,
         Err(_) => {
@@ -785,7 +753,7 @@ async fn authentication_options(
         rp_id: webauthn::RP_ID,
         origin: webauthn::ORIGIN,
         expires_at_rfc3339: "unused: database clock",
-        user_id: Some(payload.user_id),
+        user_id: None,
         browser_session_id: None,
         pairing_request_id: None,
     };
@@ -864,11 +832,26 @@ async fn authentication_verify(
             );
         }
     };
-    if state_blob.user_id != payload.user_id {
+    let user_id = match webauthn::user_id_from_handle(payload.response.user_handle.as_deref()) {
+        Ok(user_id) => user_id,
+        Err(_) => {
+            return error_response(
+                StatusCode::UNAUTHORIZED,
+                "webauthn_rejected",
+                "The passkey response was rejected.",
+                &request_id,
+                json!({}),
+            );
+        }
+    };
+    if state_blob
+        .user_id
+        .is_some_and(|expected| expected != user_id)
+    {
         return error_response(
             StatusCode::UNAUTHORIZED,
-            "challenge_rejected",
-            "The passkey challenge does not belong to this account.",
+            "webauthn_rejected",
+            "The passkey response was rejected.",
             &request_id,
             json!({}),
         );
@@ -886,7 +869,7 @@ async fn authentication_verify(
         }
     };
     let Some(credential) = store
-        .find_passkey_credential_for_user(payload.user_id, credential_id.as_bytes())
+        .find_passkey_credential_for_user(user_id, credential_id.as_bytes())
         .await
         .ok()
         .flatten()
@@ -939,7 +922,7 @@ async fn authentication_verify(
     let csrf_token = Uuid::new_v4().simple().to_string();
     let session = NewBrowserSession {
         session_id: Uuid::new_v4(),
-        user_id: payload.user_id,
+        user_id,
         session_token_hash: &token_hash(&session_token),
         csrf_hash: &token_hash(&csrf_token),
         passkey_reauthenticated_at_rfc3339: "unused: database clock",
@@ -3197,6 +3180,23 @@ mod tests {
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
                         r#"{"desktop_token":"0123456789abcdef","user_id":"00000000-0000-0000-0000-000000000000"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn passkey_authentication_rejects_a_client_supplied_account_identifier() {
+        let response = router()
+            .oneshot(
+                Request::post("/v1/auth/passkeys/authentication/verify")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"challenge_id":"00000000-0000-0000-0000-000000000000","user_id":"00000000-0000-0000-0000-000000000000","id":"x","authenticatorData":"x","signature":"x","clientDataJSON":"x","userHandle":"x"}"#,
                     ))
                     .unwrap(),
             )
