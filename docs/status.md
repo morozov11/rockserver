@@ -25,6 +25,12 @@ already does for the database password and legacy API credential; it is neither 
 through the desktop environment. A second bootstrap is required to install that operator-script
 fix and provision the value before retrying deploy.
 
+The next deploy diagnosis found that the existing VPS Caddy container was the upstream base image,
+while the script neither transferred the built web bundle nor supplied the required immutable
+`ROCKSERVER_CADDY_IMAGE`. The rollout now builds, labels, checksums, transfers, and verifies a
+Caddy image tagged with the same source commit as RockServer. Bootstrap must install this updated
+root-side deploy script before the final retry.
+
 ## RM-011-B2 — browser/pairing persistence implementation (2026-08-26)
 
 Владелец разблокировал проектирование и реализацию `RM-011-B2`, приняв рекомендуемые значения:

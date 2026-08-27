@@ -129,6 +129,19 @@ validate_artifact() {
   [ "$label" = "$commit" ] || fail 'loaded image revision label does not match the current commit'
   printf '%s\n' "$loaded_id"
 }
+validate_caddy_artifact() {
+  local stage="$1" image="$2" commit="$3" archive_hash="$4" actual_hash loaded_id label
+  [ "$image" = "rockserver-caddy:sha-$commit" ] || fail 'Caddy image reference must exactly match the source commit'
+  [[ "$archive_hash" =~ ^[0-9a-f]{64}$ ]] || fail 'Caddy artifact SHA-256 is invalid'
+  [ -f "$stage/rockserver-caddy-image.tar" ] && [ ! -L "$stage/rockserver-caddy-image.tar" ] || fail 'Caddy image artifact is missing or unsafe'
+  actual_hash="$(sha256sum "$stage/rockserver-caddy-image.tar" | awk '{print $1}')"
+  [ "$actual_hash" = "$archive_hash" ] || fail 'transferred Caddy image artifact checksum mismatch'
+  docker image load --input "$stage/rockserver-caddy-image.tar" >/dev/null
+  loaded_id="$(docker image inspect --format '{{.Id}}' "$image")"
+  label="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")"
+  [[ "$loaded_id" =~ ^sha256:[0-9a-f]{64}$ ]] || fail 'loaded Caddy image ID is invalid'
+  [ "$label" = "$commit" ] || fail 'loaded Caddy image revision label does not match the current commit'
+}
 download_onnx() {
   local manifest="$release_root/onnx-assets.json"
   [ -f "$manifest" ] || fail 'ONNX manifest is missing'
@@ -213,7 +226,7 @@ catalog_marker_path() {
   printf '%s/releases/catalog-%s.ready' "$release_root" "$version"
 }
 catalog_seed_is_current() {
-  local compose="$1" image="$2" metadata version count checksum marker actual_counts
+  local compose="$1" image="$2" caddy_image="$3" metadata version count checksum marker actual_counts
   metadata="$(catalog_marker_metadata)"
   IFS='|' read -r version count checksum <<< "$metadata"
   marker="$(catalog_marker_path "$version")"
@@ -221,7 +234,7 @@ catalog_seed_is_current() {
   grep -Fx "catalog_version=$version" "$marker" >/dev/null || return 1
   grep -Fx "catalog_count=$count" "$marker" >/dev/null || return 1
   grep -Fx "catalog_sha256=$checksum" "$marker" >/dev/null || return 1
-  actual_counts="$(ROCKSERVER_IMAGE="$image" $compose exec -T postgres sh -c 'psql -Atq -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT (SELECT count(*) FROM stations), (SELECT count(*) FROM station_embeddings);"')"
+  actual_counts="$(ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose exec -T postgres sh -c 'psql -Atq -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT (SELECT count(*) FROM stations), (SELECT count(*) FROM station_embeddings);"')"
   [ "$actual_counts" = "$count|$count" ]
 }
 write_catalog_marker() {
@@ -233,44 +246,35 @@ write_catalog_marker() {
   chmod 0600 "$marker"
 }
 deploy_internal() {
-  local stage="${1:?stage required}" image="${2:?image required}" commit="${3:?commit required}" archive_hash
-  # Accept the former five-argument form while an older root-owned operator
-  # script may still be installed on the VPS. The fourth value was its local
-  # image ID; current verification uses the archive checksum and revision label.
-  if [ "$#" -eq 5 ]; then
-    archive_hash="${5:?archive hash required}"
-  elif [ "$#" -eq 4 ]; then
-    archive_hash="${4:?archive hash required}"
-  else
-    fail 'deploy requires stage, image, commit, and artifact hash'
-  fi
+  local stage="${1:?stage required}" image="${2:?image required}" caddy_image="${3:?Caddy image required}" commit="${4:?commit required}" archive_hash="${5:?artifact hash required}" caddy_archive_hash="${6:?Caddy artifact hash required}"
   local backup container backup_hash domain catalog_version catalog_count compose loaded_id
   require_root; validate_stage "$stage"
   [ -f "$env_file" ] || fail 'bootstrap has not provisioned the protected runtime env-file'
   ensure_host_log_dir
   install_owner_files "$stage"
   loaded_id="$(validate_artifact "$stage" "$image" "$commit" "$archive_hash")"
+  validate_caddy_artifact "$stage" "$caddy_image" "$commit" "$caddy_archive_hash"
   download_onnx
   compose="docker compose --project-name rockserver --env-file $env_file --file $release_root/compose.yaml --file $release_root/compose.production.yaml"
-  ROCKSERVER_IMAGE="$image" $compose config >/dev/null
-  ROCKSERVER_IMAGE="$image" $compose up --detach --wait postgres
+  ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose config >/dev/null
+  ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose up --detach --wait postgres
   backup="$release_root/backups/rockserver-$(date -u +%Y%m%d-%H%M%SZ).dump"
-  ROCKSERVER_IMAGE="$image" $compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --format=custom --file=/tmp/ops001d.dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"'
-  container="$(ROCKSERVER_IMAGE="$image" $compose ps -q postgres)"
+  ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --format=custom --file=/tmp/ops001d.dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"'
+  container="$(ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose ps -q postgres)"
   docker cp "${container}:/tmp/ops001d.dump" "$backup"
-  ROCKSERVER_IMAGE="$image" $compose exec -T postgres rm -f /tmp/ops001d.dump
+  ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose exec -T postgres rm -f /tmp/ops001d.dump
   backup_hash="$(sha256sum "$backup" | awk '{print $1}')"
   # A full release replacement deletes/rebuilds derived vectors.  Skip that
   # costly operation only when the exact pinned release was already completed
   # and PostgreSQL still contains every station and every embedding.
-  if catalog_seed_is_current "$compose" "$image"; then
+  if catalog_seed_is_current "$compose" "$image" "$caddy_image"; then
     printf '%s\n' 'catalog seed skipped: exact pinned catalog and embeddings are already ready'
   else
     # The pinned importer first applies embedded migrations, then transactionally activates the full catalog.
-    ROCKSERVER_IMAGE="$image" $compose run --rm catalog_seed >/dev/null
+    ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose run --rm catalog_seed >/dev/null
     write_catalog_marker
   fi
-  ROCKSERVER_IMAGE="$image" $compose up --detach --no-build --wait rockserver caddy
+  ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose up --detach --no-build --wait rockserver caddy
   domain="$(sed -n 's/^ROCKSERVER_DOMAIN=//p' "$env_file" | head -n1)"
   curl --fail --silent --show-error --max-time 30 "https://${domain}/health/ready" >/dev/null
   catalog_version="$(sed -n 's/^OPS001D_CATALOG_VERSION=//p' "$env_file" | head -n1)"
@@ -285,7 +289,7 @@ deploy_internal() {
 # be tied to a caller's SSH session: a lost laptop/network connection must not
 # leave a loaded image and seeded database without starting the web service.
 submit_deploy() {
-  local stage="${1:?stage required}" image="${2:?image required}" commit="${3:?commit required}"
+  local stage="${1:?stage required}" image="${2:?image required}" caddy_image="${3:?Caddy image required}" commit="${4:?commit required}"
   local existing_commit worker_log pid
   require_root; validate_stage "$stage"; validate_commit "$commit"
   [ -f "$env_file" ] || fail 'bootstrap has not provisioned the protected runtime env-file'
@@ -316,7 +320,7 @@ submit_deploy() {
 }
 
 deploy_worker() {
-  local stage="${1:?stage required}" commit="${3:?commit required}" exit_code=0
+  local stage="${1:?stage required}" commit="${4:?commit required}" exit_code=0
   require_root; validate_stage "$stage"; validate_commit "$commit"
   [ -d "$deploy_lock" ] || fail 'deployment worker lock is missing'
   write_deploy_status "$commit" running

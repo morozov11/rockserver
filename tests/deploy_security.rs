@@ -27,3 +27,21 @@ fn bootstrap_provisions_the_trusted_proxy_proof() {
     .expect("deployment script must be present");
     assert!(script.contains("write_or_keep_secret ROCKSERVER_TRUSTED_PROXY_TOKEN"));
 }
+
+/// Ensures production deployment binds the immutable Caddy bundle to the same source commit.
+#[test]
+fn deploy_transfers_a_commit_bound_caddy_image() {
+    let launcher = std::fs::read_to_string(format!(
+        "{}/deploy/ops-001-d.ps1",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("deployment launcher must be present");
+    let remote = std::fs::read_to_string(format!(
+        "{}/deploy/remote-ops-001-d.sh",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("remote deployment script must be present");
+    assert!(launcher.contains("rockserver-caddy:sha-$commit"));
+    assert!(launcher.contains("rockserver-caddy-image.tar"));
+    assert!(remote.contains("validate_caddy_artifact"));
+}

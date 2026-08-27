@@ -18,6 +18,10 @@
   root-only `release.env`. Bootstrap now provisions that generated proof with the other protected
   runtime values; no secret was inspected or printed. The matching regression test prevents a
   future bootstrap from omitting the required proxy boundary.
+- Second deployment diagnosis: Compose also required an immutable Caddy image, while the VPS had
+  only the upstream base Caddy container. The rollout now transfers a commit-labelled Caddy web
+  bundle alongside RockServer and verifies both archive hashes and revision labels before starting
+  either service. This prevents a healthy server image from being paired with a stale/no-UI proxy.
 - Checks: RockServer `cargo fmt --check`, strict Clippy, and `cargo test` passed; RockCast format
   and 85 library tests passed; RockMobile debug unit tests and `assembleDebug` passed; both
   Caddyfiles validated. Physical-device passkey/Keystore evidence remains required.

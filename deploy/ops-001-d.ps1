@@ -33,6 +33,7 @@ $onnxLock = Join-Path $PSScriptRoot 'onnx-assets.lock.json'
 $onnx = Test-Ops001DOnnxManifest -Path $onnxLock
 $commit = Get-Ops001DCurrentCommit -RepositoryRoot $repoRoot -AllowDirty:$DryRun
 $image = "rockserver:sha-$commit"
+$caddyImage = "rockserver-caddy:sha-$commit"
 
 if ($DryRun) {
     $summary = Format-Ops001DSafeSummary -Environment $yandex -Commit $commit -ImageId 'not-built-in-dry-run' -Readiness 'not-contacted'
@@ -79,6 +80,7 @@ try {
 
     $imageId = ''
     $archiveHash = ''
+    $caddyArchiveHash = ''
     if ($Action -eq 'deploy') {
         & docker build --label "org.opencontainers.image.revision=$commit" --tag $image $repoRoot
         if ($LASTEXITCODE -ne 0) { throw 'Local Docker build failed.' }
@@ -95,15 +97,14 @@ try {
         & docker image save --output $archive $image
         if ($LASTEXITCODE -ne 0) { throw 'Could not create the local image artifact.' }
         $archiveHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-        # Docker Desktop tags the local OCI manifest list, whereas `docker load`
-        # on the Linux VPS exposes the platform config digest. Obtain that digest
-        # from this exact tarball for compatibility with hosts bootstrapped by
-        # an earlier launcher version.
-        $archiveManifestJson = (& tar.exe -xOf $archive 'manifest.json' | Out-String)
-        if ($LASTEXITCODE -ne 0) { throw 'Could not read manifest.json from the local image artifact.' }
-        $archiveManifest = @(ConvertFrom-Json -InputObject $archiveManifestJson)
-        if ($archiveManifest.Count -ne 1 -or [string]$archiveManifest[0].Config -notmatch '^(?:blobs/sha256/)?(?<id>[0-9a-f]{64})(?:\.json)?$') { throw 'Local image artifact has an invalid manifest config reference.' }
-        $portableImageId = "sha256:$($Matches.id)"
+        & docker build --label "org.opencontainers.image.revision=$commit" --file (Join-Path $PSScriptRoot 'Dockerfile.caddy') --tag $caddyImage $repoRoot
+        if ($LASTEXITCODE -ne 0) { throw 'Local Caddy image build failed.' }
+        $caddyLabelsJson = (& docker image inspect --format '{{json .Config.Labels}}' $caddyImage).Trim()
+        if ($LASTEXITCODE -ne 0 -or [string](ConvertFrom-Json -InputObject $caddyLabelsJson).'org.opencontainers.image.revision' -ne $commit) { throw 'Caddy image revision label does not match the current commit.' }
+        $caddyArchive = Join-Path $stage 'rockserver-caddy-image.tar'
+        & docker image save --output $caddyArchive $caddyImage
+        if ($LASTEXITCODE -ne 0) { throw 'Could not create the local Caddy image artifact.' }
+        $caddyArchiveHash = (Get-FileHash -LiteralPath $caddyArchive -Algorithm SHA256).Hash.ToLowerInvariant()
     }
 
     & ssh -i $key @nonInteractiveSshOptions $target "umask 077; mkdir '$remoteStage'"
@@ -116,7 +117,7 @@ try {
         (Join-Path $stage 'owner.env'),
         (Join-Path $stage 'onnx-assets.json')
     )
-    if ($Action -eq 'deploy') { $uploadFiles += (Join-Path $stage 'rockserver-image.tar') }
+    if ($Action -eq 'deploy') { $uploadFiles += (Join-Path $stage 'rockserver-image.tar'), (Join-Path $stage 'rockserver-caddy-image.tar') }
     & scp -i $key @nonInteractiveScpOptions @uploadFiles "${target}:$remoteStage/"
     if ($LASTEXITCODE -ne 0) { throw 'Secure copy of the deployment bundle to the VPS failed.' }
 
@@ -132,7 +133,7 @@ try {
         # The VPS immediately acknowledges a detached worker.  The worker is
         # independent of this SSH connection, so losing Wi-Fi or closing this
         # PowerShell window cannot interrupt a long first-run ONNX backfill.
-        $remoteCommand = "sudo -n /opt/rockserver/remote-ops-001-d.sh deploy '$remoteStage' '$image' '$commit' '$portableImageId' '$archiveHash'"
+        $remoteCommand = "sudo -n /opt/rockserver/remote-ops-001-d.sh deploy '$remoteStage' '$image' '$caddyImage' '$commit' '$archiveHash' '$caddyArchiveHash'"
         $sshArgs = Get-Ops001DSshCommand -Action deploy -KeyPath $key -Target $target -RemoteCommand $remoteCommand
         $submitOutput = @(& ssh @sshArgs 2>&1)
         $submitExitCode = $LASTEXITCODE
