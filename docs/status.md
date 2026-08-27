@@ -18,6 +18,13 @@ and the two negative RM-011 route probes returned `404`; the live site therefore
 RM-011 auth router and cannot be accepted as this release. No staging claim is made until the
 approved commit is deployed and the physical-device passkey/Keystore flow is witnessed.
 
+The first immutable RM-011-F deploy attempt uploaded its verified server image and Caddyfile but
+stopped before backup/migration because the protected VPS `release.env` was missing the required
+Caddy-to-server proof variable. Bootstrap now creates that root-only random value just as it
+already does for the database password and legacy API credential; it is neither printed nor copied
+through the desktop environment. A second bootstrap is required to install that operator-script
+fix and provision the value before retrying deploy.
+
 ## RM-011-B2 — browser/pairing persistence implementation (2026-08-26)
 
 Владелец разблокировал проектирование и реализацию `RM-011-B2`, приняв рекомендуемые значения:

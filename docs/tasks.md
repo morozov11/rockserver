@@ -13,6 +13,11 @@
   commit-to-image guarantee; no staging deployment was performed after the fix. The existing
   staging site passed HTTPS readiness and rejected direct port `3000`, but its root and negative
   RM-011 route probes returned `404`, so it predates the required auth router.
+- Follow-up deployment diagnosis: the immutable image and Caddyfile safely reached the VPS, but
+  Compose stopped before database backup because `ROCKSERVER_TRUSTED_PROXY_TOKEN` was absent from
+  root-only `release.env`. Bootstrap now provisions that generated proof with the other protected
+  runtime values; no secret was inspected or printed. The matching regression test prevents a
+  future bootstrap from omitting the required proxy boundary.
 - Checks: RockServer `cargo fmt --check`, strict Clippy, and `cargo test` passed; RockCast format
   and 85 library tests passed; RockMobile debug unit tests and `assembleDebug` passed; both
   Caddyfiles validated. Physical-device passkey/Keystore evidence remains required.

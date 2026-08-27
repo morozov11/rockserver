@@ -96,6 +96,7 @@ bootstrap() {
   install_owner_files "$stage"
   write_or_keep_secret POSTGRES_PASSWORD
   write_or_keep_secret ROCKSERVER_API_BEARER_TOKEN
+  write_or_keep_secret ROCKSERVER_TRUSTED_PROXY_TOKEN
   if ! grep -q '^POSTGRES_DB=' "$env_file"; then
     password="$(sed -n 's/^POSTGRES_PASSWORD=//p' "$env_file" | head -n1)"
     printf 'POSTGRES_DB=rockserver\nPOSTGRES_USER=rockserver\nDATABASE_URL=postgres://rockserver:%s@postgres:5432/rockserver\n' "$password" >> "$env_file"

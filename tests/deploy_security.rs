@@ -16,3 +16,14 @@ fn caddy_disables_referrers_for_pairing_approval_urls() {
         );
     }
 }
+
+/// Ensures bootstrap creates the Caddy-to-server proof instead of leaving production Compose invalid.
+#[test]
+fn bootstrap_provisions_the_trusted_proxy_proof() {
+    let script = std::fs::read_to_string(format!(
+        "{}/deploy/remote-ops-001-d.sh",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("deployment script must be present");
+    assert!(script.contains("write_or_keep_secret ROCKSERVER_TRUSTED_PROXY_TOKEN"));
+}
