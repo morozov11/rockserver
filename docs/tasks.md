@@ -1,5 +1,23 @@
 # Task log
 
+## RM-011-F — 2026-08-27 — staging authorization security acceptance (in progress)
+
+- Goal: perform the final integration/security acceptance of RM-011 browser/native authorization
+  on staging without committing or pushing.
+- Scope: reviewed RockServer, RockCast, and RockMobile authorization boundaries; ran local
+  server/client checks; inspected local Docker state; prepared the standard staging deploy.
+- Result: found and minimally fixed P1 QR approval-secret referrer leakage: Caddy now sends
+  `Referrer-Policy: no-referrer` in both local and production configurations. Added the
+  `deploy_security` regression test and validated both Caddyfiles in Caddy 2.10 with placeholder
+  values only. The deploy script correctly refused the dirty worktree, preserving its immutable
+  commit-to-image guarantee; no staging deployment was performed after the fix. The existing
+  staging site passed HTTPS readiness and rejected direct port `3000`, but its root and negative
+  RM-011 route probes returned `404`, so it predates the required auth router.
+- Checks: RockServer `cargo fmt --check`, strict Clippy, and `cargo test` passed; RockCast format
+  and 85 library tests passed; RockMobile debug unit tests and `assembleDebug` passed; both
+  Caddyfiles validated. Physical-device passkey/Keystore evidence remains required.
+- Status: **blocked on an approved immutable commit for deployment, then physical-device evidence**.
+
 ## MVP-001-C follow-up — 2026-08-26 — local launcher credential fallback
 
 - Goal: allow the documented local launcher to start for public `/v1` testing

@@ -1,6 +1,22 @@
 # Project status
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
+
+## RM-011-F — staging security acceptance (in progress, 2026-08-27)
+
+Local acceptance has verified the RockServer, RockCast, and RockMobile security boundaries and
+their relevant test/build checks. During review, the QR approval URI was found to be protected by
+the weaker Caddy `Referrer-Policy: same-origin` header. Both Caddy configurations now use
+`no-referrer`, preventing the short-lived approval secret in the QR URI from being sent as a
+same-origin request referrer; `tests/deploy_security.rs` locks this down and both configurations
+validate in Caddy 2.10 with placeholder-only environment values.
+
+The approved staging deploy script refuses to build from this intentionally uncommitted fix, so
+deployment of the secure configuration is pending an approved immutable commit. Safe staging
+checks on 2026-08-27 returned HTTPS readiness `200` and refused direct TCP port `3000`, but `/`
+and the two negative RM-011 route probes returned `404`; the live site therefore predates the
+RM-011 auth router and cannot be accepted as this release. No staging claim is made until the
+approved commit is deployed and the physical-device passkey/Keystore flow is witnessed.
 
 ## RM-011-B2 — browser/pairing persistence implementation (2026-08-26)
 
