@@ -15,8 +15,8 @@ The approved staging deploy script refuses to build from this intentionally unco
 deployment of the secure configuration is pending an approved immutable commit. Safe staging
 checks on 2026-08-27 returned HTTPS readiness `200` and refused direct TCP port `3000`, but `/`
 and the two negative RM-011 route probes returned `404`; the live site therefore predates the
-RM-011 auth router and cannot be accepted as this release. No staging claim is made until the
-approved commit is deployed and the physical-device passkey/Keystore flow is witnessed.
+RM-011 auth router and could not be accepted as this release before the corrected immutable
+commit was deployed.
 
 The first immutable RM-011-F deploy attempt uploaded its verified server image and Caddyfile but
 stopped before backup/migration because the protected VPS `release.env` was missing the required
@@ -41,6 +41,15 @@ non-interactive image build cannot wait for a modules-directory prompt after sou
 Post-deploy probing found that Caddy's SPA `try_files` rewrite was taking precedence over the
 API matcher, returning the static page for `/health/*` and `/v1/*`. Both Caddyfiles now use an
 exclusive API `handle` before the static fallback; the regression test requires that order.
+
+Final staging deployment `f960e323a2b9e06e0281bf144bb368dc244e54c9` succeeded through its
+catalog and readiness gates. HTTPS `/health/ready` returns JSON `200`; the public Caddy response
+sets CSP, `Referrer-Policy: no-referrer`, `nosniff`, `DENY`, and Permissions-Policy headers; and
+direct public TCP port `3000` is unreachable. Browser passkey options without first-party Origin
+return `403`; malformed native completion returns `422`. One disposable staging pairing request
+returned `201` with the expected in-memory-only proof shape, while completion carrying a forged
+`user_id` was rejected with `422`. RM-011-F is now blocked only on physical phone passkey/Keystore
+evidence; no secret, pairing proof, code, URI, ID, or protected log was printed.
 
 ## RM-011-B2 — browser/pairing persistence implementation (2026-08-26)
 

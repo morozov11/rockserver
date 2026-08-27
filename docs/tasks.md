@@ -36,6 +36,19 @@
   Caddyfiles validated. Physical-device passkey/Keystore evidence remains required.
 - Status: **blocked on an approved immutable commit for deployment, then physical-device evidence**.
 
+### Deployment completion follow-up
+
+- Result: after three minimal deployment fixes, staging commit
+  `f960e323a2b9e06e0281bf144bb368dc244e54c9` completed successfully. The fixes provision the
+  root-only trusted Caddy proof during bootstrap, deploy a matching checksum/label-verified Caddy
+  web image, and proxy API/health routes before the SPA fallback.
+- Staging checks: `/health/ready` returned JSON `200`; Caddy returned CSP, `no-referrer`,
+  `nosniff`, `DENY`, and Permissions-Policy headers; TCP `3000` was unreachable externally;
+  browser passkey options without first-party Origin returned `403`; malformed native completion
+  returned `422`; a short-lived pairing create returned `201`, and completion with client-supplied
+  `user_id` returned `422`. No response proof or identifier was logged.
+- Status: **blocked only on manual physical-device passkey/Keystore evidence**.
+
 ## MVP-001-C follow-up — 2026-08-26 — local launcher credential fallback
 
 - Goal: allow the documented local launcher to start for public `/v1` testing
