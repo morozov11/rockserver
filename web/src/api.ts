@@ -6,15 +6,18 @@ export type AuthenticationOptions = { challenge_id: string; options: Omit<Public
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, { ...init, credentials: "same-origin", headers: { "Content-Type": "application/json", ...init.headers } });
-  if (!response.ok) throw await response.json() as ApiError;
-  return response.status === 204 ? undefined as T : response.json() as Promise<T>;
+  if (response.status === 204) return undefined as T;
+  const body = await response.json().catch(() => undefined);
+  if (!response.ok || !body) throw (body ?? { code: "server_unavailable", message: "", request_id: "", details: {} }) as ApiError;
+  return body as T;
 }
 
 export const api = {
-  registrationOptions() { return request<RegistrationOptions>("/v1/auth/passkeys/registration/options", { method: "POST", body: "{}" }); },
+  registrationOptions(payload?: { account_display_name: string }) { return request<RegistrationOptions>("/v1/auth/passkeys/registration/options", { method: "POST", body: JSON.stringify(payload ?? {}) }); },
   registrationVerify(payload: unknown) { return request<{ account_display_name: string; csrf_token: string }>("/v1/auth/passkeys/registration/verify", { method: "POST", body: JSON.stringify(payload) }); },
   authenticationOptions() { return request<AuthenticationOptions>("/v1/auth/passkeys/authentication/options", { method: "POST", body: "{}" }); },
   authenticationVerify(payload: unknown) { return request<{ csrf_token: string }>("/v1/auth/passkeys/authentication/verify", { method: "POST", body: JSON.stringify(payload) }); },
+  browserSession() { return request<{ account_display_name: string; csrf_token: string }>("/v1/auth/browser-session", { method: "POST", body: "{}" }); },
   pairing(code: string) { return request<PairingPreview>(`/v1/pairing-requests/lookup?code=${encodeURIComponent(code)}`); },
   approvePairing(requestId: string, approvalSecret: string, verificationPhrase: string, csrfToken: string) {
     return request<void>(`/v1/pairing-requests/${requestId}/approve`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ approval_secret: approvalSecret, verification_phrase: verificationPhrase }) });

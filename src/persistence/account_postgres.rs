@@ -148,6 +148,24 @@ impl PostgresAccountStore {
         .await
     }
 
+    /// Rotates the tab-local CSRF proof and returns the active account display name.
+    pub async fn rotate_browser_csrf(
+        &self,
+        session_token_hash: &SecretHash,
+        csrf_token_hash: &SecretHash,
+    ) -> Result<Option<String>, sqlx::Error> {
+        sqlx::query_scalar(
+            "UPDATE browser_sessions b SET csrf_token_hash = $2 \
+             FROM users u WHERE b.user_id = u.id AND b.session_token_hash = $1 \
+             AND b.revoked_at IS NULL AND b.expires_at > now() AND u.status = 'active' \
+             RETURNING u.account_display_name",
+        )
+        .bind(session_token_hash.as_bytes())
+        .bind(csrf_token_hash.as_bytes())
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     /// Returns an active account's display name for a server-derived owner ID.
     pub async fn account_display_name(&self, user_id: Uuid) -> Result<Option<String>, sqlx::Error> {
         sqlx::query_scalar(

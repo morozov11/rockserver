@@ -1,5 +1,27 @@
 # Task log
 
+## RM-011-G2 — 2026-08-28 — browser account and pairing UX
+
+- Goal: make a secure pairing link explain one pending device and prevent accidental account
+  creation or loss of pairing context.
+- Scope: current Preact/Vite page, tab-local browser-session CSRF refresh endpoint, OpenAPI and
+  contract/security regressions. No native client, secret file, dependency, account, credential or
+  deployment change was made.
+- Result: `/` is an authenticated/anonymous account landing page without a generic pairing form.
+  A link with the existing pairing code and approval secret renders only that request's product,
+  suggested device name, phrase, code and expiry. Anonymous users see distinct passkey sign-in and
+  clearly warned account-creation actions; successful ceremonies retain the same URL. A live
+  session gets a rotating in-memory CSRF proof and sees a named account/device confirmation with
+  connect/cancel. No UUID, credential ID, HTTP detail or native token is rendered.
+- Checks: `cargo fmt --check`, strict all-target/all-feature Clippy, `cargo test` (99 regular
+  tests), web regression tests, TypeScript typecheck/lint and Vite production build passed. Clean
+  browser automation verified the anonymous landing has zero inputs, then a local deterministic
+  API harness rendered both the named RockMobile target/anonymous choices and the named signed-in
+  confirmation. No passkey, account or staging pairing request was created. PostgreSQL tests remain
+  opt-in without `TEST_DATABASE_URL`.
+- Status: **implemented locally; standard staging deploy awaits an immutable clean commit and was
+  not bypassed.**
+
 ## RM-011-G1 — 2026-08-28 — account and pairing contract
 
 - Goal: make the server contract express one user account with many understandable devices, without

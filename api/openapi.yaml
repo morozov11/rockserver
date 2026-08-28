@@ -84,6 +84,29 @@ paths:
         "200": { description: Browser session cookie and CSRF token were created. }
         "401": { description: Assertion, challenge or sign counter was rejected. }
         "403": { description: Direct or wrong-origin requests are rejected. }
+  /v1/auth/browser-session:
+    post:
+      operationId: refreshBrowserSessionCsrf
+      summary: Refresh the tab-local CSRF proof for an active first-party browser session
+      security:
+        - RockserverBrowserCookie: []
+      responses:
+        "200":
+          description: Active account display name and a new tab-local CSRF proof.
+          headers:
+            Cache-Control: { schema: { type: string, example: no-store } }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [account_display_name, csrf_token]
+                properties:
+                  account_display_name: { type: string, minLength: 1, maxLength: 128 }
+                  csrf_token: { type: string, minLength: 1, maxLength: 256, writeOnly: true }
+        "401": { description: Browser session cookie is absent, expired, or invalid. }
+        "403": { description: Direct or wrong-origin requests are rejected. }
+        "503": { description: Authentication persistence is unavailable. }
   /v1/auth/refresh:
     post:
       operationId: refreshNativeSession

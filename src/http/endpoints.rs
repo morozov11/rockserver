@@ -227,6 +227,7 @@ pub fn router_with_speech_recognizers_and_bearer_token(
         .route("/v1/voice/stream", get(public_voice_stream))
         .route("/v1/pairing-requests", post(create_pairing_request))
         .route("/v1/pairing-requests/lookup", get(lookup_pairing_request))
+        .route("/v1/auth/browser-session", post(browser_session))
         .route(
             "/v1/pairing-requests/{request_id}/approve",
             post(approve_pairing_request),
@@ -316,6 +317,7 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
         .route("/v1/voice/stream", get(public_voice_stream))
         .route("/v1/pairing-requests", post(create_pairing_request))
         .route("/v1/pairing-requests/lookup", get(lookup_pairing_request))
+        .route("/v1/auth/browser-session", post(browser_session))
         .route(
             "/v1/pairing-requests/{request_id}/approve",
             post(approve_pairing_request),
@@ -422,6 +424,12 @@ struct PairingPreviewDto {
 struct PairingApprovalDto {
     approval_secret: String,
     verification_phrase: String,
+}
+
+#[derive(Serialize)]
+struct BrowserSessionDto {
+    account_display_name: String,
+    csrf_token: String,
 }
 
 #[derive(Deserialize)]
@@ -1218,6 +1226,74 @@ async fn lookup_pairing_request(
             StatusCode::SERVICE_UNAVAILABLE,
             "pairing_unavailable",
             "Pairing service is temporarily unavailable.",
+            &request_id,
+            json!({}),
+        ),
+    }
+}
+
+/// Refreshes the tab-local CSRF proof for an active browser account session.
+async fn browser_session(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let request_id = request_id(&headers);
+    if !is_trusted_browser_request(&headers)
+        || !trusted_proxy_header_matches(&headers, state.trusted_proxy_token.as_deref())
+    {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "untrusted_request",
+            "The request must originate from the trusted first-party proxy.",
+            &request_id,
+            json!({}),
+        );
+    }
+    let Some(cookie) = cookie_value(&headers, "rockserver_browser") else {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "A browser session is required.",
+            &request_id,
+            json!({}),
+        );
+    };
+    let Some(store) = state.account_store.as_ref() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        );
+    };
+    let csrf_token = Uuid::new_v4().simple().to_string();
+    match store
+        .rotate_browser_csrf(&token_hash(cookie), &token_hash(&csrf_token))
+        .await
+    {
+        Ok(Some(account_display_name)) => {
+            let mut response = with_request_id(
+                Json(BrowserSessionDto {
+                    account_display_name,
+                    csrf_token,
+                })
+                .into_response(),
+                &request_id,
+            );
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            response
+        }
+        Ok(None) => error_response(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "A browser session is required.",
+            &request_id,
+            json!({}),
+        ),
+        Err(_) => error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
             &request_id,
             json!({}),
         ),
@@ -3335,6 +3411,21 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn browser_session_refresh_rejects_direct_requests() {
+        let response = router()
+            .oneshot(
+                Request::post("/v1/auth/browser-session")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
     #[test]

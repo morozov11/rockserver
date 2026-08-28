@@ -2,27 +2,32 @@
 
 Last updated: 2026-08-28
 
-## RM-011-G1 — account and pairing contract (implemented locally, staging deploy pending)
+## RM-011-G2 — browser account and pairing UX (implemented locally, staging deploy pending)
 
-Migration `0016` preserves existing users/devices while adding `account_display_name` with the
-safe default `Rock account` and renaming stored device metadata to `device_display_name` and
-`device_type`. The runtime profile/device DTOs now include the requested display, type,
-`created_at`, and nullable `last_seen_at` fields. Explicit passkey registration accepts an optional
-account display name and passes it into the passkey ceremony; discoverable login remains entirely
-username-less.
+The ordinary page is now a safe account landing page: it states whether the browser is signed in,
+offers username-less passkey sign-in when anonymous, and has no general pairing-code or device
+flow. A secure link carrying the existing opaque code and approval secret opens only that pending
+request. It displays the human device name/product, verification phrase, short code and expiry;
+it never renders request IDs, account UUIDs, credential IDs or native tokens.
 
-Pairing lookup now exposes only the browser-safe pending context: device type/display name, short
-code, verification phrase, expiry, status, and (only for an active browser cookie) account display
-name. It does not serialize desktop proof, approval secret, credential ID, access token, or refresh
-token. Approval still binds an already existing authenticated account, while completion still accepts
-only the desktop proof and derives the owner transactionally. Existing CSRF/cookie, RP/origin,
-trusted-proxy, rate-limit, 90-day audit, and 10-device constraints remain unchanged.
+Anonymous pairing makes the two choices explicit: sign in with an existing passkey, or create a
+new Rock account with an unambiguous warning. The current URL remains unchanged through both
+ceremonies, so the original request survives login/registration and reloads. An authenticated
+browser sees the exact confirmation question for its account, with connect and cancel actions.
+`POST /v1/auth/browser-session` rotates a tab-local CSRF value for a live cookie session; it is
+first-party/proxy-bound, no-store, returns only the display name and CSRF value, and lets the
+specific pairing screen recover safely after reload without browser token storage.
 
-Local checks passed: `cargo fmt --check`, strict all-target/all-feature Clippy, `cargo test`
-(98 regular tests; four disposable PostgreSQL tests remain ignored without `TEST_DATABASE_URL`),
-and web typecheck/lint/production build. The normal staging deploy was attempted and safely refused:
-it requires a clean worktree so the image matches an immutable Git commit. The task explicitly
-requires no commit, so no bypass was attempted; no staging data or credentials have been touched by G1.
+User-facing statuses cover missing key, cancelled prompt, expired/already-completed request,
+already-connected device, and server unavailability without HTTP details. Existing approval owner
+derivation, CSRF/cookie, RP/origin, trusted Caddy proxy, and native-token boundaries are unchanged.
+Local checks passed: Rust format, strict all-target/all-feature Clippy, `cargo test` (99 regular
+tests; four disposable PostgreSQL tests remain ignored without `TEST_DATABASE_URL`), web source
+regressions, typecheck/lint and production build. A clean browser automation session confirmed no
+UUID/code field on the landing page, then used a local deterministic API harness (no account,
+credential or staging request) to verify both the anonymous target-device screen and the signed-in
+named account confirmation. Staging deployment is pending the primary flow's immutable commit
+because this task must not commit or bypass the clean-worktree gate.
 
 ## RM-011-F P0 blocker fix — username-less discoverable passkey login (deployed, 2026-08-27)
 

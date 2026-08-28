@@ -1,56 +1,95 @@
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { api, browserAuthenticationOptions, browserRegistrationOptions, serializeAuthentication, serializeRegistration, type ApiError, type PairingPreview } from "./api";
-import QRCode from "qrcode";
 import "./style.css";
 
-const errorMessage = (error: unknown) => (error as ApiError)?.message ?? "Сервис временно недоступен. Повторите попытку.";
+const errorMessage = (error: unknown) => {
+  const code = (error as ApiError)?.code;
+  if (code === "pairing_not_found" || code === "pairing_not_approvable") return "Этот запрос на подключение истёк, уже завершён или устройство уже подключено.";
+  if (code === "auth_unavailable" || code === "pairing_unavailable" || code === "server_unavailable") return "Сервер временно недоступен. Повторите попытку позже.";
+  return "Не удалось выполнить действие. Повторите попытку позже.";
+};
+
 const passkeyErrorMessage = (error: unknown) => {
   if (error instanceof DOMException) {
     if (error.name === "AbortError") return "Вход отменён пользователем.";
-    if (error.name === "NotAllowedError") return "Доступный passkey не найден или вход отменён пользователем.";
+    if (error.name === "NotAllowedError") return "Ключ не найден. Выберите passkey этого Rock-аккаунта и попробуйте ещё раз.";
   }
-  return (error as ApiError)?.code ? "Ошибка сервера. Повторите попытку позже." : "Не удалось выполнить вход с passkey.";
+  if ((error as ApiError)?.code === "webauthn_rejected") return "Ключ не найден. Выберите passkey этого Rock-аккаунта и попробуйте ещё раз.";
+  return (error as ApiError)?.code ? "Сервер временно недоступен. Повторите попытку позже." : "Не удалось выполнить вход с passkey.";
 };
 
-/** First-party passkey and pairing page, shared with the administration shell. */
+const deviceProductName = (deviceType: string) => deviceType.toLowerCase().includes("mobile") ? "RockMobile" : "RockCast";
+
+/** Renders the account landing page or the secure, request-specific pairing screen. */
 export function App() {
-  const pairingUrl = new URLSearchParams(location.search);
-  const [code, setCode] = useState(pairingUrl.get("code") ?? "");
+  const params = new URLSearchParams(location.search);
+  const code = params.get("code")?.trim().toUpperCase() ?? "";
+  const approvalSecret = params.get("secret") ?? "";
+  const isPairing = Boolean(code && approvalSecret);
   const [preview, setPreview] = useState<PairingPreview>();
   const [message, setMessage] = useState("");
   const [csrf, setCsrf] = useState("");
-  const [approvalSecret] = useState(pairingUrl.get("secret") ?? "");
+  const [accountName, setAccountName] = useState("");
   const [busy, setBusy] = useState(false);
-  const [qr, setQr] = useState("");
+
   const lookup = async () => {
-    setMessage("");
-    try { setPreview(await api.pairing(code.trim())); } catch (error) { setPreview(undefined); setMessage(errorMessage(error)); }
+    try { setPreview(await api.pairing(code)); } catch (error) { setPreview(undefined); setMessage(errorMessage(error)); }
   };
+  const restoreSession = async () => {
+    try {
+      const session = await api.browserSession();
+      setCsrf(session.csrf_token); setAccountName(session.account_display_name);
+    } catch (error) {
+      if ((error as ApiError)?.code !== "authentication_required") setMessage(errorMessage(error));
+    }
+  };
+  useEffect(() => { void restoreSession(); if (isPairing) void lookup(); }, []);
+
   const register = async () => {
     setBusy(true); setMessage("");
     try {
       if (!window.PublicKeyCredential) throw new Error("Браузер не поддерживает passkey.");
-      const started = await api.registrationOptions();
+      const started = await api.registrationOptions(accountName.trim() ? { account_display_name: accountName.trim() } : undefined);
       const credential = await navigator.credentials.create({ publicKey: browserRegistrationOptions(started) });
       if (!(credential instanceof PublicKeyCredential)) throw new Error("Passkey не создан.");
       const result = await api.registrationVerify({ challenge_id: started.challenge_id, ...serializeRegistration(credential) });
-      setCsrf(result.csrf_token); setMessage("Passkey создан, браузер подключён.");
+      setCsrf(result.csrf_token); setAccountName(result.account_display_name);
+      setMessage("Rock-аккаунт создан. Теперь можно подтвердить устройство.");
+      if (isPairing) await lookup();
     } catch (error) { setMessage(errorMessage(error)); } finally { setBusy(false); }
   };
   const authenticate = async () => {
     if (!window.PublicKeyCredential) { setMessage("Браузер не поддерживает passkey."); return; }
-    setBusy(true); try { const started = await api.authenticationOptions(); const credential = await navigator.credentials.get({ publicKey: browserAuthenticationOptions(started) }); if (!(credential instanceof PublicKeyCredential)) { setMessage("Доступный passkey не найден."); return; } const result = await api.authenticationVerify({ challenge_id: started.challenge_id, ...serializeAuthentication(credential) }); setCsrf(result.csrf_token); setMessage("Вход выполнен."); } catch (error) { setMessage(passkeyErrorMessage(error)); } finally { setBusy(false); }
+    setBusy(true); setMessage("");
+    try {
+      const started = await api.authenticationOptions();
+      const credential = await navigator.credentials.get({ publicKey: browserAuthenticationOptions(started) });
+      if (!(credential instanceof PublicKeyCredential)) { setMessage("Ключ не найден. Выберите passkey этого Rock-аккаунта и попробуйте ещё раз."); return; }
+      const result = await api.authenticationVerify({ challenge_id: started.challenge_id, ...serializeAuthentication(credential) });
+      setCsrf(result.csrf_token);
+      if (isPairing) {
+        await lookup();
+        const session = await api.browserSession();
+        setCsrf(session.csrf_token); setAccountName(session.account_display_name);
+      }
+      setMessage(isPairing ? "Вход выполнен. Проверьте устройство перед подключением." : "Вход выполнен.");
+    } catch (error) { setMessage(passkeyErrorMessage(error)); } finally { setBusy(false); }
   };
   const approve = async () => {
-    if (!preview || !approvalSecret || !csrf) { setMessage("Сначала войдите с passkey и откройте QR-ссылку с секретом."); return; }
-    setBusy(true); try { await api.approvePairing(preview.request_id, approvalSecret, preview.verification_phrase, csrf); setMessage("Устройство подтверждено. Вернитесь в RockCast."); } catch (error) { setMessage(errorMessage(error)); } finally { setBusy(false); }
+    if (!preview || !csrf) { setMessage("Сначала войдите с passkey."); return; }
+    setBusy(true); setMessage("");
+    try { await api.approvePairing(preview.request_id, approvalSecret, preview.verification_phrase, csrf); setMessage("Устройство подтверждено. Вернитесь в RockCast или RockMobile."); }
+    catch (error) { setMessage(errorMessage(error)); } finally { setBusy(false); }
   };
-  return <main><header><span>ROCKSERVER</span><h1>Войти или подключить устройство</h1></header>
-    <section><h2>Passkey</h2><p>Passkey хранится в вашем менеджере ключей и не попадает в localStorage или bundle.</p><button onClick={register} disabled={busy}>{busy ? "Проверяем…" : "Создать passkey"}</button><button className="secondary" onClick={authenticate} disabled={busy}>Войти с passkey</button></section>
-    <section><h2>Подключить RockCast</h2><p>Отсканируйте QR-код на компьютере или введите короткий код.</p><label>Код <input value={code} maxLength={16} onInput={event => setCode(event.currentTarget.value)} /></label><button onClick={lookup}>Проверить устройство</button>
-      {message && <p role="alert">{message}</p>}
-      {preview && <article><strong>{preview.device_display_name}</strong><br />{preview.device_type}{preview.app_version ? ` · ${preview.app_version}` : ""}<p>Сверьте фразу на компьютере: <b>{preview.verification_phrase}</b></p><button onClick={approve} disabled={busy}>Подтвердить устройство</button></article>}
-      {approvalSecret && <button className="secondary" onClick={async () => setQr(await QRCode.toDataURL(`${location.origin}/?code=${encodeURIComponent(code)}&secret=${encodeURIComponent(approvalSecret)}`))}>Показать QR-код</button>}
-      {qr && <img className="qr" src={qr} alt="QR-код подключения" />}
-    </section><footer>Администрирование использует этот же интерфейс и общие API-типы; отдельного frontend-приложения нет.</footer></main>;
+
+  if (!isPairing) return <main><header><span>ROCK</span><h1>Rock-аккаунт</h1></header><section><h2>{accountName ? `Вы вошли в аккаунт «${accountName}»` : "Вы не вошли"}</h2><p>{accountName ? "Открывайте защищённую ссылку с устройства, которое хотите добавить." : "Войдите, чтобы подтвердить устройство по его защищённой ссылке."}</p>{!accountName && <button onClick={authenticate} disabled={busy}>{busy ? "Проверяем…" : "Войти с passkey"}</button>}</section>{message && <p role="alert">{message}</p>}<footer>Passkey и данные сессии не сохраняются в браузере.</footer></main>;
+
+  const deviceType = deviceProductName(preview?.device_type ?? "");
+  return <main><header><span>ROCK</span><h1>Подключение устройства</h1></header>
+    {preview && <section><p className="eyebrow">Проверьте, что это ваше устройство</p><h2>{deviceType} — {preview.device_display_name}</h2><dl><div><dt>Проверочная фраза</dt><dd>{preview.verification_phrase}</dd></div><div><dt>Короткий код</dt><dd>{preview.short_code}</dd></div><div><dt>Действует до</dt><dd>{new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(preview.expires_at))}</dd></div></dl></section>}
+    {message && <p role="alert">{message}</p>}
+    {preview && accountName ? <section><h2>Подключить {deviceType} к аккаунту «{accountName}»?</h2><p>Будет подключено только показанное выше устройство.</p><button onClick={approve} disabled={busy}>{busy ? "Подключаем…" : "Подключить"}</button><a className="button secondary" href="/">Отмена</a></section>
+      : preview ? <section><h2>Чтобы продолжить</h2><p>Войдите в существующий Rock-аккаунт или создайте новый. После этого вы вернётесь к этому устройству.</p><button onClick={authenticate} disabled={busy}>{busy ? "Проверяем…" : "Войти с passkey"}</button><div className="create"><h3>Создать Rock-аккаунт</h3><p>Это создаст новый отдельный аккаунт, а не войдёт в существующий.</p><label>Имя аккаунта <input value={accountName} maxLength={128} placeholder="Например, Алексей" onInput={event => setAccountName(event.currentTarget.value)} /></label><button className="secondary" onClick={register} disabled={busy}>Создать Rock-аккаунт</button></div></section>
+      : <section><h2>Ссылка подключения недействительна</h2><p>Откройте новую защищённую ссылку на устройстве, которое хотите подключить.</p></section>}
+    <footer>Passkey и данные сессии не сохраняются в браузере.</footer></main>;
 }

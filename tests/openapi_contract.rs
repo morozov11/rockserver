@@ -168,6 +168,13 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
             "missing required schema {schema}"
         );
     }
+    assert!(
+        value_at(&document, "paths")
+            .and_then(|paths| paths.get("/v1/auth/browser-session"))
+            .and_then(|path| path.get("post"))
+            .is_some(),
+        "browser session CSRF refresh must be documented"
+    );
     let preview = schemas
         .get(Value::String("PairingPreview".to_owned()))
         .expect("pairing preview schema must exist");
