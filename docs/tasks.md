@@ -1234,11 +1234,26 @@
   account registration atomic after a successful passkey ceremony; cancel RockCast and RockMobile
   pairing when the native UI is dismissed; and clear the existing RockCast Clippy and RockMobile
   lint gates with targeted fixes.
-- Result: F-1/F-2/F-3 are resolved in the current uncommitted checkouts. No UUID/manual bearer
-  token path was introduced, and local radio/fallback behavior remains independent of the server.
+- Result: F-1/F-2/F-3 are resolved in the current checkouts. No UUID/manual bearer token path was
+  introduced, and local radio/fallback behavior remains independent of the server. The deploy
+  follow-up preserves one verified on-VPS rollback dump and leaves the previous dump intact when
+  backup creation or verification fails; the portable image ID and legacy argument compatibility
+  checks are covered by the deploy test suite.
 - Checks: RockServer fmt, strict Clippy and all-target/all-feature tests passed (103 library tests
   plus available target tests; six disposable PostgreSQL tests ignored without
-  `TEST_DATABASE_URL`); OpenAPI contract tests passed. RockCast fmt/check/89 unit tests/strict
-  Clippy passed. RockMobile unit tests, debug assemble, and lint passed. No staging, commit, push,
-  or deploy was performed.
+  `TEST_DATABASE_URL`); OpenAPI and OPS-001-D contract tests passed. RockCast fmt/check/89 unit
+  tests/strict Clippy passed. RockMobile unit tests, debug assemble, and lint passed. Commit
+  `99c2783` contains the pairing fixes; commit `392d8b4` contains the deploy/backup follow-up.
 - Status: **complete in local checkouts; disposable-DB and staging/real-device smoke remains.**
+
+## OPS-001-D backup retention follow-up — 2026-08-28
+
+- Goal: restore the requested bounded local rollback-backup behavior without weakening deploy
+  failure safety.
+- Scope: retain exactly one verified `rockserver-*.dump` on the VPS, add portable saved-image ID
+  extraction on Windows, preserve former deploy argument compatibility, and update the static deploy
+  checks for the current Caddy-aware compose environment.
+- Result: a new dump is verified before old matching dumps are removed; a failed dump/checksum does
+  not prune the previous backup. Local OPS-001-D tests pass. Commit `392d8b4` was created locally;
+  push and deploy are the next steps.
+- Status: **ready for push and staging deploy.**

@@ -21,7 +21,14 @@ tests remain ignored without `TEST_DATABASE_URL`.
 RM-011-G7 is not accepted yet: real passkey/WebAuthn, Windows GUI, physical Android, staging, and
 live account/device-centre checks were intentionally not run. The remaining work is the separately
 authorized disposable-DB and physical-device smoke checklist in
-`docs/rm-011-g7-e2e-verification.md`; no staging mutation, deploy, commit, or push was performed.
+`docs/rm-011-g7-e2e-verification.md`.
+
+The deploy hardening follow-up preserves the requested on-VPS backup retention behavior: after a
+new dump is copied and checksummed, older `rockserver-*.dump` files are removed while the new dump
+is retained; any earlier failure leaves the previous dump untouched. The launcher also records the
+portable image config ID from the exact saved archive, and the remote wrapper retains compatibility
+with the former deploy argument shape. The deploy-script suite passes locally. These changes are in
+commit `392d8b4`; push and staging readiness are pending.
 
 ## RM-011-G6 — preview-first staging account cleanup (local, 2026-08-28)
 
@@ -41,9 +48,8 @@ Local verification passed: `cargo fmt --check`, strict all-target/all-feature Cl
 deployment/security tests, 2 OpenAPI tests, 9 search API tests, 5 voice-command tests, and 1
 voice-stream test passed; 6 disposable PostgreSQL, 1 ONNX, 4 billable Yandex LLM, and 1
 SpeechKit integration tests remain ignored). Web `typecheck`, `lint`, `test` (5 tests), and
-`build` also passed, as did `git diff --check`. No staging cleanup, production operation, deploy,
-commit, or push was performed. The existing deploy PowerShell suite still has its unrelated
-pre-existing portable-image-ID assertion failure.
+`build` also passed, as did `git diff --check`. This historical local verification preceded the
+later deploy commits; it did not perform staging cleanup or production operation.
 
 ## SECURITY-001 — Rust TLS dependency remediation (deployed, 2026-08-28)
 

@@ -244,7 +244,7 @@ physical devices are attached. Run later in a separately authorized, disposable 
 
 ## Criteria to close RM-011-G
 
-- F-1/F-2/F-3 are resolved in the current uncommitted checkouts; run the disposable-DB and live
+- F-1/F-2/F-3 are resolved in the current checkouts; run the disposable-DB and live
   smoke evidence below before accepting the epic.
 - RockServer PostgreSQL account/pairing/browser-centre tests run against a disposable database;
   no destructive staging migration is needed.
@@ -253,4 +253,7 @@ physical devices are attached. Run later in a separately authorized, disposable 
 - RockCast and RockMobile local quality gates pass; only real-device/browser/staging evidence
   remains.
 
-No commit, push, deploy, staging mutation or staging cleanup was made.
+Pairing fixes are in RockServer commit `99c2783`, RockCast commit `0bd9639`, and RockMobile commit
+`fd1693d`. Deploy/backup hardening is in RockServer commit `392d8b4`. These commits have not yet
+been reflected in this report as a successful staging rollout; the real passkey/device smoke
+checklist remains manual and no staging data was changed by the verification run.
