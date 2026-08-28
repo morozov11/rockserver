@@ -105,10 +105,14 @@ pub struct OwnedDevice {
     pub id: Uuid,
     /// Owning account identifier.
     pub user_id: Uuid,
-    /// Untrusted bounded display name.
-    pub name: String,
-    /// Client-provided platform label.
-    pub platform: String,
+    /// User-visible bounded device name.
+    pub device_display_name: String,
+    /// Stable client type supplied by the native client.
+    pub device_type: String,
+    /// Device creation time in RFC 3339 UTC form when read from persistence.
+    pub created_at: String,
+    /// Last activity time in RFC 3339 UTC form when read from persistence.
+    pub last_seen_at: Option<String>,
 }
 
 /// Result of an accepted refresh rotation; it intentionally contains no plaintext token.
@@ -197,10 +201,10 @@ pub struct NewPairingRequest<'a> {
     pub short_code_hash: &'a SecretHash,
     /// Human-visible phrase shown by both devices.
     pub verification_phrase: &'a str,
-    /// Bounded desktop display name.
-    pub device_name: &'a str,
-    /// Client platform label.
-    pub platform: &'a str,
+    /// Suggested user-visible device name.
+    pub device_display_name: &'a str,
+    /// Target client type.
+    pub device_type: &'a str,
     /// Optional client version.
     pub app_version: Option<&'a str>,
     /// Expiry in RFC 3339 UTC form.
@@ -240,6 +244,12 @@ pub struct PairingCompletion {
     pub device_id: Uuid,
     /// Newly created native session.
     pub session_id: Uuid,
+    /// User-visible owner account name resolved from the approved browser session.
+    pub account_display_name: String,
+    /// User-visible name of the newly connected device.
+    pub device_display_name: String,
+    /// Stable type of the newly connected device.
+    pub device_type: String,
 }
 
 /// Non-secret pairing details shown to a browser after a short-code lookup.
@@ -247,14 +257,33 @@ pub struct PairingCompletion {
 pub struct PairingPreview {
     /// Pending pairing request identifier.
     pub request_id: Uuid,
-    /// Bounded desktop display name.
-    pub device_name: String,
-    /// Client platform label.
-    pub platform: String,
+    /// Suggested user-visible device name.
+    pub device_display_name: String,
+    /// Target client type.
+    pub device_type: String,
     /// Optional client version.
     pub app_version: Option<String>,
     /// Human-visible phrase that must be confirmed by the user.
     pub verification_phrase: String,
+    /// Database-formatted UTC expiry for the pending request.
+    pub expires_at: String,
+}
+
+/// User-facing account and current-device metadata resolved only for an authenticated session.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountProjection {
+    /// User-visible account name.
+    pub account_display_name: String,
+    /// Account creation time in RFC 3339 UTC form.
+    pub created_at: String,
+    /// Current device display name.
+    pub device_display_name: String,
+    /// Current device type.
+    pub device_type: String,
+    /// Current device creation time in RFC 3339 UTC form.
+    pub device_created_at: String,
+    /// Current device last activity time in RFC 3339 UTC form, when recorded.
+    pub last_seen_at: Option<String>,
 }
 
 /// Safe refresh outcome that does not disclose whether a token existed or why it was rejected.

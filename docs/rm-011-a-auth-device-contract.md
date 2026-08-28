@@ -59,13 +59,13 @@ response logs, trace spans или audit payloads.
 
 | Record | Необходимые поля | Ownership и lifecycle |
 |---|---|---|
-| `User` | `id`, `status`, `created_at`, `updated_at`, `deleted_at` | account не содержит обязательных contact data. `deleted` не может получить session. |
+| `User` | `id`, `account_display_name`, `status`, `created_at`, `updated_at`, `deleted_at` | account не содержит обязательных contact data. `account_display_name` — единственное пользовательское имя account; старые rows получают безопасное значение `Rock account`. `deleted` не может получить session. |
 | `PasskeyCredential` | `id`, `user_id`, `credential_id`, `public_key`, `sign_count`, `transports`, `created_at`, `last_used_at`, `revoked_at` | public key и credential ID не секреты, но остаются server-only. Один user имеет один или несколько passkeys. |
 | `AccountIdentity` | `id`, `user_id`, `kind`, `subject_hash`, `subject_ciphertext`, `verified_at`, `created_at`, `revoked_at` | зарезервированный extension boundary; в текущем proposal не создаётся. Позже `email`, `phone`, `password` или external identity добавляется как отдельная verified identity к тому же `user_id`, а не как новая user/device/session model. |
-| `Device` | `id`, `user_id`, `name`, `platform`, `app_version`, `created_at`, `last_seen_at`, `revoked_at` | принадлежит ровно одному active user. Удаление account revokes every device. Name is untrusted bounded display data. |
+| `Device` | `id`, `user_id`, `device_display_name`, `device_type`, `app_version`, `created_at`, `last_seen_at`, `revoked_at` | принадлежит ровно одному active user. Удаление account revokes every device. Display name is untrusted bounded user-visible data. |
 | `Session` | `id`, `user_id`, `device_id`, `access_token_hash`, `access_expires_at`, `refresh_family_id`, `revoked_at`, `last_seen_at`, `created_at` | отдельная desktop/native session; bearer access привязан к ней. Revoking device revokes its sessions. |
 | `RefreshToken` | `id`, `session_id`, `family_id`, `token_hash`, `issued_at`, `expires_at`, `used_at`, `replaced_by_id`, `revoked_at` | append-only rotation chain. Plaintext появляется только в successful desktop completion/refresh response и не persistent. |
-| `PairingRequest` | `id`, `desktop_token_hash`, `approval_secret_hash`, `short_code_hash`, `device_metadata`, `expires_at`, `approved_by_user_id`, `approved_at`, `consumed_at`, `revoked_at` | создаётся desktop до account. Один request можно approve ровно один раз и consume ровно один раз; после expiry/revoke никакая сторона не получает session. |
+| `PairingRequest` | `id`, `desktop_token_hash`, `approval_secret_hash`, `short_code_hash`, `device_display_name`, `device_type`, `expires_at`, `approved_by_user_id`, `approved_at`, `consumed_at`, `revoked_at` | создаётся desktop до account. Browser preview возвращает только display/type, short code, phrase, expiry и `pending`; имя account добавляется только для текущей authenticated browser session. Один request можно approve ровно один раз и consume ровно один раз; после expiry/revoke никакая сторона не получает session. |
 | `BrowserSession` | `id`, `user_id`, `passkey_reauthenticated_at`, `expires_at`, `revoked_at` | только first-party mobile browser, `Secure`, `HttpOnly`, `SameSite` cookie; не заменяет desktop bearer API. |
 
 Response schemas intentionally omit all hashes, credential public-key material, IP address,
@@ -93,7 +93,8 @@ approved sign-count policy considers unsafe.
   without a desktop request. The identical ceremony can run after a QR/code continuation; it still
   does **not** reveal a desktop token to the browser.
 - An existing passkey signs the user into a short-lived first-party browser session. The browser
-  sees a device name/platform and explicitly approves or cancels pairing.
+  sees `account_display_name`, `device_display_name`, `device_type`, phrase and expiry, then
+  explicitly approves or cancels pairing. Approval never creates a `User`.
 - The desktop authenticates its `complete` request with its high-entropy desktop token, not the QR
   secret or short code. After approval it receives a distinct opaque access token (maximum 10 min)
   and a distinct opaque refresh token (maximum 30 days).

@@ -1,5 +1,5 @@
 /** Shared, credentialed first-party API client. It never persists tokens. */
-export type PairingPreview = { request_id: string; device_name: string; platform: string; app_version?: string; verification_phrase: string };
+export type PairingPreview = { request_id: string; device_display_name: string; device_type: string; app_version?: string; verification_phrase: string; short_code: string; expires_at: string; status: "pending"; account_display_name?: string };
 export type ApiError = { code: string; message: string; request_id: string; details: Record<string, unknown> };
 export type RegistrationOptions = { challenge_id: string; options: Omit<PublicKeyCredentialCreationOptions, "challenge" | "user"> & { challenge: string; user: Omit<PublicKeyCredentialUserEntity, "id"> & { id: string }; } };
 export type AuthenticationOptions = { challenge_id: string; options: Omit<PublicKeyCredentialRequestOptions, "challenge" | "allowCredentials"> & { challenge: string; allowCredentials?: Array<PublicKeyCredentialDescriptor & { id: string }>; } };
@@ -12,7 +12,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const api = {
   registrationOptions() { return request<RegistrationOptions>("/v1/auth/passkeys/registration/options", { method: "POST", body: "{}" }); },
-  registrationVerify(payload: unknown) { return request<{ user_id: string; csrf_token: string }>("/v1/auth/passkeys/registration/verify", { method: "POST", body: JSON.stringify(payload) }); },
+  registrationVerify(payload: unknown) { return request<{ account_display_name: string; csrf_token: string }>("/v1/auth/passkeys/registration/verify", { method: "POST", body: JSON.stringify(payload) }); },
   authenticationOptions() { return request<AuthenticationOptions>("/v1/auth/passkeys/authentication/options", { method: "POST", body: "{}" }); },
   authenticationVerify(payload: unknown) { return request<{ csrf_token: string }>("/v1/auth/passkeys/authentication/verify", { method: "POST", body: JSON.stringify(payload) }); },
   pairing(code: string) { return request<PairingPreview>(`/v1/pairing-requests/lookup?code=${encodeURIComponent(code)}`); },

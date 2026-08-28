@@ -17,7 +17,16 @@ paths:
   /v1/auth/passkeys/registration/options:
     post:
       operationId: startPasskeyRegistration
-      summary: Start a first-party passkey registration
+      summary: Explicitly start first-party account creation and passkey registration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                account_display_name: { type: string, minLength: 1, maxLength: 128, default: Rock account }
       responses:
         "200": { description: WebAuthn creation options and server challenge identifier. }
         "403": { description: Direct or wrong-origin requests are rejected. }
@@ -171,13 +180,17 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [device_name, platform]
+              required: [device_display_name, device_type]
               properties:
-                device_name: { type: string, minLength: 1, maxLength: 128 }
-                platform: { type: string, minLength: 1, maxLength: 64 }
+                device_display_name: { type: string, minLength: 1, maxLength: 128 }
+                device_type: { type: string, minLength: 1, maxLength: 64 }
                 app_version: { type: string, maxLength: 64 }
       responses:
-        "201": { description: Desktop-only proof, browser approval proof and short code were created. }
+        "201":
+          description: Desktop-only proof, browser approval proof and safe pairing context were created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreatedPairingRequest" }
         "422": { description: Device metadata is invalid. }
         "503": { description: Account persistence is unavailable. }
   /v1/pairing-requests/lookup:
@@ -190,7 +203,11 @@ paths:
           required: true
           schema: { type: string, minLength: 8, maxLength: 8, pattern: "^[A-Fa-f0-9]{8}$" }
       responses:
-        "200": { description: A pending pairing request was found. }
+        "200":
+          description: A pending pairing request was found without native proofs or credential material.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PairingPreview" }
         "404": { description: The code is unknown, expired, used or revoked. }
         "503": { description: Account persistence is unavailable. }
   /v1/pairing-requests/{request_id}/approve:
@@ -245,7 +262,11 @@ paths:
               properties:
                 desktop_token: { type: string, minLength: 16, maxLength: 128 }
       responses:
-        "200": { description: Native access and refresh credentials were issued once. }
+        "200":
+          description: Native credentials and user-visible account/device context were issued once.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PairingCompletion" }
         "401": { description: Proof is invalid, expired or consumed. The owner is derived server-side. }
         "503": { description: Account persistence is unavailable. }
   /admin:
@@ -755,20 +776,28 @@ components:
     AccountProfile:
       type: object
       additionalProperties: false
-      required: [user_id, session_id, device_id]
+      required: [user_id, session_id, device_id, account_display_name, created_at, device_display_name, device_type, device_created_at]
       properties:
         user_id: { type: string, format: uuid }
         session_id: { type: string, format: uuid }
         device_id: { type: string, format: uuid }
+        account_display_name: { type: string, minLength: 1, maxLength: 128 }
+        created_at: { type: string, format: date-time }
+        device_display_name: { type: string, minLength: 1, maxLength: 128 }
+        device_type: { type: string, minLength: 1, maxLength: 64 }
+        device_created_at: { type: string, format: date-time }
+        last_seen_at: { type: [string, "null"], format: date-time }
     Device:
       type: object
       additionalProperties: false
-      required: [device_id, user_id, name, platform]
+      required: [device_id, user_id, device_display_name, device_type, created_at]
       properties:
         device_id: { type: string, format: uuid }
         user_id: { type: string, format: uuid }
-        name: { type: string }
-        platform: { type: string }
+        device_display_name: { type: string, minLength: 1, maxLength: 128 }
+        device_type: { type: string, minLength: 1, maxLength: 64 }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: [string, "null"], format: date-time }
     DeviceList:
       type: object
       additionalProperties: false
@@ -777,6 +806,47 @@ components:
         devices:
           type: array
           items: { $ref: "#/components/schemas/Device" }
+    CreatedPairingRequest:
+      type: object
+      additionalProperties: false
+      required: [pairing_request_id, desktop_token, approval_secret, short_code, verification_phrase, device_display_name, device_type, expires_at, status]
+      properties:
+        pairing_request_id: { type: string, format: uuid }
+        desktop_token: { type: string, minLength: 16, maxLength: 128, writeOnly: true }
+        approval_secret: { type: string, minLength: 16, maxLength: 128, writeOnly: true }
+        short_code: { type: string, minLength: 8, maxLength: 8 }
+        verification_phrase: { type: string, minLength: 1, maxLength: 64 }
+        device_display_name: { type: string, minLength: 1, maxLength: 128 }
+        device_type: { type: string, minLength: 1, maxLength: 64 }
+        expires_at: { type: string, format: date-time }
+        status: { type: string, enum: [pending] }
+    PairingPreview:
+      type: object
+      additionalProperties: false
+      required: [request_id, device_display_name, device_type, verification_phrase, short_code, expires_at, status]
+      properties:
+        request_id: { type: string, format: uuid, description: Internal route handle; clients must not render it. }
+        device_display_name: { type: string, minLength: 1, maxLength: 128 }
+        device_type: { type: string, minLength: 1, maxLength: 64 }
+        app_version: { type: string, maxLength: 64 }
+        verification_phrase: { type: string, minLength: 1, maxLength: 64 }
+        short_code: { type: string, minLength: 8, maxLength: 8 }
+        expires_at: { type: string, format: date-time }
+        status: { type: string, enum: [pending] }
+        account_display_name: { type: string, minLength: 1, maxLength: 128, description: Present only for the authenticated browser session. }
+    PairingCompletion:
+      type: object
+      additionalProperties: false
+      required: [user_id, device_id, session_id, access_token, refresh_token, account_display_name, device_display_name, device_type]
+      properties:
+        user_id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid }
+        session_id: { type: string, format: uuid }
+        access_token: { type: string, writeOnly: true }
+        refresh_token: { type: string, writeOnly: true }
+        account_display_name: { type: string, minLength: 1, maxLength: 128 }
+        device_display_name: { type: string, minLength: 1, maxLength: 128 }
+        device_type: { type: string, minLength: 1, maxLength: 64 }
     HealthResponse:
       type: object
       additionalProperties: false

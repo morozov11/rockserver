@@ -369,11 +369,16 @@ const PAIRING_CREATE_LIMIT: i64 = 10;
 const PAIRING_RATE_LIMIT_MINUTES: i32 = 15;
 const FIRST_PARTY_ORIGIN: &str = "https://alex.vault57.ru";
 
+/// Supplies the migration-safe label for account records created before naming is configurable.
+fn default_account_display_name() -> String {
+    "Rock account".to_owned()
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreatePairingRequestDto {
-    device_name: String,
-    platform: String,
+    device_display_name: String,
+    device_type: String,
     #[serde(default)]
     app_version: Option<String>,
 }
@@ -385,6 +390,10 @@ struct CreatedPairingRequestDto {
     approval_secret: String,
     short_code: String,
     verification_phrase: String,
+    device_display_name: String,
+    device_type: String,
+    expires_at: String,
+    status: &'static str,
 }
 
 #[derive(Deserialize)]
@@ -396,11 +405,16 @@ struct PairingLookupDto {
 #[derive(Serialize)]
 struct PairingPreviewDto {
     request_id: String,
-    device_name: String,
-    platform: String,
+    device_display_name: String,
+    device_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     app_version: Option<String>,
     verification_phrase: String,
+    short_code: String,
+    expires_at: String,
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    account_display_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -423,6 +437,9 @@ struct PairingCompletionResponseDto {
     session_id: String,
     access_token: String,
     refresh_token: String,
+    account_display_name: String,
+    device_display_name: String,
+    device_type: String,
 }
 
 #[derive(Deserialize)]
@@ -442,14 +459,24 @@ struct AccountProfileDto {
     user_id: String,
     session_id: String,
     device_id: String,
+    account_display_name: String,
+    created_at: String,
+    device_display_name: String,
+    device_type: String,
+    device_created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_seen_at: Option<String>,
 }
 
 #[derive(Serialize)]
 struct DeviceDto {
     device_id: String,
     user_id: String,
-    name: String,
-    platform: String,
+    device_display_name: String,
+    device_type: String,
+    created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_seen_at: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -463,6 +490,13 @@ struct RegistrationVerifyDto {
     challenge_id: Uuid,
     #[serde(flatten)]
     response: RegistrationResponse,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RegistrationOptionsRequestDto {
+    #[serde(default = "default_account_display_name")]
+    account_display_name: String,
 }
 
 #[derive(Serialize)]
@@ -486,8 +520,27 @@ struct AuthenticationVerifyDto {
 }
 
 /// Starts a first-party passkey registration and persists its opaque verifier state.
-async fn registration_options(State(state): State<AppState>, headers: HeaderMap) -> Response {
+async fn registration_options(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
     let request_id = request_id(&headers);
+    let payload: RegistrationOptionsRequestDto =
+        match parse_json_request(&headers, body, &request_id).await {
+            Ok(payload) => payload,
+            Err(response) => return response,
+        };
+    let account_display_name = payload.account_display_name.trim();
+    if account_display_name.is_empty() || account_display_name.len() > 128 {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_failed",
+            "Request validation failed.",
+            &request_id,
+            json!({"field":"account_display_name"}),
+        );
+    }
     if !is_trusted_browser_request(&headers)
         || !trusted_proxy_header_matches(&headers, state.trusted_proxy_token.as_deref())
     {
@@ -509,7 +562,11 @@ async fn registration_options(State(state): State<AppState>, headers: HeaderMap)
         );
     };
     let user_id = Uuid::new_v4();
-    if store.create_user(user_id).await.is_err() {
+    if store
+        .create_user_with_display_name(user_id, account_display_name)
+        .await
+        .is_err()
+    {
         return error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "auth_unavailable",
@@ -518,7 +575,7 @@ async fn registration_options(State(state): State<AppState>, headers: HeaderMap)
             json!({}),
         );
     }
-    let (options, state_blob) = webauthn::start_registration(user_id);
+    let (options, state_blob) = webauthn::start_registration(user_id, account_display_name);
     let encoded = match webauthn::encode_state(&state_blob) {
         Ok(value) => value,
         Err(_) => {
@@ -696,8 +753,30 @@ async fn registration_verify(
             json!({}),
         );
     }
+    let account_display_name = match store.account_display_name(registered_user_id).await {
+        Ok(Some(name)) => name,
+        Ok(None) => {
+            return error_response(
+                StatusCode::UNAUTHORIZED,
+                "credential_rejected",
+                "The passkey response was rejected.",
+                &request_id,
+                json!({}),
+            );
+        }
+        Err(_) => {
+            return error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "auth_unavailable",
+                "Authentication service is temporarily unavailable.",
+                &request_id,
+                json!({}),
+            );
+        }
+    };
     let mut response = with_request_id(
-        Json(json!({"user_id": registered_user_id, "csrf_token": csrf_token})).into_response(),
+        Json(json!({"account_display_name": account_display_name, "csrf_token": csrf_token}))
+            .into_response(),
         &request_id,
     );
     response.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&format!("rockserver_browser={session_token}; Path=/; Max-Age=1800; HttpOnly; Secure; SameSite=Strict")).expect("generated cookie is valid"));
@@ -964,10 +1043,10 @@ async fn create_pairing_request(
             Ok(payload) => payload,
             Err(response) => return response,
         };
-    if payload.device_name.trim().is_empty()
-        || payload.device_name.len() > 128
-        || payload.platform.trim().is_empty()
-        || payload.platform.len() > 64
+    if payload.device_display_name.trim().is_empty()
+        || payload.device_display_name.len() > 128
+        || payload.device_type.trim().is_empty()
+        || payload.device_type.len() > 64
         || payload
             .app_version
             .as_ref()
@@ -978,7 +1057,7 @@ async fn create_pairing_request(
             "validation_failed",
             "Request validation failed.",
             &request_id,
-            json!({"field":"device_name or platform"}),
+            json!({"field":"device_display_name or device_type"}),
         );
     }
     let Some(store) = state.account_store.as_ref() else {
@@ -1033,8 +1112,8 @@ async fn create_pairing_request(
         approval_secret_hash: &approval_secret_hash,
         short_code_hash: &short_code_hash,
         verification_phrase: &verification_phrase,
-        device_name: payload.device_name.trim(),
-        platform: payload.platform.trim(),
+        device_display_name: payload.device_display_name.trim(),
+        device_type: payload.device_type.trim(),
         app_version: payload.app_version.as_deref(),
         expires_at_rfc3339: "unused: database clock",
     };
@@ -1042,7 +1121,7 @@ async fn create_pairing_request(
         .create_pairing_request_for_minutes(request, PAIRING_LIFETIME_MINUTES)
         .await
     {
-        Ok(true) => {
+        Ok(Some(expires_at)) => {
             let mut response = with_request_id(
                 (
                     StatusCode::CREATED,
@@ -1052,6 +1131,10 @@ async fn create_pairing_request(
                         approval_secret,
                         short_code,
                         verification_phrase,
+                        device_display_name: payload.device_display_name.trim().to_owned(),
+                        device_type: payload.device_type.trim().to_owned(),
+                        expires_at,
+                        status: "pending",
                     }),
                 )
                     .into_response(),
@@ -1062,7 +1145,7 @@ async fn create_pairing_request(
                 .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             response
         }
-        Ok(false) | Err(_) => error_response(
+        Ok(None) | Err(_) => error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "pairing_unavailable",
             "Pairing service is temporarily unavailable.",
@@ -1097,6 +1180,14 @@ async fn lookup_pairing_request(
             json!({}),
         );
     };
+    let account_display_name = match cookie_value(&headers, "rockserver_browser") {
+        Some(cookie) => store
+            .browser_account_display_name(&token_hash(cookie))
+            .await
+            .ok()
+            .flatten(),
+        None => None,
+    };
     match store
         .lookup_pairing_request(&token_hash(&query.code.to_ascii_uppercase()))
         .await
@@ -1104,10 +1195,14 @@ async fn lookup_pairing_request(
         Ok(Some(preview)) => with_request_id(
             Json(PairingPreviewDto {
                 request_id: preview.request_id.to_string(),
-                device_name: preview.device_name,
-                platform: preview.platform,
+                device_display_name: preview.device_display_name,
+                device_type: preview.device_type,
                 app_version: preview.app_version,
                 verification_phrase: preview.verification_phrase,
+                short_code: query.code.to_ascii_uppercase(),
+                expires_at: preview.expires_at,
+                status: "pending",
+                account_display_name,
             })
             .into_response(),
             &request_id,
@@ -1263,6 +1358,9 @@ async fn complete_pairing_request(
                     session_id: result.session_id.to_string(),
                     access_token,
                     refresh_token,
+                    account_display_name: result.account_display_name,
+                    device_display_name: result.device_display_name,
+                    device_type: result.device_type,
                 })
                 .into_response(),
                 &request_id,
@@ -1396,11 +1494,42 @@ async fn account_profile(State(state): State<AppState>, headers: HeaderMap) -> R
     let Some(session) = match_native_session(&state, &headers, &request_id).await else {
         return unauthorized_response(&request_id);
     };
+    let Some(store) = state.account_store.as_ref() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        );
+    };
+    let projection = match store
+        .account_projection(session.user_id, session.device_id)
+        .await
+    {
+        Ok(Some(projection)) => projection,
+        Ok(None) => return unauthorized_response(&request_id),
+        Err(_) => {
+            return error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "auth_unavailable",
+                "Account service is unavailable.",
+                &request_id,
+                json!({}),
+            );
+        }
+    };
     with_request_id(
         Json(AccountProfileDto {
             user_id: session.user_id.to_string(),
             session_id: session.session_id.to_string(),
             device_id: session.device_id.to_string(),
+            account_display_name: projection.account_display_name,
+            created_at: projection.created_at,
+            device_display_name: projection.device_display_name,
+            device_type: projection.device_type,
+            device_created_at: projection.device_created_at,
+            last_seen_at: projection.last_seen_at,
         })
         .into_response(),
         &request_id,
@@ -1509,8 +1638,10 @@ async fn list_devices(State(state): State<AppState>, headers: HeaderMap) -> Resp
                     .map(|device| DeviceDto {
                         device_id: device.id.to_string(),
                         user_id: device.user_id.to_string(),
-                        name: device.name,
-                        platform: device.platform,
+                        device_display_name: device.device_display_name,
+                        device_type: device.device_type,
+                        created_at: device.created_at,
+                        last_seen_at: device.last_seen_at,
                     })
                     .collect(),
             })
@@ -3115,7 +3246,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::{
-        FIRST_PARTY_ORIGIN, HealthResponse, HealthStatus, TEST_API_BEARER_TOKEN,
+        FIRST_PARTY_ORIGIN, HealthResponse, HealthStatus, PairingPreviewDto, TEST_API_BEARER_TOKEN,
         is_trusted_browser_request, request_rate_limit_scope, router, trusted_proxy_header_matches,
     };
 
@@ -3157,7 +3288,7 @@ mod tests {
                 Request::post("/v1/pairing-requests")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
-                        r#"{"device_name":"Test desktop","platform":"windows"}"#,
+                        r#"{"device_display_name":"Test desktop","device_type":"windows"}"#,
                     ))
                     .unwrap(),
             )
@@ -3204,6 +3335,27 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn pairing_preview_serializes_only_browser_safe_context() {
+        let value = serde_json::to_value(PairingPreviewDto {
+            request_id: "00000000-0000-0000-0000-000000000000".into(),
+            device_display_name: "RockCast — This PC".into(),
+            device_type: "rockcast_windows".into(),
+            app_version: None,
+            verification_phrase: "AMBER-FJORD".into(),
+            short_code: "A1B2C3D4".into(),
+            expires_at: "2030-01-01T00:00:00Z".into(),
+            status: "pending",
+            account_display_name: Some("Alex's Rock account".into()),
+        })
+        .unwrap();
+        assert_eq!(value["status"], "pending");
+        assert!(value.get("desktop_token").is_none());
+        assert!(value.get("approval_secret").is_none());
+        assert!(value.get("credential_id").is_none());
+        assert!(value.get("refresh_token").is_none());
     }
 
     #[test]

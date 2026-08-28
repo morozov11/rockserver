@@ -49,7 +49,7 @@ export function App() {
     <section><h2>Passkey</h2><p>Passkey хранится в вашем менеджере ключей и не попадает в localStorage или bundle.</p><button onClick={register} disabled={busy}>{busy ? "Проверяем…" : "Создать passkey"}</button><button className="secondary" onClick={authenticate} disabled={busy}>Войти с passkey</button></section>
     <section><h2>Подключить RockCast</h2><p>Отсканируйте QR-код на компьютере или введите короткий код.</p><label>Код <input value={code} maxLength={16} onInput={event => setCode(event.currentTarget.value)} /></label><button onClick={lookup}>Проверить устройство</button>
       {message && <p role="alert">{message}</p>}
-      {preview && <article><strong>{preview.device_name}</strong><br />{preview.platform}{preview.app_version ? ` · ${preview.app_version}` : ""}<p>Сверьте фразу на компьютере: <b>{preview.verification_phrase}</b></p><button onClick={approve} disabled={busy}>Подтвердить устройство</button></article>}
+      {preview && <article><strong>{preview.device_display_name}</strong><br />{preview.device_type}{preview.app_version ? ` · ${preview.app_version}` : ""}<p>Сверьте фразу на компьютере: <b>{preview.verification_phrase}</b></p><button onClick={approve} disabled={busy}>Подтвердить устройство</button></article>}
       {approvalSecret && <button className="secondary" onClick={async () => setQr(await QRCode.toDataURL(`${location.origin}/?code=${encodeURIComponent(code)}&secret=${encodeURIComponent(approvalSecret)}`))}>Показать QR-код</button>}
       {qr && <img className="qr" src={qr} alt="QR-код подключения" />}
     </section><footer>Администрирование использует этот же интерфейс и общие API-типы; отдельного frontend-приложения нет.</footer></main>;

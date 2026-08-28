@@ -1,5 +1,23 @@
 # Task log
 
+## RM-011-G1 — 2026-08-28 — account and pairing contract
+
+- Goal: make the server contract express one user account with many understandable devices, without
+  weakening the deployed username-less passkey or native-token boundaries.
+- Scope: migration `0016`, account/device/pairing persistence and DTOs, runtime OpenAPI, safe browser
+  preview, explicit registration naming, contract/security tests, and current-state documentation.
+  No G2 browser UX or native-client workflow was implemented.
+- Result: existing account rows receive `Rock account`; legacy device and pairing values are preserved
+  through column renames. Browser pairing preview has display/type, short code, phrase, expiry and
+  `pending` status, with account display name only for the current browser session. It serializes no
+  native proof, credential ID, access token, or refresh token. Approval does not create users;
+  strict input DTOs still reject client-supplied owner identifiers.
+- Checks: local Rust format, strict Clippy, and 98 tests passed; disposable PostgreSQL tests remain
+  ignored without `TEST_DATABASE_URL`. Web typecheck, lint, and production build passed with the
+  bundled runtime. The normal staging deploy was attempted and refused its clean-worktree gate;
+  no bypass is permitted because the requested changes must remain uncommitted.
+- Status: **implemented locally; deployment blocked by the immutable clean-worktree safety gate.**
+
 ## RM-011-F P0 blocker fix — 2026-08-27 — username-less discoverable passkey login (deployed)
 
 - Goal: remove the unusable UUID prerequisite from existing-account browser login while keeping

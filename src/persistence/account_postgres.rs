@@ -5,8 +5,8 @@ use sqlx::{PgPool, postgres::PgPoolOptions};
 use uuid::Uuid;
 
 use crate::auth::{
-    ActiveSession, NewBrowserSession, NewPairingRequest, NewPairingSession, NewSession,
-    NewWebAuthnChallenge, OwnedDevice, PairingCompletion, PairingPreview, RefreshError,
+    AccountProjection, ActiveSession, NewBrowserSession, NewPairingRequest, NewPairingSession,
+    NewSession, NewWebAuthnChallenge, OwnedDevice, PairingCompletion, PairingPreview, RefreshError,
     RefreshRotation, SecretHash, WebAuthnCeremony, is_safe_audit_event,
 };
 
@@ -51,16 +51,30 @@ impl PostgresAccountStore {
         Ok(())
     }
 
+    /// Creates an account with the explicit user-facing label used for its passkey and browser flow.
+    pub async fn create_user_with_display_name(
+        &self,
+        user_id: Uuid,
+        account_display_name: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("INSERT INTO users (id, account_display_name) VALUES ($1, $2)")
+            .bind(user_id)
+            .bind(account_display_name)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Creates a device only when its owner is still active.
     pub async fn create_device(&self, device: &OwnedDevice) -> Result<bool, sqlx::Error> {
         let inserted = sqlx::query(
-            "INSERT INTO devices (id, user_id, name, platform) \
+            "INSERT INTO devices (id, user_id, device_display_name, device_type) \
              SELECT $1, id, $3, $4 FROM users WHERE id = $2 AND status = 'active'",
         )
         .bind(device.id)
         .bind(device.user_id)
-        .bind(&device.name)
-        .bind(&device.platform)
+        .bind(&device.device_display_name)
+        .bind(&device.device_type)
         .execute(&self.pool)
         .await?;
         Ok(inserted.rows_affected() == 1)
@@ -73,7 +87,7 @@ impl PostgresAccountStore {
         device_id: Uuid,
     ) -> Result<Option<OwnedDevice>, sqlx::Error> {
         sqlx::query_as::<_, DeviceRow>(
-            "SELECT d.id, d.user_id, d.name, d.platform FROM devices d \
+            "SELECT d.id, d.user_id, d.device_display_name, d.device_type, to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, to_char(d.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS last_seen_at FROM devices d \
              JOIN users u ON u.id = d.user_id \
              WHERE d.id = $1 AND d.user_id = $2 AND d.revoked_at IS NULL AND u.status = 'active'",
         )
@@ -101,10 +115,53 @@ impl PostgresAccountStore {
         .map(|row| row.map(Into::into))
     }
 
+    /// Returns the account and current-device labels only for an already authenticated native owner.
+    pub async fn account_projection(
+        &self,
+        user_id: Uuid,
+        device_id: Uuid,
+    ) -> Result<Option<AccountProjection>, sqlx::Error> {
+        sqlx::query_as::<_, AccountProjectionRow>(
+            "SELECT u.account_display_name, to_char(u.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, d.device_display_name, d.device_type, \
+             to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS device_created_at, to_char(d.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS last_seen_at \
+             FROM users u JOIN devices d ON d.user_id = u.id \
+             WHERE u.id = $1 AND d.id = $2 AND u.status = 'active' AND d.revoked_at IS NULL",
+        )
+        .bind(user_id)
+        .bind(device_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map(|row| row.map(Into::into))
+    }
+
+    /// Resolves a browser account label from an unexpired opaque cookie hash without exposing its owner ID.
+    pub async fn browser_account_display_name(
+        &self,
+        session_token_hash: &SecretHash,
+    ) -> Result<Option<String>, sqlx::Error> {
+        sqlx::query_scalar(
+            "SELECT u.account_display_name FROM browser_sessions b JOIN users u ON u.id = b.user_id \
+             WHERE b.session_token_hash = $1 AND b.revoked_at IS NULL AND b.expires_at > now() AND u.status = 'active'",
+        )
+        .bind(session_token_hash.as_bytes())
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    /// Returns an active account's display name for a server-derived owner ID.
+    pub async fn account_display_name(&self, user_id: Uuid) -> Result<Option<String>, sqlx::Error> {
+        sqlx::query_scalar(
+            "SELECT account_display_name FROM users WHERE id = $1 AND status = 'active'",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     /// Lists only active devices owned by the requested account.
     pub async fn list_owned_devices(&self, user_id: Uuid) -> Result<Vec<OwnedDevice>, sqlx::Error> {
         sqlx::query_as::<_, DeviceRow>(
-            "SELECT d.id, d.user_id, d.name, d.platform FROM devices d \
+            "SELECT d.id, d.user_id, d.device_display_name, d.device_type, to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, to_char(d.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS last_seen_at FROM devices d \
              JOIN users u ON u.id = d.user_id WHERE d.user_id = $1 AND d.revoked_at IS NULL \
              AND u.status = 'active' ORDER BY d.created_at, d.id",
         )
@@ -465,7 +522,7 @@ impl PostgresAccountStore {
         request: NewPairingRequest<'_>,
     ) -> Result<bool, sqlx::Error> {
         let inserted = sqlx::query(
-            "INSERT INTO pairing_requests (id, desktop_token_hash, approval_secret_hash, short_code_hash, verification_phrase, device_name, platform, app_version, expires_at) \
+            "INSERT INTO pairing_requests (id, desktop_token_hash, approval_secret_hash, short_code_hash, verification_phrase, device_display_name, device_type, app_version, expires_at) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz)",
         )
         .bind(request.request_id)
@@ -473,8 +530,8 @@ impl PostgresAccountStore {
         .bind(request.approval_secret_hash.as_bytes())
         .bind(request.short_code_hash.as_bytes())
         .bind(request.verification_phrase)
-        .bind(request.device_name)
-        .bind(request.platform)
+        .bind(request.device_display_name)
+        .bind(request.device_type)
         .bind(request.app_version)
         .bind(request.expires_at_rfc3339)
         .execute(&self.pool)
@@ -487,23 +544,22 @@ impl PostgresAccountStore {
         &self,
         request: NewPairingRequest<'_>,
         lifetime_minutes: i32,
-    ) -> Result<bool, sqlx::Error> {
-        let inserted = sqlx::query(
-            "INSERT INTO pairing_requests (id, desktop_token_hash, approval_secret_hash, short_code_hash, verification_phrase, device_name, platform, app_version, expires_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now() + ($9 * interval '1 minute'))",
+    ) -> Result<Option<String>, sqlx::Error> {
+        sqlx::query_scalar(
+            "INSERT INTO pairing_requests (id, desktop_token_hash, approval_secret_hash, short_code_hash, verification_phrase, device_display_name, device_type, app_version, expires_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now() + ($9 * interval '1 minute')) RETURNING to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
         )
         .bind(request.request_id)
         .bind(request.desktop_token_hash.as_bytes())
         .bind(request.approval_secret_hash.as_bytes())
         .bind(request.short_code_hash.as_bytes())
         .bind(request.verification_phrase)
-        .bind(request.device_name)
-        .bind(request.platform)
+        .bind(request.device_display_name)
+        .bind(request.device_type)
         .bind(request.app_version)
         .bind(lifetime_minutes)
-        .execute(&self.pool)
-        .await?;
-        Ok(inserted.rows_affected() == 1)
+        .fetch_optional(&self.pool)
+        .await
     }
 
     /// Looks up an unexpired request by short-code hash without returning any secret proof.
@@ -512,7 +568,7 @@ impl PostgresAccountStore {
         short_code_hash: &SecretHash,
     ) -> Result<Option<PairingPreview>, sqlx::Error> {
         sqlx::query_as::<_, PairingPreviewRow>(
-            "SELECT id, device_name, platform, app_version, verification_phrase FROM pairing_requests \
+            "SELECT id, device_display_name, device_type, app_version, verification_phrase, to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS expires_at FROM pairing_requests \
              WHERE short_code_hash = $1 AND approved_at IS NULL AND consumed_at IS NULL \
              AND revoked_at IS NULL AND expires_at > now()",
         )
@@ -584,7 +640,7 @@ impl PostgresAccountStore {
     ) -> Result<Option<PairingCompletion>, sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
         let request = sqlx::query_as::<_, PairingRow>(
-            "SELECT approved_by_user_id, device_name, platform, app_version FROM pairing_requests \
+            "SELECT approved_by_user_id, device_display_name, device_type, app_version FROM pairing_requests \
              WHERE id = $1 AND desktop_token_hash = $2 AND approved_at IS NOT NULL AND consumed_at IS NULL \
              AND revoked_at IS NULL AND expires_at > now() FOR UPDATE",
         )
@@ -601,18 +657,24 @@ impl PostgresAccountStore {
             return Ok(None);
         };
         // Serialize completions for one account so concurrent requests cannot bypass the device cap.
-        sqlx::query("SELECT id FROM users WHERE id = $1 AND status = 'active' FOR UPDATE")
-            .bind(user_id)
-            .execute(&mut *transaction)
-            .await?;
+        let account_display_name = sqlx::query_scalar::<_, String>(
+            "SELECT account_display_name FROM users WHERE id = $1 AND status = 'active' FOR UPDATE",
+        )
+        .bind(user_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some(account_display_name) = account_display_name else {
+            transaction.rollback().await?;
+            return Ok(None);
+        };
         let inserted = sqlx::query(
-            "INSERT INTO devices (id, user_id, name, platform, app_version) \
+            "INSERT INTO devices (id, user_id, device_display_name, device_type, app_version) \
              SELECT $1, $2, $3, $4, $5 WHERE (SELECT COUNT(*) FROM devices WHERE user_id = $2 AND revoked_at IS NULL) < 10",
         )
         .bind(session.device_id)
         .bind(user_id)
-        .bind(request.device_name)
-        .bind(request.platform)
+        .bind(&request.device_display_name)
+        .bind(&request.device_type)
         .bind(request.app_version)
         .execute(&mut *transaction)
         .await?;
@@ -651,6 +713,9 @@ impl PostgresAccountStore {
             user_id,
             device_id: session.device_id,
             session_id: session.session_id,
+            account_display_name,
+            device_display_name: request.device_display_name,
+            device_type: request.device_type,
         }))
     }
 
@@ -855,8 +920,20 @@ impl PostgresAccountStore {
 struct DeviceRow {
     id: Uuid,
     user_id: Uuid,
-    name: String,
-    platform: String,
+    device_display_name: String,
+    device_type: String,
+    created_at: String,
+    last_seen_at: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct AccountProjectionRow {
+    account_display_name: String,
+    created_at: String,
+    device_display_name: String,
+    device_type: String,
+    device_created_at: String,
+    last_seen_at: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -888,8 +965,22 @@ impl From<DeviceRow> for OwnedDevice {
         Self {
             id: row.id,
             user_id: row.user_id,
-            name: row.name,
-            platform: row.platform,
+            device_display_name: row.device_display_name,
+            device_type: row.device_type,
+            created_at: row.created_at,
+            last_seen_at: row.last_seen_at,
+        }
+    }
+}
+impl From<AccountProjectionRow> for AccountProjection {
+    fn from(row: AccountProjectionRow) -> Self {
+        Self {
+            account_display_name: row.account_display_name,
+            created_at: row.created_at,
+            device_display_name: row.device_display_name,
+            device_type: row.device_type,
+            device_created_at: row.device_created_at,
+            last_seen_at: row.last_seen_at,
         }
     }
 }
@@ -904,28 +995,30 @@ struct RefreshRow {
 #[derive(sqlx::FromRow)]
 struct PairingRow {
     approved_by_user_id: Option<Uuid>,
-    device_name: String,
-    platform: String,
+    device_display_name: String,
+    device_type: String,
     app_version: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
 struct PairingPreviewRow {
     id: Uuid,
-    device_name: String,
-    platform: String,
+    device_display_name: String,
+    device_type: String,
     app_version: Option<String>,
     verification_phrase: String,
+    expires_at: String,
 }
 
 impl From<PairingPreviewRow> for PairingPreview {
     fn from(row: PairingPreviewRow) -> Self {
         Self {
             request_id: row.id,
-            device_name: row.device_name,
-            platform: row.platform,
+            device_display_name: row.device_display_name,
+            device_type: row.device_type,
             app_version: row.app_version,
             verification_phrase: row.verification_phrase,
+            expires_at: row.expires_at,
         }
     }
 }

@@ -31,11 +31,14 @@ pub fn verifier() -> Webauthn {
 }
 
 /// Starts a registration ceremony and returns JSON-safe challenge/state values.
-pub fn start_registration(user_id: Uuid) -> (RegistrationChallenge, RegistrationState) {
+pub fn start_registration(
+    user_id: Uuid,
+    account_display_name: &str,
+) -> (RegistrationChallenge, RegistrationState) {
     verifier().start_registration(
         user_id.as_bytes(),
-        &user_id.to_string(),
-        "RockServer user",
+        account_display_name,
+        account_display_name,
         &[],
     )
 }

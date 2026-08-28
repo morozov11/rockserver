@@ -1,6 +1,28 @@
 # Project status
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
+
+## RM-011-G1 — account and pairing contract (implemented locally, staging deploy pending)
+
+Migration `0016` preserves existing users/devices while adding `account_display_name` with the
+safe default `Rock account` and renaming stored device metadata to `device_display_name` and
+`device_type`. The runtime profile/device DTOs now include the requested display, type,
+`created_at`, and nullable `last_seen_at` fields. Explicit passkey registration accepts an optional
+account display name and passes it into the passkey ceremony; discoverable login remains entirely
+username-less.
+
+Pairing lookup now exposes only the browser-safe pending context: device type/display name, short
+code, verification phrase, expiry, status, and (only for an active browser cookie) account display
+name. It does not serialize desktop proof, approval secret, credential ID, access token, or refresh
+token. Approval still binds an already existing authenticated account, while completion still accepts
+only the desktop proof and derives the owner transactionally. Existing CSRF/cookie, RP/origin,
+trusted-proxy, rate-limit, 90-day audit, and 10-device constraints remain unchanged.
+
+Local checks passed: `cargo fmt --check`, strict all-target/all-feature Clippy, `cargo test`
+(98 regular tests; four disposable PostgreSQL tests remain ignored without `TEST_DATABASE_URL`),
+and web typecheck/lint/production build. The normal staging deploy was attempted and safely refused:
+it requires a clean worktree so the image matches an immutable Git commit. The task explicitly
+requires no commit, so no bypass was attempted; no staging data or credentials have been touched by G1.
 
 ## RM-011-F P0 blocker fix — username-less discoverable passkey login (deployed, 2026-08-27)
 

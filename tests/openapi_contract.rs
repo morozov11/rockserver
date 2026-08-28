@@ -160,10 +160,43 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         "TokenPair",
         "AccountProfile",
         "DeviceList",
+        "CreatedPairingRequest",
+        "PairingPreview",
     ] {
         assert!(
             schemas.contains_key(Value::String(schema.to_owned())),
             "missing required schema {schema}"
+        );
+    }
+    let preview = schemas
+        .get(Value::String("PairingPreview".to_owned()))
+        .expect("pairing preview schema must exist");
+    let preview_properties = preview
+        .get("properties")
+        .and_then(Value::as_mapping)
+        .expect("pairing preview properties must be declared");
+    for field in [
+        "device_display_name",
+        "device_type",
+        "short_code",
+        "verification_phrase",
+        "expires_at",
+        "status",
+    ] {
+        assert!(
+            preview_properties.contains_key(Value::String(field.to_owned())),
+            "pairing preview must expose {field}"
+        );
+    }
+    for secret in [
+        "desktop_token",
+        "approval_secret",
+        "credential_id",
+        "refresh_token",
+    ] {
+        assert!(
+            !preview_properties.contains_key(Value::String(secret.to_owned())),
+            "pairing preview must not expose {secret}"
         );
     }
 }

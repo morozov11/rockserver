@@ -161,8 +161,8 @@ async fn postgres_b2_browser_pairing_webauthn_and_rate_limits() {
                 approval_secret_hash: &SecretHash::new([4; 32]),
                 short_code_hash: &SecretHash::new([5; 32]),
                 verification_phrase: "BLUE-MOON",
-                device_name: "Test desktop",
-                platform: "rockcast_windows",
+                device_display_name: "Test desktop",
+                device_type: "rockcast_windows",
                 app_version: Some("test"),
                 expires_at_rfc3339: "2035-01-01T00:00:00Z",
             })
@@ -229,8 +229,8 @@ async fn postgres_b2_browser_pairing_webauthn_and_rate_limits() {
                 approval_secret_hash: &SecretHash::new([13; 32]),
                 short_code_hash: &SecretHash::new([14; 32]),
                 verification_phrase: "SILVER-STAR",
-                device_name: "Expired desktop",
-                platform: "rockcast_windows",
+                device_display_name: "Expired desktop",
+                device_type: "rockcast_windows",
                 app_version: None,
                 expires_at_rfc3339: "2035-01-01T00:00:00Z",
             })
@@ -372,8 +372,10 @@ async fn postgres_account_session_rotation_deletion_and_ownership() {
     let device = OwnedDevice {
         id: Uuid::new_v4(),
         user_id: owner,
-        name: "Desktop".into(),
-        platform: "windows".into(),
+        device_display_name: "Desktop".into(),
+        device_type: "windows".into(),
+        created_at: "unused".into(),
+        last_seen_at: None,
     };
     assert!(
         store
