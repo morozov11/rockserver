@@ -1180,4 +1180,6 @@
   `cargo tree` dependency inspection, and `git diff --check` passed. `cargo audit` is not
   installed on this host; the exact Dependabot advisories were independently checked against the
   lockfile dependency path.
-- Status: **implemented and verified locally; awaiting commit, push, and deployment readiness.**
+- Status: **deployed and readiness-verified**. Commit
+  `266b9740ae2f0489952f46a15e80a18791d09a7e` reached `origin/master`; OPS-001-D reported
+  `status=succeeded` and readiness passed for the immutable server image.

@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-28
 
-## SECURITY-001 — Rust TLS dependency remediation (ready for deployment, 2026-08-28)
+## SECURITY-001 — Rust TLS dependency remediation (deployed, 2026-08-28)
 
 GitHub Dependabot reported one high and two low advisories for `rustls-webpki 0.101.7`,
 reachable through `yandex-cloud 2025.4.14 → tonic 0.9`. The published Yandex crate has no
@@ -18,8 +18,11 @@ contains no `rustls-webpki 0.101.7`, `tonic 0.9`, or `yandex-cloud`; the remaini
 `rustls-webpki` is `0.103.14` through the maintained `rustls 0.23` graph. Local `cargo fmt
 --check`, strict all-target/all-feature Clippy, locked compilation, full all-target/all-feature
 tests (102 passed; five disposable PostgreSQL, four billable Yandex LLM, one SpeechKit, and one
-ONNX test remain explicitly ignored) and `git diff --check` passed. Deployment is pending the
-commit and remote readiness gate.
+ONNX test remain explicitly ignored) and `git diff --check` passed. Commit
+`266b9740ae2f0489952f46a15e80a18791d09a7e` was pushed to `origin/master` and deployed through
+the OPS-001-D rollout. The remote worker reported `status=succeeded`; the immutable server image
+`sha256:a3a9fcad59fd6ef464261d29dd5409aa411f3ee7e9add5c65689078d8adddd5b` passed the public
+readiness gate.
 
 ## REFACTOR-001 — HTTP transport module extraction (deployed, 2026-08-28)
 
