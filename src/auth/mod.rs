@@ -115,6 +115,23 @@ pub struct OwnedDevice {
     pub last_seen_at: Option<String>,
 }
 
+/// Non-secret device projection for the first-party browser account centre.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BrowserDevice {
+    /// Opaque identifier used only by the browser's protected management calls.
+    pub id: Uuid,
+    /// Human-readable name selected for the device.
+    pub device_display_name: String,
+    /// Stable client family supplied during pairing.
+    pub device_type: String,
+    /// Time the device was connected.
+    pub created_at: String,
+    /// Most recent recorded native activity, when available.
+    pub last_seen_at: Option<String>,
+    /// Safe aggregate status derived from active native sessions.
+    pub session_status: String,
+}
+
 /// Result of an accepted refresh rotation; it intentionally contains no plaintext token.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RefreshRotation {
@@ -303,7 +320,9 @@ pub fn is_safe_audit_event(event_type: &str) -> bool {
             | "refresh_rotated"
             | "refresh_reuse_detected"
             | "logout"
+            | "browser_logout"
             | "device_revoked"
+            | "device_renamed"
             | "account_deletion_accepted"
             | "account_deletion_completed"
     )

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { api, browserAuthenticationOptions, browserRegistrationOptions, serializeAuthentication, serializeRegistration, type ApiError, type PairingPreview } from "./api";
+import { api, browserAuthenticationOptions, browserRegistrationOptions, serializeAuthentication, serializeRegistration, type ApiError, type BrowserAccount, type PairingPreview } from "./api";
 import "./style.css";
 
 const errorMessage = (error: unknown) => {
@@ -19,6 +19,7 @@ const passkeyErrorMessage = (error: unknown) => {
 };
 
 const deviceProductName = (deviceType: string) => deviceType.toLowerCase().includes("mobile") ? "RockMobile" : "RockCast";
+const formatDate = (value: string) => new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 
 /** Renders the account landing page or the secure, request-specific pairing screen. */
 export function App() {
@@ -31,6 +32,7 @@ export function App() {
   const [csrf, setCsrf] = useState("");
   const [accountName, setAccountName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [account, setAccount] = useState<BrowserAccount>();
 
   const lookup = async () => {
     try { setPreview(await api.pairing(code)); } catch (error) { setPreview(undefined); setMessage(errorMessage(error)); }
@@ -39,6 +41,7 @@ export function App() {
     try {
       const session = await api.browserSession();
       setCsrf(session.csrf_token); setAccountName(session.account_display_name);
+      if (!isPairing) setAccount(await api.browserAccount());
     } catch (error) {
       if ((error as ApiError)?.code !== "authentication_required") setMessage(errorMessage(error));
     }
@@ -82,7 +85,25 @@ export function App() {
     catch (error) { setMessage(errorMessage(error)); } finally { setBusy(false); }
   };
 
-  if (!isPairing) return <main><header><span>ROCK</span><h1>Rock-аккаунт</h1></header><section><h2>{accountName ? `Вы вошли в аккаунт «${accountName}»` : "Вы не вошли"}</h2><p>{accountName ? "Открывайте защищённую ссылку с устройства, которое хотите добавить." : "Войдите, чтобы подтвердить устройство по его защищённой ссылке."}</p>{!accountName && <button onClick={authenticate} disabled={busy}>{busy ? "Проверяем…" : "Войти с passkey"}</button>}</section>{message && <p role="alert">{message}</p>}<footer>Passkey и данные сессии не сохраняются в браузере.</footer></main>;
+  const refreshAccount = async () => { const session = await api.browserSession(); setCsrf(session.csrf_token); setAccountName(session.account_display_name); setAccount(await api.browserAccount()); };
+  const rename = async (deviceId: string, oldName: string) => {
+    const name = window.prompt("Новое имя устройства", oldName)?.trim();
+    if (!name || name === oldName) return;
+    setBusy(true); setMessage("");
+    try { await api.renameDevice(deviceId, name, csrf); await refreshAccount(); setMessage("Имя устройства обновлено."); } catch (error) { setMessage(errorMessage(error)); } finally { setBusy(false); }
+  };
+  const revoke = async (deviceId: string, name: string) => {
+    if (!window.confirm(`Отключить «${name}»? На нём будет завершён вход в RockCast или RockMobile. Это не завершит вход в текущем браузере.`)) return;
+    setBusy(true); setMessage("");
+    try { await api.revokeDevice(deviceId, csrf); await refreshAccount(); setMessage("Устройство отключено."); } catch (error) { setMessage(errorMessage(error)); } finally { setBusy(false); }
+  };
+  const logout = async () => {
+    if (!window.confirm("Выйти из Rock-аккаунта в этом браузере? Устройства останутся подключёнными.")) return;
+    setBusy(true); setMessage("");
+    try { await api.logoutBrowser(csrf); setCsrf(""); setAccountName(""); setAccount(undefined); setMessage("Вы вышли из аккаунта в этом браузере."); } catch (error) { setMessage(errorMessage(error)); } finally { setBusy(false); }
+  };
+
+  if (!isPairing) return <main><header><span>ROCK</span><h1>Rock-аккаунт</h1></header><section><h2>{accountName ? `Аккаунт «${accountName}»` : "Вы не вошли"}</h2><p>{accountName ? "RockCast и RockMobile, показанные ниже, принадлежат этому аккаунту." : "Войдите, чтобы увидеть подключённые устройства или подтвердить устройство по защищённой ссылке."}</p>{!accountName && <button onClick={authenticate} disabled={busy}>{busy ? "Проверяем…" : "Войти с passkey"}</button>}{accountName && <button className="secondary" onClick={logout} disabled={busy}>Выйти из браузера</button>}</section>{account && <><section><h2>Устройства ({account.devices.length} из {account.device_limit})</h2><p>Чтобы подключить новое устройство после достижения лимита, отключите здесь ненужное устройство. Управление системными passkey выполняется в настройках браузера или ОС.</p>{account.devices.length === 0 ? <p>Пока нет подключённых устройств.</p> : <ul className="devices">{account.devices.map(device => <li key={device.device_id}><div><strong>{deviceProductName(device.device_type)} — {device.device_display_name}</strong><p>{device.session_status === "active" ? "Сессия активна" : "Нет активной сессии"} · Подключено {formatDate(device.connected_at)}{device.last_seen_at && ` · Активность ${formatDate(device.last_seen_at)}`}</p></div><div><button className="secondary" onClick={() => rename(device.device_id, device.device_display_name)} disabled={busy}>Переименовать</button><button className="danger" onClick={() => revoke(device.device_id, device.device_display_name)} disabled={busy}>Отключить</button></div></li>)}</ul>}</section><section><h2>Безопасность доступа</h2><p>«Отключить» завершает native-сессии выбранного RockCast или RockMobile. Это не завершает вход в текущем браузере; для него используйте «Выйти из браузера» выше.</p></section></>}{message && <p role="alert">{message}</p>}<footer>Passkey и данные сессии не сохраняются в браузере.</footer></main>;
 
   const deviceType = deviceProductName(preview?.device_type ?? "");
   return <main><header><span>ROCK</span><h1>Подключение устройства</h1></header>

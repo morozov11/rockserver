@@ -107,6 +107,37 @@ paths:
         "401": { description: Browser session cookie is absent, expired, or invalid. }
         "403": { description: Direct or wrong-origin requests are rejected. }
         "503": { description: Authentication persistence is unavailable. }
+  /v1/browser/account:
+    get:
+      operationId: getBrowserAccountCentre
+      summary: Read the first-party browser account centre without native credentials
+      security:
+        - RockserverBrowserCookie: []
+      responses:
+        "200":
+          description: Account name and safe device metadata only; never credentials, tokens, audit details, or account UUIDs.
+          headers:
+            Cache-Control: { schema: { type: string, example: no-store } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrowserAccount" }
+        "401": { description: Browser session cookie is absent, expired, or invalid. }
+        "403": { description: Request did not arrive through the trusted first-party proxy. }
+  /v1/auth/browser-logout:
+    post:
+      operationId: logoutBrowserSession
+      summary: Revoke only the current first-party browser session
+      security:
+        - RockserverBrowserCookie: []
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "204": { description: Current browser session revoked; native device sessions are unchanged. }
+        "401": { description: Browser session cookie is absent, expired, or invalid. }
+        "403": { description: Trusted proxy, origin, or CSRF proof is missing. }
   /v1/auth/refresh:
     post:
       operationId: refreshNativeSession
@@ -191,6 +222,46 @@ paths:
       responses:
         "204": { description: Device revoked. }
         "401": { $ref: "#/components/responses/AuthenticationRequired" }
+        "404": { description: Device is unknown or belongs to another account. }
+  /v1/browser/devices/{device_id}:
+    patch:
+      operationId: renameBrowserOwnedDevice
+      summary: Rename one caller-owned device from the first-party browser account centre
+      security:
+        - RockserverBrowserCookie: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RenameDeviceRequest" }
+      responses:
+        "204": { description: Device was renamed. }
+        "401": { description: Browser session is invalid. }
+        "403": { description: Trusted proxy, origin, or CSRF proof is missing. }
+        "404": { description: Device is unknown or belongs to another account. }
+        "422": { description: Device name is invalid. }
+    delete:
+      operationId: revokeBrowserOwnedDevice
+      summary: Revoke another caller-owned native device and all of its native sessions
+      description: This never logs out the current browser cookie session.
+      security:
+        - RockserverBrowserCookie: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "204": { description: Device and its native sessions were revoked. }
+        "401": { description: Browser session is invalid. }
+        "403": { description: Trusted proxy, origin, or CSRF proof is missing. }
         "404": { description: Device is unknown or belongs to another account. }
   /v1/pairing-requests:
     post:
@@ -744,6 +815,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 components:
+  parameters:
+    DeviceId:
+      name: device_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
   securitySchemes:
     RockserverBrowserCookie:
       type: apiKey
@@ -783,6 +860,38 @@ components:
             request_id: req_01AUTH401
             details: {}
   schemas:
+    RenameDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [device_display_name]
+      properties:
+        device_display_name: { type: string, minLength: 1, maxLength: 128 }
+    BrowserAccount:
+      type: object
+      additionalProperties: false
+      required: [account_display_name, device_limit, devices]
+      properties:
+        account_display_name: { type: string, minLength: 1, maxLength: 128 }
+        device_limit: { type: integer, const: 10 }
+        devices:
+          type: array
+          maxItems: 10
+          items: { $ref: "#/components/schemas/BrowserDevice" }
+    BrowserDevice:
+      type: object
+      additionalProperties: false
+      required: [device_id, device_display_name, device_type, connected_at, session_status]
+      properties:
+        device_id:
+          type: string
+          format: uuid
+          writeOnly: true
+          description: Opaque action handle used by the browser client; it must never be rendered to the user.
+        device_display_name: { type: string, minLength: 1, maxLength: 128 }
+        device_type: { type: string, minLength: 1, maxLength: 64 }
+        connected_at: { type: string, format: date-time }
+        last_seen_at: { type: [string, "null"], format: date-time }
+        session_status: { type: string, enum: [active, inactive] }
     RefreshRequest:
       type: object
       additionalProperties: false

@@ -3,6 +3,8 @@ export type PairingPreview = { request_id: string; device_display_name: string; 
 export type ApiError = { code: string; message: string; request_id: string; details: Record<string, unknown> };
 export type RegistrationOptions = { challenge_id: string; options: Omit<PublicKeyCredentialCreationOptions, "challenge" | "user"> & { challenge: string; user: Omit<PublicKeyCredentialUserEntity, "id"> & { id: string }; } };
 export type AuthenticationOptions = { challenge_id: string; options: Omit<PublicKeyCredentialRequestOptions, "challenge" | "allowCredentials"> & { challenge: string; allowCredentials?: Array<PublicKeyCredentialDescriptor & { id: string }>; } };
+export type BrowserDevice = { device_id: string; device_display_name: string; device_type: string; connected_at: string; last_seen_at?: string; session_status: "active" | "inactive" };
+export type BrowserAccount = { account_display_name: string; device_limit: number; devices: BrowserDevice[] };
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, { ...init, credentials: "same-origin", headers: { "Content-Type": "application/json", ...init.headers } });
@@ -18,6 +20,10 @@ export const api = {
   authenticationOptions() { return request<AuthenticationOptions>("/v1/auth/passkeys/authentication/options", { method: "POST", body: "{}" }); },
   authenticationVerify(payload: unknown) { return request<{ csrf_token: string }>("/v1/auth/passkeys/authentication/verify", { method: "POST", body: JSON.stringify(payload) }); },
   browserSession() { return request<{ account_display_name: string; csrf_token: string }>("/v1/auth/browser-session", { method: "POST", body: "{}" }); },
+  browserAccount() { return request<BrowserAccount>("/v1/browser/account"); },
+  renameDevice(deviceId: string, device_display_name: string, csrfToken: string) { return request<void>(`/v1/browser/devices/${encodeURIComponent(deviceId)}`, { method: "PATCH", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ device_display_name }) }); },
+  revokeDevice(deviceId: string, csrfToken: string) { return request<void>(`/v1/browser/devices/${encodeURIComponent(deviceId)}`, { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } }); },
+  logoutBrowser(csrfToken: string) { return request<void>("/v1/auth/browser-logout", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: "{}" }); },
   pairing(code: string) { return request<PairingPreview>(`/v1/pairing-requests/lookup?code=${encodeURIComponent(code)}`); },
   approvePairing(requestId: string, approvalSecret: string, verificationPhrase: string, csrfToken: string) {
     return request<void>(`/v1/pairing-requests/${requestId}/approve`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ approval_secret: approvalSecret, verification_phrase: verificationPhrase }) });

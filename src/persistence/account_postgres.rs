@@ -5,9 +5,10 @@ use sqlx::{PgPool, postgres::PgPoolOptions};
 use uuid::Uuid;
 
 use crate::auth::{
-    AccountProjection, ActiveSession, NewBrowserSession, NewPairingRequest, NewPairingSession,
-    NewSession, NewWebAuthnChallenge, OwnedDevice, PairingCompletion, PairingPreview, RefreshError,
-    RefreshRotation, SecretHash, WebAuthnCeremony, is_safe_audit_event,
+    AccountProjection, ActiveSession, BrowserDevice, NewBrowserSession, NewPairingRequest,
+    NewPairingSession, NewSession, NewWebAuthnChallenge, OwnedDevice, PairingCompletion,
+    PairingPreview, RefreshError, RefreshRotation, SecretHash, WebAuthnCeremony,
+    is_safe_audit_event,
 };
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
@@ -314,6 +315,113 @@ impl PostgresAccountStore {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Resolves an active browser session to its owner only when its current CSRF proof matches.
+    pub async fn browser_session_user_with_csrf(
+        &self,
+        session_token_hash: &SecretHash,
+        csrf_hash: &SecretHash,
+    ) -> Result<Option<Uuid>, sqlx::Error> {
+        sqlx::query_scalar(
+            "SELECT b.user_id FROM browser_sessions b JOIN users u ON u.id = b.user_id \\
+             WHERE b.session_token_hash = $1 AND b.csrf_token_hash = $2 AND b.revoked_at IS NULL \\
+             AND b.expires_at > now() AND u.status = 'active'",
+        )
+        .bind(session_token_hash.as_bytes())
+        .bind(csrf_hash.as_bytes())
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    /// Resolves a live browser cookie to its owner without exposing that identifier to HTTP clients.
+    pub async fn browser_session_user(
+        &self,
+        session_token_hash: &SecretHash,
+    ) -> Result<Option<Uuid>, sqlx::Error> {
+        sqlx::query_scalar(
+            "SELECT b.user_id FROM browser_sessions b JOIN users u ON u.id = b.user_id \\
+             WHERE b.session_token_hash = $1 AND b.revoked_at IS NULL AND b.expires_at > now() AND u.status = 'active'",
+        )
+        .bind(session_token_hash.as_bytes())
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    /// Lists only safe device metadata for the owner of an already authenticated browser session.
+    pub async fn list_browser_devices(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<BrowserDevice>, sqlx::Error> {
+        sqlx::query_as::<_, BrowserDeviceRow>(
+            "SELECT d.id, d.device_display_name, d.device_type, \\
+             to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, \\
+             to_char(GREATEST(d.last_seen_at, (SELECT max(s.last_seen_at) FROM sessions s WHERE s.device_id = d.id)) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS last_seen_at, \\
+             CASE WHEN EXISTS (SELECT 1 FROM sessions s WHERE s.device_id = d.id AND s.revoked_at IS NULL AND s.access_expires_at > now()) THEN 'active' ELSE 'inactive' END AS session_status \\
+             FROM devices d JOIN users u ON u.id = d.user_id WHERE d.user_id = $1 AND d.revoked_at IS NULL AND u.status = 'active' ORDER BY d.created_at, d.id",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await
+        .map(|rows| rows.into_iter().map(Into::into).collect())
+    }
+
+    /// Renames one active device owned by the authenticated account and records a safe audit class.
+    pub async fn rename_owned_device(
+        &self,
+        user_id: Uuid,
+        device_id: Uuid,
+        name: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let mut transaction = self.pool.begin().await?;
+        let updated = sqlx::query(
+            "UPDATE devices SET device_display_name = $3 WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL \\
+             AND EXISTS (SELECT 1 FROM users WHERE id = $2 AND status = 'active')",
+        )
+        .bind(device_id)
+        .bind(user_id)
+        .bind(name)
+        .execute(&mut *transaction)
+        .await?;
+        if updated.rows_affected() == 0 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+        audit(
+            &mut transaction,
+            Some(user_id),
+            Some(device_id),
+            "device_renamed",
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(true)
+    }
+
+    /// Revokes the caller's browser session and records a safe logout audit event.
+    pub async fn logout_browser_session(
+        &self,
+        user_id: Uuid,
+        session_token_hash: &SecretHash,
+        csrf_hash: &SecretHash,
+    ) -> Result<bool, sqlx::Error> {
+        let mut transaction = self.pool.begin().await?;
+        let updated = sqlx::query(
+            "UPDATE browser_sessions SET revoked_at = now() WHERE user_id = $1 AND session_token_hash = $2 AND csrf_token_hash = $3 \\
+             AND revoked_at IS NULL AND expires_at > now()",
+        )
+        .bind(user_id)
+        .bind(session_token_hash.as_bytes())
+        .bind(csrf_hash.as_bytes())
+        .execute(&mut *transaction)
+        .await?;
+        if updated.rows_affected() == 0 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+        audit(&mut transaction, Some(user_id), None, "browser_logout").await?;
+        transaction.commit().await?;
+        Ok(true)
     }
 
     /// Confirms a live browser session with a recent passkey assertion for one account.
@@ -945,6 +1053,16 @@ struct DeviceRow {
 }
 
 #[derive(sqlx::FromRow)]
+struct BrowserDeviceRow {
+    id: Uuid,
+    device_display_name: String,
+    device_type: String,
+    created_at: String,
+    last_seen_at: Option<String>,
+    session_status: String,
+}
+
+#[derive(sqlx::FromRow)]
 struct AccountProjectionRow {
     account_display_name: String,
     created_at: String,
@@ -987,6 +1105,19 @@ impl From<DeviceRow> for OwnedDevice {
             device_type: row.device_type,
             created_at: row.created_at,
             last_seen_at: row.last_seen_at,
+        }
+    }
+}
+
+impl From<BrowserDeviceRow> for BrowserDevice {
+    fn from(row: BrowserDeviceRow) -> Self {
+        Self {
+            id: row.id,
+            device_display_name: row.device_display_name,
+            device_type: row.device_type,
+            created_at: row.created_at,
+            last_seen_at: row.last_seen_at,
+            session_status: row.session_status,
         }
     }
 }

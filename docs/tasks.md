@@ -1,5 +1,13 @@
 # Task log
 
+## HTTP transport architecture guardrail — 2026-08-28
+
+- Goal: prevent further growth of the legacy mixed HTTP endpoint module.
+- Result: added always-applied `.cursor/rules/http-module-boundaries.mdc`, requiring domain
+  transport modules, thin route composition, and a final refactoring review for every HTTP change.
+- Checks: pending final repository checks.
+- Status: **guardrail complete; behavior-preserving legacy-module extraction remains a separate task.**
+
 ## RM-011-G2 — 2026-08-28 — browser account and pairing UX
 
 - Goal: make a secure pairing link explain one pending device and prevent accidental account
@@ -1120,3 +1128,19 @@
   explicitly used `--jobs 1` for sequential execution.
 - Checks: configuration is valid TOML; no source behavior changed.
 - Status: **complete locally**.
+## RM-011-G3 — 2026-08-28 — browser account and device centre
+
+- Goal: provide one safe browser view proving that RockCast and RockMobile belong to the same
+  named account, with device rename, revoke and current-browser logout.
+- Scope: added cookie/proxy/CSRF-protected browser account endpoints and Preact account centre;
+  device responses omit account IDs, tokens, credentials and audit details, while an opaque route
+  handle remains internal to the browser UI and is never rendered.
+- Result: rename rejects empty, control-character and over-128-character names; rename/revoke
+  remain owner-scoped and auditable. Revoke ends all native sessions and refresh tokens on the
+  selected device, whereas browser logout revokes only the current browser session. The UI uses
+  explicit confirmations and explains that these two actions are different.
+- Checks: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test` passed
+  (100 tests; five disposable PostgreSQL tests intentionally ignored without
+  `TEST_DATABASE_URL`). TypeScript typecheck/lint, Vite build and five deterministic browser UX
+  regressions passed using the checked-in web dependencies. No staging deploy, commit or push.
+- Status: **complete locally; staging/physical-phone smoke remains.**

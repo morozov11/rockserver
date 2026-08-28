@@ -18,7 +18,7 @@ use axum::{
     },
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{Html, IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{delete, get, patch, post},
 };
 use passkey_auth::{AuthenticationResponse, CredentialId, RegistrationResponse};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -228,6 +228,8 @@ pub fn router_with_speech_recognizers_and_bearer_token(
         .route("/v1/pairing-requests", post(create_pairing_request))
         .route("/v1/pairing-requests/lookup", get(lookup_pairing_request))
         .route("/v1/auth/browser-session", post(browser_session))
+        .route("/v1/browser/account", get(browser_account))
+        .route("/v1/auth/browser-logout", post(logout_browser_session))
         .route(
             "/v1/pairing-requests/{request_id}/approve",
             post(approve_pairing_request),
@@ -258,6 +260,10 @@ pub fn router_with_speech_recognizers_and_bearer_token(
         .route("/v1/account", delete(delete_account))
         .route("/v1/devices", get(list_devices))
         .route("/v1/devices/{device_id}", delete(revoke_device))
+        .route(
+            "/v1/browser/devices/{device_id}",
+            patch(rename_browser_device).delete(revoke_browser_device),
+        )
         .with_state(state)
         .layer(
             TraceLayer::new_for_http()
@@ -318,6 +324,8 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
         .route("/v1/pairing-requests", post(create_pairing_request))
         .route("/v1/pairing-requests/lookup", get(lookup_pairing_request))
         .route("/v1/auth/browser-session", post(browser_session))
+        .route("/v1/browser/account", get(browser_account))
+        .route("/v1/auth/browser-logout", post(logout_browser_session))
         .route(
             "/v1/pairing-requests/{request_id}/approve",
             post(approve_pairing_request),
@@ -348,6 +356,10 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
         .route("/v1/account", delete(delete_account))
         .route("/v1/devices", get(list_devices))
         .route("/v1/devices/{device_id}", delete(revoke_device))
+        .route(
+            "/v1/browser/devices/{device_id}",
+            patch(rename_browser_device).delete(revoke_browser_device),
+        )
         .with_state(state)
         .layer(
             TraceLayer::new_for_http()
@@ -430,6 +442,30 @@ struct PairingApprovalDto {
 struct BrowserSessionDto {
     account_display_name: String,
     csrf_token: String,
+}
+
+#[derive(Serialize)]
+struct BrowserAccountDto {
+    account_display_name: String,
+    device_limit: u8,
+    devices: Vec<BrowserDeviceDto>,
+}
+
+#[derive(Serialize)]
+struct BrowserDeviceDto {
+    device_id: String,
+    device_display_name: String,
+    device_type: String,
+    connected_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_seen_at: Option<String>,
+    session_status: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RenameBrowserDeviceDto {
+    device_display_name: String,
 }
 
 #[derive(Deserialize)]
@@ -559,7 +595,7 @@ async fn registration_options(
             &request_id,
             json!({}),
         );
-    }
+    };
     let Some(store) = state.account_store.as_ref() else {
         return error_response(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1290,6 +1326,323 @@ async fn browser_session(State(state): State<AppState>, headers: HeaderMap) -> R
             &request_id,
             json!({}),
         ),
+        Err(_) => error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        ),
+    }
+}
+
+/// Returns the authenticated browser account's safe device-management projection.
+async fn browser_account(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let request_id = request_id(&headers);
+    if !trusted_proxy_header_matches(&headers, state.trusted_proxy_token.as_deref()) {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "untrusted_request",
+            "The request must originate from the trusted first-party proxy.",
+            &request_id,
+            json!({}),
+        );
+    }
+    let Some(cookie) = cookie_value(&headers, "rockserver_browser") else {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "A browser session is required.",
+            &request_id,
+            json!({}),
+        );
+    };
+    let Some(store) = state.account_store.as_ref() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        );
+    };
+    let account_display_name = match store
+        .browser_account_display_name(&token_hash(cookie))
+        .await
+    {
+        Ok(Some(name)) => name,
+        Ok(None) => {
+            return error_response(
+                StatusCode::UNAUTHORIZED,
+                "authentication_required",
+                "A browser session is required.",
+                &request_id,
+                json!({}),
+            );
+        }
+        Err(_) => {
+            return error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "auth_unavailable",
+                "Account service is unavailable.",
+                &request_id,
+                json!({}),
+            );
+        }
+    };
+    let user_id = match store.browser_session_user(&token_hash(cookie)).await {
+        Ok(Some(user_id)) => user_id,
+        Ok(None) => {
+            return error_response(
+                StatusCode::UNAUTHORIZED,
+                "authentication_required",
+                "A browser session is required.",
+                &request_id,
+                json!({}),
+            );
+        }
+        Err(_) => {
+            return error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "auth_unavailable",
+                "Account service is unavailable.",
+                &request_id,
+                json!({}),
+            );
+        }
+    };
+    match store.list_browser_devices(user_id).await {
+        Ok(devices) => {
+            let mut response = with_request_id(
+                Json(BrowserAccountDto {
+                    account_display_name,
+                    device_limit: 10,
+                    devices: devices
+                        .into_iter()
+                        .map(|device| BrowserDeviceDto {
+                            device_id: device.id.to_string(),
+                            device_display_name: device.device_display_name,
+                            device_type: device.device_type,
+                            connected_at: device.created_at,
+                            last_seen_at: device.last_seen_at,
+                            session_status: device.session_status,
+                        })
+                        .collect(),
+                })
+                .into_response(),
+                &request_id,
+            );
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            response
+        }
+        Err(_) => error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        ),
+    }
+}
+
+/// Validates a browser state-changing request and derives its account owner from cookie and CSRF proofs.
+async fn browser_mutation_owner(
+    state: &AppState,
+    headers: &HeaderMap,
+    request_id: &str,
+) -> Result<Uuid, Response> {
+    if !is_trusted_browser_request(headers)
+        || !trusted_proxy_header_matches(headers, state.trusted_proxy_token.as_deref())
+    {
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "untrusted_request",
+            "The request must originate from the trusted first-party proxy.",
+            request_id,
+            json!({}),
+        ));
+    }
+    let Some(cookie) = cookie_value(headers, "rockserver_browser") else {
+        return Err(error_response(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "A browser session is required.",
+            request_id,
+            json!({}),
+        ));
+    };
+    let Some(csrf) = headers
+        .get("x-csrf-token")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty() && value.len() <= 256)
+    else {
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "csrf_failed",
+            "A valid CSRF token is required.",
+            request_id,
+            json!({}),
+        ));
+    };
+    let Some(store) = state.account_store.as_ref() else {
+        return Err(error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            request_id,
+            json!({}),
+        ));
+    };
+    match store
+        .browser_session_user_with_csrf(&token_hash(cookie), &token_hash(csrf))
+        .await
+    {
+        Ok(Some(user_id)) => Ok(user_id),
+        Ok(None) => Err(error_response(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "A browser session is required.",
+            request_id,
+            json!({}),
+        )),
+        Err(_) => Err(error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            request_id,
+            json!({}),
+        )),
+    }
+}
+
+/// Renames a caller-owned device through the first-party browser management boundary.
+async fn rename_browser_device(
+    State(state): State<AppState>,
+    Path(device_id): Path<Uuid>,
+    headers: HeaderMap,
+    Json(payload): Json<RenameBrowserDeviceDto>,
+) -> Response {
+    let request_id = request_id(&headers);
+    let user_id = match browser_mutation_owner(&state, &headers, &request_id).await {
+        Ok(user_id) => user_id,
+        Err(response) => return response,
+    };
+    let Some(name) = validated_device_display_name(&payload.device_display_name) else {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_device_name",
+            "Device name must be 1 to 128 printable characters.",
+            &request_id,
+            json!({}),
+        );
+    };
+    let Some(store) = state.account_store.as_ref() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        );
+    };
+    match store.rename_owned_device(user_id, device_id, name).await {
+        Ok(true) => with_request_id(StatusCode::NO_CONTENT.into_response(), &request_id),
+        Ok(false) => error_response(
+            StatusCode::NOT_FOUND,
+            "device_not_found",
+            "Device is unavailable.",
+            &request_id,
+            json!({}),
+        ),
+        Err(_) => error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        ),
+    }
+}
+
+/// Normalizes a user-visible device name while rejecting control characters that could affect logs or UI text.
+fn validated_device_display_name(value: &str) -> Option<&str> {
+    let name = value.trim();
+    (!name.is_empty() && name.chars().count() <= 128 && !name.chars().any(char::is_control))
+        .then_some(name)
+}
+
+/// Revokes another caller-owned native device from the browser account centre.
+async fn revoke_browser_device(
+    State(state): State<AppState>,
+    Path(device_id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Response {
+    let request_id = request_id(&headers);
+    let user_id = match browser_mutation_owner(&state, &headers, &request_id).await {
+        Ok(user_id) => user_id,
+        Err(response) => return response,
+    };
+    let Some(store) = state.account_store.as_ref() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        );
+    };
+    match store.revoke_owned_device(user_id, device_id).await {
+        Ok(true) => with_request_id(StatusCode::NO_CONTENT.into_response(), &request_id),
+        Ok(false) => error_response(
+            StatusCode::NOT_FOUND,
+            "device_not_found",
+            "Device is unavailable.",
+            &request_id,
+            json!({}),
+        ),
+        Err(_) => error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        ),
+    }
+}
+
+/// Logs out only the current browser cookie session; native device sessions remain unchanged.
+async fn logout_browser_session(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let request_id = request_id(&headers);
+    let user_id = match browser_mutation_owner(&state, &headers, &request_id).await {
+        Ok(user_id) => user_id,
+        Err(response) => return response,
+    };
+    let Some(cookie) = cookie_value(&headers, "rockserver_browser") else {
+        return unauthorized_response(&request_id);
+    };
+    let Some(csrf) = headers
+        .get("x-csrf-token")
+        .and_then(|value| value.to_str().ok())
+    else {
+        return unauthorized_response(&request_id);
+    };
+    let Some(store) = state.account_store.as_ref() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "Account service is unavailable.",
+            &request_id,
+            json!({}),
+        );
+    };
+    match store
+        .logout_browser_session(user_id, &token_hash(cookie), &token_hash(csrf))
+        .await
+    {
+        Ok(true) => with_request_id(StatusCode::NO_CONTENT.into_response(), &request_id),
+        Ok(false) => unauthorized_response(&request_id),
         Err(_) => error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "auth_unavailable",
@@ -3324,6 +3677,7 @@ mod tests {
     use super::{
         FIRST_PARTY_ORIGIN, HealthResponse, HealthStatus, PairingPreviewDto, TEST_API_BEARER_TOKEN,
         is_trusted_browser_request, request_rate_limit_scope, router, trusted_proxy_header_matches,
+        validated_device_display_name,
     };
 
     #[tokio::test]
@@ -3484,6 +3838,16 @@ mod tests {
             request_rate_limit_scope(&headers, Some("proxy-secret")),
             "198.51.100.10"
         );
+    }
+
+    #[test]
+    fn device_name_validation_trims_but_rejects_empty_control_and_overlong_values() {
+        assert_eq!(
+            validated_device_display_name("  Living room PC  "),
+            Some("Living room PC")
+        );
+        assert_eq!(validated_device_display_name("Rock\nCast"), None);
+        assert_eq!(validated_device_display_name(&"a".repeat(129)), None);
     }
 
     async fn assert_health_endpoint(uri: &str) {

@@ -445,6 +445,100 @@ async fn postgres_account_session_rotation_deletion_and_ownership() {
     inspection.close().await;
 }
 
+/// Verifies the browser account centre keeps management actions owner-scoped and revocation blocks refresh.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL pointing to a disposable PostgreSQL database"]
+async fn postgres_browser_account_centre_owns_rename_and_revoke() {
+    let database_url = env::var("TEST_DATABASE_URL")
+        .expect("set TEST_DATABASE_URL to an isolated PostgreSQL database");
+    let store = PostgresAccountStore::connect(&database_url).await.unwrap();
+    let owner = Uuid::new_v4();
+    let foreign = Uuid::new_v4();
+    store.create_user(owner).await.unwrap();
+    store.create_user(foreign).await.unwrap();
+    let device = OwnedDevice {
+        id: Uuid::new_v4(),
+        user_id: owner,
+        device_display_name: "Living room PC".into(),
+        device_type: "rockcast_windows".into(),
+        created_at: "unused".into(),
+        last_seen_at: None,
+    };
+    assert!(store.create_device(&device).await.unwrap());
+    let cookie = SecretHash::new([41; 32]);
+    let csrf = SecretHash::new([42; 32]);
+    assert!(
+        store
+            .create_browser_session(NewBrowserSession {
+                session_id: Uuid::new_v4(),
+                user_id: owner,
+                session_token_hash: &cookie,
+                csrf_hash: &csrf,
+                passkey_reauthenticated_at_rfc3339: "2035-01-01T00:00:00Z",
+                expires_at_rfc3339: "2035-02-01T00:00:00Z"
+            })
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        store
+            .browser_session_user_with_csrf(&cookie, &csrf)
+            .await
+            .unwrap(),
+        Some(owner)
+    );
+    let listed = store.list_browser_devices(owner).await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].device_display_name, "Living room PC");
+    assert_eq!(listed[0].session_status, "inactive");
+    assert!(
+        !store
+            .rename_owned_device(foreign, device.id, "Foreign name")
+            .await
+            .unwrap()
+    );
+    assert!(
+        store
+            .rename_owned_device(owner, device.id, "Studio PC")
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        store.list_browser_devices(owner).await.unwrap()[0].device_display_name,
+        "Studio PC"
+    );
+    let refresh = SecretHash::new([43; 32]);
+    assert!(
+        store
+            .create_session(NewSession {
+                session_id: Uuid::new_v4(),
+                user_id: owner,
+                device_id: device.id,
+                access_hash: &SecretHash::new([44; 32]),
+                access_expires_at_rfc3339: "2035-01-01T00:15:00Z",
+                refresh_id: Uuid::new_v4(),
+                refresh_hash: &refresh,
+                refresh_expires_at_rfc3339: "2035-02-01T00:00:00Z"
+            })
+            .await
+            .unwrap()
+    );
+    assert!(!store.revoke_owned_device(foreign, device.id).await.unwrap());
+    assert!(store.revoke_owned_device(owner, device.id).await.unwrap());
+    assert!(matches!(
+        store
+            .rotate_refresh(
+                &refresh,
+                Uuid::new_v4(),
+                &SecretHash::new([45; 32]),
+                "2035-02-01T00:00:00Z"
+            )
+            .await,
+        Err(RefreshError::Rejected)
+    ));
+    store.close().await;
+}
+
 /// Exercises migrations, seed data, search semantics, and live database readiness.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL pointing to a disposable PostgreSQL database"]

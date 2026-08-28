@@ -2,6 +2,35 @@
 
 Last updated: 2026-08-28
 
+## HTTP transport maintainability (2026-08-28)
+
+Added the always-applied project rule `.cursor/rules/http-module-boundaries.mdc`: new HTTP work
+must enter a domain transport module, keep router composition thin, and include a post-change
+review for misplaced responsibilities and dead code. The existing `src/http/endpoints.rs` remains
+a legacy mixed transport module and needs a dedicated, behavior-preserving extraction of account,
+pairing, catalog, and voice domains before further broad endpoint work.
+
+## RM-011-G3 — browser account and device centre (local, 2026-08-28)
+
+The authenticated first-party browser view now presents one named Rock account and its active
+RockCast/RockMobile devices without rendering UUIDs, credentials, tokens, or audit data. It shows
+the human device name/type, connection time, most recent activity when available, an aggregate
+active/inactive native-session status, and the 10-device limit with an explanation for freeing a
+slot. Anonymous landing remains a sign-in/pairing entry point rather than an account centre.
+
+`GET /v1/browser/account` is cookie/proxy-bound and returns only the safe browser projection.
+Rename, revoke, and browser logout use separate first-party trusted-proxy, Origin and CSRF checks;
+the server derives ownership from the cookie, writes only safe audit classifications, and owner
+checks every target device. Browser logout revokes only its cookie session. Device revoke revokes
+the target's native sessions/refresh tokens and explicitly cannot terminate the current browser
+session. Existing native refresh and revoke semantics are unchanged.
+
+Verified locally: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`
+(100 tests passed; five disposable PostgreSQL tests stayed opt-in without `TEST_DATABASE_URL`).
+The checked-in web dependencies also passed TypeScript typecheck/lint, Vite production build, and
+five deterministic UX regressions. Remaining acceptance is the requested staging/physical-phone
+smoke test; no staging deployment, account creation, credential ceremony, commit, or push was run.
+
 ## RM-011-G2 — browser account and pairing UX (deployed to staging, 2026-08-28)
 
 The ordinary page is now a safe account landing page: it states whether the browser is signed in,

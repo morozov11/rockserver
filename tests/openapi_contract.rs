@@ -23,10 +23,13 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         "/health/ready",
         "/v1/auth/refresh",
         "/v1/auth/logout",
+        "/v1/auth/browser-logout",
+        "/v1/browser/account",
         "/v1/account/profile",
         "/v1/account",
         "/v1/devices",
         "/v1/devices/{device_id}",
+        "/v1/browser/devices/{device_id}",
         "/v1/search",
         "/api/v1/voice/command",
         "/v1/voice/command",
@@ -160,6 +163,9 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         "TokenPair",
         "AccountProfile",
         "DeviceList",
+        "BrowserAccount",
+        "BrowserDevice",
+        "RenameDeviceRequest",
         "CreatedPairingRequest",
         "PairingPreview",
     ] {
@@ -175,6 +181,19 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
             .is_some(),
         "browser session CSRF refresh must be documented"
     );
+    let browser_device = schemas
+        .get(Value::String("BrowserDevice".to_owned()))
+        .expect("browser device schema must exist");
+    let browser_properties = browser_device
+        .get("properties")
+        .and_then(Value::as_mapping)
+        .expect("browser device fields must be declared");
+    for secret in ["credential_id", "access_token", "refresh_token", "user_id"] {
+        assert!(
+            !browser_properties.contains_key(Value::String(secret.to_owned())),
+            "browser device must not expose {secret}"
+        );
+    }
     let preview = schemas
         .get(Value::String("PairingPreview".to_owned()))
         .expect("pairing preview schema must exist");

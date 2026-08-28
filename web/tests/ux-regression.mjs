@@ -31,3 +31,14 @@ test("unavailable API responses stay user-facing and never expose HTTP details",
   assert.match(app, /Сервер временно недоступен/);
   assert.doesNotMatch(app, /HTTP-/);
 });
+
+test("authenticated landing is an account centre with safe device actions", () => {
+  assert.match(api, /browserAccount\(\).*\/v1\/browser\/account/);
+  assert.match(api, /renameDevice\(.*\/v1\/browser\/devices/);
+  assert.match(api, /logoutBrowser\(.*\/v1\/auth\/browser-logout/);
+  assert.match(app, /Устройства \(\{account\.devices\.length\} из \{account\.device_limit\}\)/);
+  assert.match(app, /Выйти из браузера/);
+  assert.match(app, /Отключить/);
+  assert.match(app, /Это не завершит вход в текущем браузере/);
+  assert.doesNotMatch(app, /credential_id|refresh_token|access_token/);
+});

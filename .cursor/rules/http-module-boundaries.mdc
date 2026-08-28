@@ -1,0 +1,14 @@
+---
+description: Keep RockServer HTTP transport modules small and cohesive
+alwaysApply: true
+---
+
+# HTTP module boundaries
+
+- Do not add handlers, DTOs, or transport helpers to an unrelated HTTP module.
+- Place new routes in a domain module (`account`, `pairing`, `catalog`, `voice`) and keep router
+  assembly as a thin composition layer.
+- When a touched HTTP file mixes more than one domain or becomes difficult to navigate, extract
+  the changed domain in the same task before adding more behavior.
+- Before handoff, run formatting, lint, tests, and review touched modules for duplication,
+  misplaced responsibilities, and dead code. Refactor clear issues within the task scope.
