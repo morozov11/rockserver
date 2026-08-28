@@ -1163,3 +1163,21 @@
   `TEST_DATABASE_URL`). TypeScript typecheck/lint, Vite build and five deterministic browser UX
   regressions passed using the checked-in web dependencies. No staging deploy, commit or push.
 - Status: **complete locally; staging/physical-phone smoke remains.**
+
+## SECURITY-001 — 2026-08-28 — remove vulnerable Rust TLS dependency chain
+
+- Goal: remove the Dependabot-reported `rustls-webpki 0.101.7` chain without changing service
+  behavior or the SpeechKit streaming contract.
+- Scope: replaced the `yandex-cloud`/`tonic 0.9` dependency path with a minimal checked-in
+  SpeechKit v3 protobuf and streaming client boundary on `tonic 0.14.6`, `tonic-prost 0.14.6`,
+  and `rustls 0.23.43`; added wire-tag regression tests and updated security status records.
+- Result: the old `yandex-cloud`, `tonic 0.9`, and `rustls-webpki 0.101.7` packages are absent
+  from the lockfile graph. Existing API-key metadata, PCM16 streaming, EOU, transcript handling,
+  endpoint validation, and HTTP/OpenAPI behavior are unchanged.
+- Checks: `cargo fmt --check`, `cargo check --locked --all-targets --all-features --jobs 1`,
+  `cargo clippy --all-targets --all-features --jobs 1 -- -D warnings`,
+  `cargo test --all-targets --all-features --jobs 1` (102 passed; 12 explicitly ignored),
+  `cargo tree` dependency inspection, and `git diff --check` passed. `cargo audit` is not
+  installed on this host; the exact Dependabot advisories were independently checked against the
+  lockfile dependency path.
+- Status: **implemented and verified locally; awaiting commit, push, and deployment readiness.**

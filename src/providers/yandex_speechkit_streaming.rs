@@ -2,12 +2,7 @@
 
 use std::{env, sync::Arc};
 
-use async_trait::async_trait;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Request, metadata::MetadataValue};
-use url::Url;
-use yandex_cloud::speechkit::stt::v3::{
+use super::yandex_speechkit_v3::{
     AlternativeUpdate, AudioChunk, AudioFormatOptions, Eou, EouClassifierOptions,
     ExternalEouClassifier, LanguageRestrictionOptions, RawAudio, RecognitionModelOptions,
     StreamingOptions, StreamingRequest, StreamingResponse, audio_format_options::AudioFormat,
@@ -16,6 +11,11 @@ use yandex_cloud::speechkit::stt::v3::{
     recognition_model_options::AudioProcessingType, recognizer_client::RecognizerClient,
     streaming_request::Event as RequestEvent, streaming_response::Event as ResponseEvent,
 };
+use async_trait::async_trait;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use tonic::{Request, metadata::MetadataValue};
+use url::Url;
 
 use crate::voice::{
     SpeechProviderError, SpeechStreamConfig, SpeechStreamSession, StreamingSpeechRecognizer,
@@ -204,7 +204,6 @@ fn streaming_options(config: &SpeechStreamConfig) -> StreamingRequest {
                         audio_channel_count: 1_i64,
                     })),
                 }),
-                text_normalization: None,
                 language_restriction: Some(LanguageRestrictionOptions {
                     restriction_type: LanguageRestrictionType::Whitelist as i32,
                     language_code: vec![config.locale.clone()],
@@ -214,9 +213,6 @@ fn streaming_options(config: &SpeechStreamConfig) -> StreamingRequest {
             eou_classifier: Some(EouClassifierOptions {
                 classifier: Some(EouClassifier::ExternalClassifier(ExternalEouClassifier {})),
             }),
-            recognition_classifier: None,
-            speech_analysis: None,
-            speaker_labeling: None,
         })),
     }
 }
@@ -256,10 +252,10 @@ fn validate_endpoint(endpoint: &str) -> Result<(), SpeechProviderError> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use yandex_cloud::speechkit::stt::v3::{
+    use super::super::yandex_speechkit_v3::{
         Alternative, streaming_response::Event as ResponseEvent,
     };
+    use super::*;
 
     #[test]
     fn streaming_options_use_pcm16_mono() {
@@ -279,11 +275,8 @@ mod tests {
             event: Some(ResponseEvent::Final(AlternativeUpdate {
                 alternatives: vec![Alternative {
                     text: "рок радио".to_owned(),
-                    ..Default::default()
                 }],
-                ..Default::default()
             })),
-            ..Default::default()
         };
         assert_eq!(
             transcript_update(response),

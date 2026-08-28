@@ -20,7 +20,14 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "sqlite", "migrate", "macros", "uuid"] }
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = "0.1"
-tonic = { version = "0.9", features = ["tls", "transport"] }
+prost = "0.14.4"
+tonic = { version = "0.14.6", default-features = false, features = [
+    "codegen",
+    "channel",
+    "tls-native-roots",
+    "tls-ring",
+] }
+tonic-prost = "0.14.6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tower-http = { version = "0.6", features = ["trace"] }
@@ -30,7 +37,6 @@ ndarray = { version = "0.17", optional = true }
 ort = { version = "2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray"], optional = true }
 tokenizers = { version = "0.22", optional = true }
 tracing-appender = "0.2.5"
-yandex-cloud = "2025.4.14"
 passkey-auth = "0.1.3"
 
 [dev-dependencies]

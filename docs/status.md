@@ -2,6 +2,25 @@
 
 Last updated: 2026-08-28
 
+## SECURITY-001 — Rust TLS dependency remediation (ready for deployment, 2026-08-28)
+
+GitHub Dependabot reported one high and two low advisories for `rustls-webpki 0.101.7`,
+reachable through `yandex-cloud 2025.4.14 → tonic 0.9`. The published Yandex crate has no
+compatible release that removes this chain, so the unused parts of its generated SpeechKit API
+were not vendored. RockServer now owns a small, checked-in SpeechKit v3 protocol boundary for
+the existing bidirectional `Recognizer/RecognizeStreaming` RPC and uses `tonic 0.14.6`,
+`tonic-prost 0.14.6`, and `rustls 0.23.43` with native roots and ring TLS support.
+
+The streaming endpoint, API-key metadata, PCM16 mono configuration, explicit EOU event, partial
+and final transcript handling, endpoint validation, and all HTTP/security behavior are unchanged.
+Wire-tag regression tests cover the SpeechKit audio request and partial response. `cargo tree`
+contains no `rustls-webpki 0.101.7`, `tonic 0.9`, or `yandex-cloud`; the remaining
+`rustls-webpki` is `0.103.14` through the maintained `rustls 0.23` graph. Local `cargo fmt
+--check`, strict all-target/all-feature Clippy, locked compilation, full all-target/all-feature
+tests (102 passed; five disposable PostgreSQL, four billable Yandex LLM, one SpeechKit, and one
+ONNX test remain explicitly ignored) and `git diff --check` passed. Deployment is pending the
+commit and remote readiness gate.
+
 ## REFACTOR-001 — HTTP transport module extraction (deployed, 2026-08-28)
 
 The behavior-preserving HTTP extraction is complete for the first slice. The former 3,704-line
