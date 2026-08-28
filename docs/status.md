@@ -31,6 +31,11 @@ with the former deploy argument shape. The deploy-script suite passes locally. C
 and `26906ef` reached `origin/master`; OPS-001-D reported `status=succeeded` and readiness passed
 for image `sha256:bf80ed529b0a7c1ffc14c2333730851fdaddfadf401a90a1c03a6052e190cd3f`.
 
+Follow-up verification found that this rollout did not activate the uploaded root-side operator
+script, so staging still retained older backup files. The fix is prepared locally: after acquiring
+the deploy lock, normal deploy validates and installs the bundle operator script before starting
+the detached worker. OPS-001-D local tests pass; the fixed deploy is pending.
+
 ## RM-011-G6 — preview-first staging account cleanup (local, 2026-08-28)
 
 The staging-only `account_cleanup` operator binary and the root-scoped remote wrapper are

@@ -259,3 +259,7 @@ Pairing fixes are in RockServer commit `99c2783`, RockCast commit `0bd9639`, and
 RockServer image `sha256:bf80ed529b0a7c1ffc14c2333730851fdaddfadf401a90a1c03a6052e190cd3f`.
 The real passkey/device smoke checklist remains manual; no staging account data was changed by the
 verification run.
+
+On 2026-08-29 a read-only staging audit found that the prior deploy had left 19 historical
+`rockserver-*.dump` files because the uploaded operator script was not activated before the worker
+started. The corrective deploy-path change is pending rollout; no backup was deleted by the audit.

@@ -1258,3 +1258,15 @@
   and `26906ef` records the verification; both reached `origin/master`, and OPS-001-D reported
   `status=succeeded` with readiness passed.
 - Status: **deployed and readiness-verified; manual account/device smoke remains.**
+
+## OPS-001-D activate updated operator script — 2026-08-29
+
+- Goal: make the requested backup retention logic execute during a normal deploy.
+- Finding: the previous deploy uploaded `remote-ops-001-d.sh` into a temporary stage but started the
+  worker from the older `/opt/rockserver/remote-ops-001-d.sh`; staging therefore retained 19 old
+  `rockserver-*.dump` files.
+- Fix: after taking the deploy lock and before starting the worker, validate the staged operator
+  file is a regular non-symlink and install it as the active root-side script. If lock or bundle
+  validation fails, the old script remains active.
+- Checks: OPS-001-D local tests and `git diff --check` pass. Push and staging deploy are pending.
+- Status: **ready for push and staging deploy.**

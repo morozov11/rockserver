@@ -354,6 +354,14 @@ submit_deploy() {
     fi
     fail 'another deployment is already running; wait for it to finish before submitting a different commit'
   fi
+  [ -f "$stage/remote-ops-001-d.sh" ] && [ ! -L "$stage/remote-ops-001-d.sh" ] || { rm -rf -- "$deploy_lock"; fail 'deployment bundle operator script is missing or unsafe'; }
+  # Activate the validated operator script before starting the worker. This
+  # keeps retention and other root-side deployment fixes from waiting for a
+  # separate bootstrap run.
+  if ! install -m 0750 "$stage/remote-ops-001-d.sh" "$release_root/remote-ops-001-d.sh"; then
+    rm -rf -- "$deploy_lock"
+    fail 'could not activate the deployment bundle operator script'
+  fi
   printf '%s\n' "$commit" > "$deploy_lock/commit"
   write_deploy_status "$commit" queued
   # nohup detaches the worker from SSH's SIGHUP.  All output goes to a

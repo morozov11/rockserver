@@ -196,8 +196,9 @@ powershell -ExecutionPolicy Bypass -File deploy/ops-001-d.ps1 -Action deploy
 The launcher requires a clean worktree, resolves the exact current `HEAD` full SHA, builds
 `rockserver:sha-<SHA>` locally with the same SHA in `org.opencontainers.image.revision`, and verifies
 the immutable Docker image ID. It creates a checksummed `docker save` artifact, copies it over SSH,
-then the VPS verifies the transfer hash, runs `docker load`, and checks both the loaded image ID and
-revision label before Compose may use that exact local tag. There is no `latest`, remote Git build/
+then the VPS verifies the transfer hash, activates the validated root-side operator script from the
+bundle, runs `docker load`, and checks both the loaded image ID and revision label before Compose may
+use that exact local tag. There is no `latest`, remote Git build/
 pull, GitHub, GHCR, external registry, or registry credential in the staging path.
 
 The launcher reads the ignored root `.env` and copies only allowlisted `YANDEX_AI_API_KEY`,
