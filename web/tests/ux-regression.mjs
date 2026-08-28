@@ -40,5 +40,7 @@ test("authenticated landing is an account centre with safe device actions", () =
   assert.match(app, /Выйти из браузера/);
   assert.match(app, /Отключить/);
   assert.match(app, /Это не завершит вход в текущем браузере/);
+  assert.match(app, /не удаляет passkey из браузера или Google Password Manager/);
+  assert.match(app, /Одинаковое имя «RockServer user» само по себе не доказывает/);
   assert.doesNotMatch(app, /credential_id|refresh_token|access_token/);
 });

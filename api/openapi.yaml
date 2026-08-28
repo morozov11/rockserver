@@ -361,7 +361,10 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/PairingCompletion" }
-        "401": { description: Proof is invalid, expired or consumed. The owner is derived server-side. }
+        "202": { description: Browser approval is still pending. Returns ErrorResponse with code pairing_pending. }
+        "401": { description: Proof is invalid. The owner is derived server-side. }
+        "409": { description: The account has reached its ten active-device limit. Returns ErrorResponse with code device_limit_reached. }
+        "410": { description: Pairing request is expired, consumed or revoked. Returns ErrorResponse with code pairing_expired. }
         "503": { description: Account persistence is unavailable. }
   /admin:
     get:
@@ -416,10 +419,8 @@ paths:
     post:
       operationId: searchStations
       summary: Find and rank internet radio stations
-      security:
-        - RockCastBearer: []
       description: >-
-        Accepts a natural-language request and returns ranked station streams.
+        Accepts a natural-language request and returns ranked station streams anonymously.
         Language, country, and exclusions are hard filters. Ranking is deterministic,
         with station ID ascending as the final tie-break, and optional semantic-provider
         failures degrade to metadata search.
@@ -446,8 +447,6 @@ paths:
                   locale: en-US
                   limit: 10
       responses:
-        "401":
-          $ref: "#/components/responses/AuthenticationRequired"
         "200":
           description: Ranked stations and the normalized interpretation of the query.
           content:
@@ -733,12 +732,8 @@ paths:
     get:
       operationId: streamVoiceCommandCompatibility
       deprecated: true
-      summary: Compatibility alias for the canonical voice streaming endpoint
-      security:
-        - RockCastBearer: []
+      summary: Anonymous compatibility alias for the canonical voice streaming endpoint
       responses:
-        "401":
-          $ref: "#/components/responses/AuthenticationRequired"
         "101":
           description: Same WebSocket protocol as `/api/v1/voice/stream`.
         "400":
@@ -747,9 +742,7 @@ paths:
     post:
       operationId: resolveVoiceCommandCompatibility
       deprecated: true
-      summary: Compatibility alias for the canonical voice-command endpoint
-      security:
-        - RockCastBearer: []
+      summary: Anonymous compatibility alias for the canonical voice-command endpoint
       description: >-
         Compatibility alias for `POST /api/v1/voice/command`. It has exactly the same request,
         response, validation, timeout, and error semantics. New Windows clients must use the
@@ -771,8 +764,6 @@ paths:
             schema:
               $ref: "#/components/schemas/VoiceCommandRequest"
       responses:
-        "401":
-          $ref: "#/components/responses/AuthenticationRequired"
         "200":
           description: Same response as the canonical endpoint.
           headers:
@@ -835,8 +826,9 @@ components:
       scheme: bearer
       bearerFormat: opaque
       description: >-
-        Required for all application routes. Until persisted, revocable per-client credentials are
-        implemented, the service uses the fixed local bootstrap credential shared with RockMobile.
+        Legacy deployment-configured Bearer credential required only for the protected `/api/v1/*`
+        compatibility routes. Normal `/v1/search` and `/v1/voice/*` product routes are anonymous;
+        this credential is not part of the account/device pairing UX and must not be exposed there.
     RockserverBearer:
       type: http
       scheme: bearer

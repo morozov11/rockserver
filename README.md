@@ -85,6 +85,15 @@ Caddy reverse proxy, and removes that project's containers, network, and volumes
 provided. Production uses `deploy/compose.production.yaml` only after a human supplies a real owned
 domain, secret injection, immutable image, VPS and firewall; those actions are not performed here.
 
+## Staging account cleanup
+
+The `account_cleanup` binary is a separate, preview-first operator tool for RM-011-G6. With the
+protected `DATABASE_URL` it prints only account/dependency IDs, statuses, counts and safe reasons;
+no account or credential name, token, hash, WebAuthn material or audit details is printed. No
+arguments means the same read-only preview. Mutations require `apply`, one UUID, and an exact
+action-specific confirmation phrase. Use the staging wrapper and the [RM-011-G6 runbook](docs/rm-011-g6-staging-runbook.md);
+never run a cleanup against production or choose a target by display name alone.
+
 ## Shared baseline catalog
 
 RockServer vendors the approved RockCatalog release under `catalog/rockcatalog/`: schema, canonical

@@ -10,7 +10,7 @@ COPY catalog ./catalog
 COPY release/mobile-catalog ./release/mobile-catalog
 
 # Cargo.lock is mandatory so a clean build resolves the reviewed dependency graph.
-RUN cargo build --locked --release --all-features --bin rockserver --bin import_shared_catalog --bin import_full_catalog --bin backfill_embeddings
+RUN cargo build --locked --release --all-features --bin rockserver --bin account_cleanup --bin import_shared_catalog --bin import_full_catalog --bin backfill_embeddings
 
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 
@@ -22,6 +22,7 @@ RUN apt-get update \
     && chown rockserver:rockserver /var/log/rockserver
 
 COPY --from=builder /build/target/release/rockserver /usr/local/bin/rockserver
+COPY --from=builder /build/target/release/account_cleanup /usr/local/bin/account_cleanup
 COPY --from=builder /build/target/release/import_shared_catalog /usr/local/bin/import_shared_catalog
 COPY --from=builder /build/target/release/import_full_catalog /usr/local/bin/import_full_catalog
 COPY --from=builder /build/target/release/backfill_embeddings /usr/local/bin/backfill_embeddings

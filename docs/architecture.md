@@ -64,6 +64,16 @@ The RS-007 migration enables pgvector and creates `station_embeddings`. Each row
 
 The controlled `backfill_embeddings` binary requires PostgreSQL and explicit `ROCKSERVER_SEMANTIC_PROVIDER=deterministic-dev`. It pages station documents by stable ID, embeds one station at a time, and idempotently inserts or updates provenance-specific rows. It is not called during HTTP startup or `POST /v1/search`, and it performs no provider network I/O. Radio Browser ownership/import semantics remain unchanged.
 
+The `account_cleanup` binary is a separate staging operator boundary. Its default command is a
+read-only inventory of account, passkey, identity, device, native-session, refresh-token,
+browser-session, pairing, WebAuthn-challenge, and audit rows with secret and personal-data fields
+redacted. An apply command accepts one UUID and an exact action-specific confirmation phrase;
+account deactivation and device/passkey revocation are transactional, auditable, and retain rows
+for recovery review. It never merges accounts, infers test ownership from names/age, or removes
+browser/Google Password Manager entries. It requires the non-secret
+`ROCKSERVER_CLEANUP_ENV=staging` guard, and the deployment wrapper exposes it only through the
+existing root-scoped operator command path.
+
 When `DATABASE_URL` is absent, startup selects `InMemoryStationRepository`; both choices are logged by backend name without logging a DSN or password. SQL uses runtime-checked queries rather than compile-time query macros, so normal builds do not require a live database. `compose.yaml` uses a pgvector-capable PostgreSQL 17 image with development-only defaults and a healthcheck. Import and embedding backfill always require `DATABASE_URL` and never fall back to memory.
 
 Hybrid scoring normalizes cosine similarity with `1 - cosine_distance / 2`, clamps it to `[0,1]`, and uses `0.70 * metadata_score + 0.30 * semantic_score` for compatible pairs. A station missing a compatible embedding keeps its unscaled metadata score. Without a valid query embedding, the existing metadata-only inclusion and score remain unchanged. Hard filters and exclusions are in the candidate CTE, before scoring and final limit; station ID ascending is the final deterministic tie-break.
@@ -78,6 +88,6 @@ The standalone [service diagrams](service-diagrams.html) summarize the current, 
 - **Domain:** normalized queries, filters, station candidates, scoring, and stable ranking are present.
 - **Persistence:** PostgreSQL migrations, development seed, SQL search repository, pgvector embeddings with provenance, controlled embedding store, provider ownership, import-run history, import-only upsert store, startup backend selection, and in-memory fallback are present.
 - **Providers:** bounded Radio Browser import, replaceable query-parser/LLM/embedding traits, deterministic parser fallback, Yandex AI Studio structured intent parsing, and an explicit development-only deterministic embedder are present outside inappropriate catalog boundaries. SpeechKit STT remains a separate future adapter.
-- **Operations:** tracing, import and embedding backfill logs, process liveness, repository-aware readiness, configurable binding, pgvector-capable local Compose, and Ctrl+C shutdown are present; metrics, rate limiting, broader shutdown triggers, stream probing, and deployment configuration remain planned.
+- **Operations:** tracing, import and embedding backfill logs, process liveness, repository-aware readiness, configurable binding, pgvector-capable local Compose, Ctrl+C shutdown, and the preview-first staging account-cleanup binary are present; metrics, broader shutdown triggers, and stream probing remain planned.
 
 Dependencies should point inward toward domain concepts. HTTP, database, and provider-specific types must not leak into the core ranking model.

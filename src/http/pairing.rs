@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::auth::{NewPairingRequest, NewPairingSession};
+use crate::auth::{NewPairingRequest, NewPairingSession, PairingCompletionOutcome};
 
 use super::{
     state::AppState,
@@ -430,7 +430,7 @@ pub(super) async fn complete_pairing_request(
         .complete_pairing(pairing_id, &token_hash(&payload.desktop_token), session)
         .await
     {
-        Ok(Some(result)) => {
+        Ok(PairingCompletionOutcome::Completed(result)) => {
             let mut response = with_request_id(
                 Json(PairingCompletionResponseDto {
                     user_id: result.user_id.to_string(),
@@ -450,10 +450,31 @@ pub(super) async fn complete_pairing_request(
                 .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             response
         }
-        Ok(None) => error_response(
+        Ok(PairingCompletionOutcome::Pending) => error_response(
+            StatusCode::ACCEPTED,
+            "pairing_pending",
+            "Pairing is waiting for browser approval.",
+            &request_id,
+            json!({}),
+        ),
+        Ok(PairingCompletionOutcome::NoLongerAvailable) => error_response(
+            StatusCode::GONE,
+            "pairing_expired",
+            "Pairing request is no longer available.",
+            &request_id,
+            json!({}),
+        ),
+        Ok(PairingCompletionOutcome::DeviceLimit) => error_response(
+            StatusCode::CONFLICT,
+            "device_limit_reached",
+            "This account has reached the 10-device limit.",
+            &request_id,
+            json!({"limit": 10}),
+        ),
+        Ok(PairingCompletionOutcome::InvalidProof) => error_response(
             StatusCode::UNAUTHORIZED,
             "pairing_rejected",
-            "Pairing proof is invalid, expired or already used.",
+            "Pairing proof is invalid or expired.",
             &request_id,
             json!({}),
         ),

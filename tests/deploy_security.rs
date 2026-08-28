@@ -71,3 +71,24 @@ fn caddy_image_build_is_non_interactive() {
     .expect("Caddy Dockerfile must be present");
     assert!(dockerfile.contains("RUN CI=true pnpm run build"));
 }
+
+/// Ensures staging cleanup is shipped as a constrained one-shot operator path rather than a public route.
+#[test]
+fn staging_cleanup_is_preview_first_and_exact_target_only() {
+    let dockerfile = std::fs::read_to_string(format!("{}/Dockerfile", env!("CARGO_MANIFEST_DIR")))
+        .expect("server Dockerfile must be present");
+    let remote = std::fs::read_to_string(format!(
+        "{}/deploy/remote-ops-001-d.sh",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("remote deployment script must be present");
+    assert!(dockerfile.contains("--bin account_cleanup"));
+    assert!(dockerfile.contains("/usr/local/bin/account_cleanup"));
+    assert!(remote.contains("cleanup) shift; cleanup_operator"));
+    assert!(remote.contains("cleanup usage is preview or apply <account|device|credential>"));
+    assert!(remote.contains("validate_uuid"));
+    assert!(remote.contains("cleanup *"));
+    assert!(remote.contains("DEACTIVATE ACCOUNT $id"));
+    assert!(remote.contains("REVOKE DEVICE $id"));
+    assert!(remote.contains("REVOKE CREDENTIAL $id"));
+}

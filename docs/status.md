@@ -2,6 +2,49 @@
 
 Last updated: 2026-08-28
 
+## RM-011-G7 — cross-repository account/pairing E2E verification (2026-08-28)
+
+The current RockServer, RockCast, and RockMobile checkouts were reviewed at their recorded
+`master` revisions. Server G1/G2, browser pairing context, RockCast G4, and RockMobile G5 expose
+the intended passkey-only, named-device flow without normal UUID or manual bearer-token entry.
+RockServer now distinguishes pending pairing (`202`) from invalid (`401`), device-limit (`409`),
+and expired/consumed/revoked (`410`) completion states. New-account registration creates no user
+until a successful passkey assertion and commits challenge, account, passkey, and browser session
+atomically. Both native clients cancel pending pairing on UI dismissal and no longer retry terminal
+responses.
+
+Local verification passes for RockServer formatting, strict Clippy, all-target/all-feature tests,
+OpenAPI contract tests, web typecheck/regression/build, RockCast formatting/check/unit tests/strict
+Clippy, and RockMobile unit tests/lint/debug assemble. Six disposable PostgreSQL account/pairing
+tests remain ignored without `TEST_DATABASE_URL`.
+
+RM-011-G7 is not accepted yet: real passkey/WebAuthn, Windows GUI, physical Android, staging, and
+live account/device-centre checks were intentionally not run. The remaining work is the separately
+authorized disposable-DB and physical-device smoke checklist in
+`docs/rm-011-g7-e2e-verification.md`; no staging mutation, deploy, commit, or push was performed.
+
+## RM-011-G6 — preview-first staging account cleanup (local, 2026-08-28)
+
+The staging-only `account_cleanup` operator binary and the root-scoped remote wrapper are
+implemented. Preview is the default and enumerates account, passkey, identity, device, native
+session, refresh-token, browser-session, pairing, WebAuthn-challenge, and safe audit dependencies
+without names, credential material, hashes, tokens, or arbitrary audit details. Apply accepts one
+exact UUID and action-specific confirmation phrase; account deactivation retains the tombstone and
+revokes every account-owned access dependency, device revoke cascades native sessions and refresh
+tokens, credential revoke retains the last active passkey, and active admin identities protect an
+account. No account ownership is inferred from display names or age, and browser/Google Password
+Manager passkeys remain a manual owner action. The account center and read-only admin preview now
+state this boundary explicitly.
+
+Local verification passed: `cargo fmt --check`, strict all-target/all-feature Clippy, and
+`cargo test --all-targets --all-features --jobs 1` (103 library tests, 4 cleanup CLI tests, 6
+deployment/security tests, 2 OpenAPI tests, 9 search API tests, 5 voice-command tests, and 1
+voice-stream test passed; 6 disposable PostgreSQL, 1 ONNX, 4 billable Yandex LLM, and 1
+SpeechKit integration tests remain ignored). Web `typecheck`, `lint`, `test` (5 tests), and
+`build` also passed, as did `git diff --check`. No staging cleanup, production operation, deploy,
+commit, or push was performed. The existing deploy PowerShell suite still has its unrelated
+pre-existing portable-image-ID assertion failure.
+
 ## SECURITY-001 — Rust TLS dependency remediation (deployed, 2026-08-28)
 
 GitHub Dependabot reported one high and two low advisories for `rustls-webpki 0.101.7`,

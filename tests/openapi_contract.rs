@@ -51,10 +51,12 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
             .is_some(),
         "search path must define POST"
     );
-    let completion = value_at(&document, "paths")
+    let completion_operation = value_at(&document, "paths")
         .and_then(|paths| paths.get("/v1/pairing-requests/{request_id}/complete"))
         .and_then(|path| path.get("post"))
-        .and_then(|operation| operation.get("requestBody"))
+        .expect("pairing completion must define POST");
+    let completion = completion_operation
+        .get("requestBody")
         .and_then(|body| body.get("content"))
         .and_then(|content| content.get("application/json"))
         .and_then(|json| json.get("schema"))
@@ -64,6 +66,15 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         .and_then(Value::as_sequence)
         .expect("pairing completion must require its desktop proof");
     assert_eq!(required, &vec![Value::String("desktop_token".to_owned())]);
+    for status in ["200", "202", "401", "409", "410", "503"] {
+        assert!(
+            completion_operation
+                .get("responses")
+                .and_then(|responses| responses.get(status))
+                .is_some(),
+            "pairing completion must document {status}"
+        );
+    }
     assert!(
         completion
             .get("properties")
@@ -84,13 +95,7 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
             "voice command must document {status}"
         );
     }
-    for path in [
-        "/v1/search",
-        "/api/v1/voice/command",
-        "/v1/voice/command",
-        "/api/v1/voice/stream",
-        "/v1/voice/stream",
-    ] {
+    for path in ["/api/v1/voice/command", "/api/v1/voice/stream"] {
         assert!(
             value_at(&document, "paths")
                 .and_then(|paths| paths.get(path))
@@ -98,7 +103,18 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
                 .and_then(|operations| operations.values().next())
                 .and_then(|operation| operation.get("security"))
                 .is_some(),
-            "{path} must require Bearer authentication"
+            "{path} must retain the legacy Bearer boundary"
+        );
+    }
+    for path in ["/v1/search", "/v1/voice/command", "/v1/voice/stream"] {
+        assert!(
+            value_at(&document, "paths")
+                .and_then(|paths| paths.get(path))
+                .and_then(Value::as_mapping)
+                .and_then(|operations| operations.values().next())
+                .and_then(|operation| operation.get("security"))
+                .is_none(),
+            "{path} must remain anonymous"
         );
     }
     assert!(

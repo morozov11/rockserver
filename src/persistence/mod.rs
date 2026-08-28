@@ -7,6 +7,10 @@ mod postgres;
 
 use std::{env, io, sync::Arc};
 
+pub use crate::account_cleanup::{
+    CleanupAccount, CleanupActionResult, CleanupCounts, CleanupDependency, CleanupError,
+    CleanupPreview,
+};
 pub use account_postgres::PostgresAccountStore;
 pub use embedding_postgres::PostgresEmbeddingStore;
 pub use import_postgres::{OwnedCatalogReplacement, PostgresImportStore};

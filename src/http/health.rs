@@ -55,7 +55,7 @@ const ADMIN_CONSOLE_HTML: &str = r#"<!doctype html>
 </head>
 <body>
   <header><div><div class="brand">ROCKSERVER</div><h1>Панель администратора</h1></div><span class="muted">локальный предпросмотр</span></header>
-  <p class="notice">Это первый просмотр интерфейса: токен не сохраняется в браузере и используется только для запросов в этой вкладке. Управление пользователями и изменение каталога пока не реализованы.</p>
+  <p class="notice">Это read-only просмотр: токен не сохраняется в браузере и используется только для запросов в этой вкладке. Очистка аккаунтов выполняется отдельной операторской командой с preview и точным подтверждением; эта страница не удаляет пользователей, passkey или устройства.</p>
   <section id="login" class="panel"><h2>Подключить консоль</h2><p class="muted">Введите значение <code>ROCKSERVER_API_BEARER_TOKEN</code> текущего сервера.</p><label for="token">Bearer token</label><input id="token" type="password" autocomplete="off" placeholder="Токен из переменной окружения"><div class="actions"><button id="connect">Подключиться</button></div><div id="message" aria-live="polite"></div></section>
   <main id="workspace">
     <section class="grid"><article class="panel"><h2>Сервис</h2><div class="metric" id="ready">—</div><span class="muted">готовность каталога</span></article><article class="panel"><h2>Доступ</h2><div class="metric">Bearer</div><span class="muted">токен только в памяти</span></article><article class="panel"><h2>Каталог</h2><div class="metric" id="result-count">—</div><span class="muted">найдено последним запросом</span></article></section>

@@ -1,3 +1,5 @@
+/// Preview-first cleanup boundary for one exact staging account, device, or passkey row.
+pub mod account_cleanup;
 /// Passkey-only account, device, and native-session domain boundaries.
 pub mod auth;
 /// Catalog domain and controlled import orchestration.

@@ -1,5 +1,48 @@
 # Task log
 
+## RM-011-G7 — 2026-08-28 — cross-repository account/pairing E2E verification
+
+- Goal: verify the real status and compatibility of the RockServer, RockCast, and RockMobile
+  account/pairing UX, and record what remains before RM-011-G closure.
+- Scope: source/contract review, deterministic browser harness, server/client unit/build/static
+  checks, secret/UI scan, E2E matrix, staging/physical-device checklist, and one RockServer-only
+  OpenAPI correction. No client changes, staging mutation, cleanup, migration, deploy, commit, or
+  push.
+- Result: named passkey/browser/device flow is present in all three checkouts and local radio
+  fallback is preserved. OpenAPI now accurately distinguishes anonymous `/v1/*` product routes
+  from legacy Bearer-protected `/api/v1/*` compatibility routes. Full live acceptance is blocked:
+  server completion collapses pending and terminal pairing failures into `401 pairing_rejected`,
+  and dismissing either native account UI does not reliably cancel a pending pairing job. A
+  cancelled registration can also leave an active user without a passkey.
+- Checks: RockServer `cargo fmt --check`, strict all-target/all-feature Clippy, `cargo test`,
+  `cargo test --all-targets --all-features --jobs 1`, OpenAPI tests, and `docker compose config`
+  passed; web typecheck/regression/build passed; RockCast fmt/check/tests passed with one unrelated
+  Clippy finding; RockMobile unit tests/assemble passed with three unrelated lint findings. Six
+  disposable PostgreSQL tests, live credential/provider tests, physical Android, Windows GUI and
+  staging smoke remain unrun. Details: `docs/rm-011-g7-e2e-verification.md`.
+- Status: **verification documented; RM-011-G remains open pending F-1/F-2, registration-policy
+  decision, disposable-DB coverage, and authorized staging/real-device smoke.**
+
+## RM-011-G6 — 2026-08-28 — preview-first staging account cleanup
+
+- Goal: safely retire obsolete staging accounts, passkey rows, devices, and access dependencies
+  after the G1/G2 pairing UX without guessing ownership or touching browser-managed passkeys.
+- Scope: redacted PostgreSQL preview, exact-UUID operator actions, transactional tombstone/revoke
+  cascades, safe audit events, staging-only deployment wrapper, account-center/read-only admin
+  messaging, runbook, and regression tests. No public HTTP route, auth-model weakening, migration,
+  staging cleanup, production action, deploy, commit, or push.
+- Result: preview is default and fail-closed behind `ROCKSERVER_CLEANUP_ENV=staging`; mutations
+  require one account/device/server credential row UUID plus its exact confirmation phrase. Account
+  deactivation blocks active admin identities, protects the last working passkey, revokes live
+  account dependencies, and retains audit/tombstone rows. The runbook separates server revocation
+  from manual Google Password Manager/browser cleanup and warns that duplicate `RockServer user`
+  labels do not identify an old key.
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features --jobs 1 -- -D warnings`;
+  `cargo test --all-targets --all-features --jobs 1` (all non-ignored tests passed; six disposable
+  PostgreSQL tests remain ignored); web `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build`;
+  `git diff --check`.
+- Status: **implemented locally; staging cleanup and deployment intentionally not performed.**
+
 ## REFACTOR-001 — 2026-08-28 — HTTP transport module extraction
 
 - Goal: separate the mixed HTTP endpoint module into understandable domain and transport layers
@@ -1183,3 +1226,19 @@
 - Status: **deployed and readiness-verified**. Commit
   `266b9740ae2f0489952f46a15e80a18791d09a7e` reached `origin/master`; OPS-001-D reported
   `status=succeeded` and readiness passed for the immutable server image.
+
+## RM-011-G7 blocker removal — 2026-08-28
+
+- Goal: remove the cross-repository pairing blockers found by the RM-011-G7 E2E verification.
+- Scope: distinguish pending/invalid/expired/device-limit server completion states; make first
+  account registration atomic after a successful passkey ceremony; cancel RockCast and RockMobile
+  pairing when the native UI is dismissed; and clear the existing RockCast Clippy and RockMobile
+  lint gates with targeted fixes.
+- Result: F-1/F-2/F-3 are resolved in the current uncommitted checkouts. No UUID/manual bearer
+  token path was introduced, and local radio/fallback behavior remains independent of the server.
+- Checks: RockServer fmt, strict Clippy and all-target/all-feature tests passed (103 library tests
+  plus available target tests; six disposable PostgreSQL tests ignored without
+  `TEST_DATABASE_URL`); OpenAPI contract tests passed. RockCast fmt/check/89 unit tests/strict
+  Clippy passed. RockMobile unit tests, debug assemble, and lint passed. No staging, commit, push,
+  or deploy was performed.
+- Status: **complete in local checkouts; disposable-DB and staging/real-device smoke remains.**

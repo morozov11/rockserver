@@ -103,7 +103,7 @@ bootstrap() {
   fi
   install -m 0750 "$stage/remote-ops-001-d.sh" "$release_root/remote-ops-001-d.sh"
   rule="$(mktemp /etc/sudoers.d/rockserver-deploy.XXXXXX)"
-  printf '%s ALL=(root) NOPASSWD: %s deploy *, %s status *\n' "$deploy_user" "$release_root/remote-ops-001-d.sh" "$release_root/remote-ops-001-d.sh" > "$rule"
+  printf '%s ALL=(root) NOPASSWD: %s deploy *, %s status *, %s cleanup *\n' "$deploy_user" "$release_root/remote-ops-001-d.sh" "$release_root/remote-ops-001-d.sh" "$release_root/remote-ops-001-d.sh" > "$rule"
   chmod 0440 "$rule"
   visudo -cf "$rule" >/dev/null || fail 'generated least-privilege sudo rule failed validation'
   mv "$rule" /etc/sudoers.d/rockserver-deploy
@@ -348,11 +348,57 @@ deploy_status() {
   printf 'status=unknown commit=%s\n' "$commit"
 }
 
+validate_uuid() {
+  [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || fail 'cleanup target must be one lowercase UUID from preview'
+}
+
+cleanup_operator() {
+  local mode="${1:-}" target id confirmation expected image caddy_image rockserver_container caddy_container compose
+  require_root
+  [ -f "$env_file" ] || fail 'bootstrap has not provisioned the protected runtime env-file'
+  if [ "$mode" = 'preview' ] && [ "$#" -eq 1 ]; then
+    target='preview'
+  elif [ "$mode" = 'apply' ] && [ "$#" -eq 6 ] && [ "$3" = '--id' ] && [ "$5" = '--confirm' ]; then
+    target="${2:?cleanup action required}"
+    id="$4"
+    confirmation="$6"
+    # The remote wrapper repeats the same exact-target checks as the binary so
+    # the sudo rule cannot be used to pass arbitrary commands or wildcards.
+    if [[ "$target" != account && "$target" != device && "$target" != credential ]]; then
+      fail 'cleanup action must be account, device, or credential'
+    fi
+    validate_uuid "$id"
+    case "$target" in
+      account) expected="DEACTIVATE ACCOUNT $id" ;;
+      device) expected="REVOKE DEVICE $id" ;;
+      credential) expected="REVOKE CREDENTIAL $id" ;;
+    esac
+    [ "$confirmation" = "$expected" ] || fail 'confirmation does not match the exact target'
+  else
+    fail 'cleanup usage is preview or apply <account|device|credential> --id <UUID> --confirm <exact phrase>'
+  fi
+
+  rockserver_container="$(docker ps --filter label=com.docker.compose.project=rockserver --filter label=com.docker.compose.service=rockserver --format '{{.ID}}')"
+  caddy_container="$(docker ps --filter label=com.docker.compose.project=rockserver --filter label=com.docker.compose.service=caddy --format '{{.ID}}')"
+  [[ -n "$rockserver_container" && "$rockserver_container" != *$'\n'* ]] || fail 'exactly one running RockServer container is required'
+  [[ -n "$caddy_container" && "$caddy_container" != *$'\n'* ]] || fail 'exactly one running Caddy container is required'
+  image="$(docker inspect --format '{{.Config.Image}}' "$rockserver_container")"
+  caddy_image="$(docker inspect --format '{{.Config.Image}}' "$caddy_container")"
+  [ -n "$image" ] && [ -n "$caddy_image" ] || fail 'deployed image identity is unavailable'
+  compose="docker compose --project-name rockserver --env-file $env_file --file $release_root/compose.yaml --file $release_root/compose.production.yaml"
+  if [ "$target" = 'preview' ]; then
+    ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose run --rm --no-deps -e ROCKSERVER_CLEANUP_ENV=staging --entrypoint /usr/local/bin/account_cleanup rockserver preview
+  else
+    ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose run --rm --no-deps -e ROCKSERVER_CLEANUP_ENV=staging --entrypoint /usr/local/bin/account_cleanup rockserver apply "$target" --id "$id" --confirm "$confirmation"
+  fi
+}
+
 case "$action" in
   bootstrap) shift; bootstrap "$@" ;;
   deploy) shift; submit_deploy "$@" ;;
   deploy-worker) shift; deploy_worker "$@" ;;
   deploy-internal) shift; deploy_internal "$@" ;;
   status) shift; deploy_status "$@" ;;
+  cleanup) shift; cleanup_operator "$@" ;;
   *) fail 'unsupported action' ;;
 esac

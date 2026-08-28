@@ -12,7 +12,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::auth::{NewBrowserSession, NewWebAuthnChallenge, WebAuthnCeremony, webauthn};
+use crate::auth::{
+    NewBrowserSession, NewPasskeyRegistration, NewWebAuthnChallenge, PasskeyRegistrationOutcome,
+    WebAuthnCeremony, webauthn,
+};
 
 use super::{
     state::AppState,
@@ -66,6 +69,13 @@ struct RegistrationOptionsRequestDto {
 struct RegistrationOptionsDto {
     challenge_id: Uuid,
     options: passkey_auth::RegistrationChallenge,
+}
+
+#[derive(Deserialize, Serialize)]
+struct RegistrationStateContext {
+    user_id: Uuid,
+    account_display_name: String,
+    state: passkey_auth::RegistrationState,
 }
 
 #[derive(Serialize)]
@@ -126,20 +136,12 @@ pub(super) async fn registration_options(
         );
     };
     let user_id = Uuid::new_v4();
-    if store
-        .create_user_with_display_name(user_id, account_display_name)
-        .await
-        .is_err()
-    {
-        return error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "auth_unavailable",
-            "Account service is temporarily unavailable.",
-            &request_id,
-            json!({}),
-        );
-    }
     let (options, state_blob) = webauthn::start_registration(user_id, account_display_name);
+    let state_blob = RegistrationStateContext {
+        user_id,
+        account_display_name: account_display_name.to_owned(),
+        state: state_blob,
+    };
     let encoded = match webauthn::encode_state(&state_blob) {
         Ok(value) => value,
         Err(_) => {
@@ -153,7 +155,7 @@ pub(super) async fn registration_options(
         }
     };
     let challenge_id = Uuid::new_v4();
-    let challenge_hash = token_hash(&state_blob.challenge.to_b64url());
+    let challenge_hash = token_hash(&state_blob.state.challenge.to_b64url());
     let challenge = NewWebAuthnChallenge {
         challenge_id,
         challenge_hash: &challenge_hash,
@@ -162,7 +164,7 @@ pub(super) async fn registration_options(
         rp_id: webauthn::RP_ID,
         origin: webauthn::ORIGIN,
         expires_at_rfc3339: "unused: database clock",
-        user_id: Some(user_id),
+        user_id: None,
         browser_session_id: None,
         pairing_request_id: None,
     };
@@ -229,7 +231,7 @@ pub(super) async fn registration_verify(
             json!({}),
         );
     };
-    let state_blob: passkey_auth::RegistrationState = match webauthn::decode_state(&encoded) {
+    let state_blob: RegistrationStateContext = match webauthn::decode_state(&encoded) {
         Ok(value) => value,
         Err(_) => {
             return error_response(
@@ -241,7 +243,7 @@ pub(super) async fn registration_verify(
             );
         }
     };
-    let credential = match webauthn::finish_registration(&state_blob, &payload.response) {
+    let credential = match webauthn::finish_registration(&state_blob.state, &payload.response) {
         Ok(value) => value,
         Err(_) => {
             return error_response(
@@ -253,81 +255,33 @@ pub(super) async fn registration_verify(
             );
         }
     };
-    let challenge_hash = token_hash(&state_blob.challenge.to_b64url());
-    if !store
-        .consume_webauthn_challenge(
-            payload.challenge_id,
-            &challenge_hash,
-            WebAuthnCeremony::Registration,
-            webauthn::ORIGIN,
-            webauthn::RP_ID,
-        )
-        .await
-        .unwrap_or(false)
-    {
-        return error_response(
-            StatusCode::UNAUTHORIZED,
-            "challenge_rejected",
-            "The passkey challenge is expired or already used.",
-            &request_id,
-            json!({}),
-        );
-    }
-    if !store
-        .create_passkey_credential(
-            Uuid::new_v4(),
-            Uuid::from_slice(&state_blob.user_id).unwrap_or_default(),
-            credential.id.as_bytes(),
-            credential.public_key_cose.as_bytes(),
-            i64::from(credential.counter),
-            &credential.transports,
-        )
-        .await
-        .unwrap_or(false)
-    {
-        return error_response(
-            StatusCode::CONFLICT,
-            "credential_rejected",
-            "The passkey credential is already registered.",
-            &request_id,
-            json!({}),
-        );
-    }
-    let registered_user_id = Uuid::from_slice(&state_blob.user_id).unwrap_or_default();
     let session_token = Uuid::new_v4().simple().to_string();
     let csrf_token = Uuid::new_v4().simple().to_string();
+    let session_token_hash = token_hash(&session_token);
+    let csrf_hash = token_hash(&csrf_token);
+    let challenge_hash = token_hash(&state_blob.state.challenge.to_b64url());
     let browser = NewBrowserSession {
         session_id: Uuid::new_v4(),
-        user_id: registered_user_id,
-        session_token_hash: &token_hash(&session_token),
-        csrf_hash: &token_hash(&csrf_token),
+        user_id: state_blob.user_id,
+        session_token_hash: &session_token_hash,
+        csrf_hash: &csrf_hash,
         passkey_reauthenticated_at_rfc3339: "unused: database clock",
         expires_at_rfc3339: "unused: database clock",
     };
-    if !store
-        .create_browser_session_for_minutes(browser, 30)
-        .await
-        .unwrap_or(false)
-    {
-        return error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "auth_unavailable",
-            "Authentication service is temporarily unavailable.",
-            &request_id,
-            json!({}),
-        );
-    }
-    let account_display_name = match store.account_display_name(registered_user_id).await {
-        Ok(Some(name)) => name,
-        Ok(None) => {
-            return error_response(
-                StatusCode::UNAUTHORIZED,
-                "credential_rejected",
-                "The passkey response was rejected.",
-                &request_id,
-                json!({}),
-            );
-        }
+    let registration = NewPasskeyRegistration {
+        user_id: state_blob.user_id,
+        account_display_name: &state_blob.account_display_name,
+        challenge_id: payload.challenge_id,
+        challenge_hash: &challenge_hash,
+        credential_id: Uuid::new_v4(),
+        credential_bytes: credential.id.as_bytes(),
+        public_key: credential.public_key_cose.as_bytes(),
+        sign_count: i64::from(credential.counter),
+        transports: &credential.transports,
+        browser_session: browser,
+    };
+    let registration_outcome = match store.complete_passkey_registration(registration).await {
+        Ok(value) => value,
         Err(_) => {
             return error_response(
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -338,8 +292,29 @@ pub(super) async fn registration_verify(
             );
         }
     };
+    match registration_outcome {
+        PasskeyRegistrationOutcome::ChallengeRejected => {
+            return error_response(
+                StatusCode::UNAUTHORIZED,
+                "challenge_rejected",
+                "The passkey challenge is expired or already used.",
+                &request_id,
+                json!({}),
+            );
+        }
+        PasskeyRegistrationOutcome::CredentialAlreadyRegistered => {
+            return error_response(
+                StatusCode::CONFLICT,
+                "credential_rejected",
+                "The passkey credential is already registered.",
+                &request_id,
+                json!({}),
+            );
+        }
+        PasskeyRegistrationOutcome::Created => {}
+    }
     let mut response = with_request_id(
-        Json(json!({"account_display_name": account_display_name, "csrf_token": csrf_token}))
+        Json(json!({"account_display_name": state_blob.account_display_name, "csrf_token": csrf_token}))
             .into_response(),
         &request_id,
     );

@@ -206,6 +206,30 @@ pub struct NewBrowserSession<'a> {
     pub expires_at_rfc3339: &'a str,
 }
 
+/// Hashed passkey, challenge, and browser-session material committed as one account transaction.
+pub struct NewPasskeyRegistration<'a> {
+    /// Account identifier reserved by the server for this ceremony.
+    pub user_id: Uuid,
+    /// New account's user-facing label.
+    pub account_display_name: &'a str,
+    /// Registration challenge row to consume.
+    pub challenge_id: Uuid,
+    /// Hash of the challenge value stored in the server-side state.
+    pub challenge_hash: &'a SecretHash,
+    /// New passkey row identifier.
+    pub credential_id: Uuid,
+    /// Authenticator credential identifier bytes.
+    pub credential_bytes: &'a [u8],
+    /// COSE public key bytes.
+    pub public_key: &'a [u8],
+    /// Authenticator sign counter at registration.
+    pub sign_count: i64,
+    /// Authenticator transport hints.
+    pub transports: &'a [String],
+    /// Browser session issued after successful registration.
+    pub browser_session: NewBrowserSession<'a>,
+}
+
 /// Hashed proofs and bounded device metadata for a pending desktop pairing request.
 pub struct NewPairingRequest<'a> {
     /// Pairing request identifier.
@@ -269,6 +293,32 @@ pub struct PairingCompletion {
     pub device_type: String,
 }
 
+/// Safe persistence outcome for a native pairing completion attempt.
+#[derive(Debug, Eq, PartialEq)]
+pub enum PairingCompletionOutcome {
+    /// The request is valid but browser approval has not happened yet.
+    Pending,
+    /// The request is no longer usable because it expired, was consumed, or was revoked.
+    NoLongerAvailable,
+    /// The account has reached its active-device limit.
+    DeviceLimit,
+    /// The supplied desktop proof did not identify a valid request.
+    InvalidProof,
+    /// The request was consumed and the device/session were created.
+    Completed(PairingCompletion),
+}
+
+/// Safe persistence outcome for a first-account passkey registration attempt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PasskeyRegistrationOutcome {
+    /// The account, credential, browser session, and challenge consumption committed together.
+    Created,
+    /// The server-side registration challenge is no longer valid.
+    ChallengeRejected,
+    /// The authenticator credential is already registered.
+    CredentialAlreadyRegistered,
+}
+
 /// Non-secret pairing details shown to a browser after a short-code lookup.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PairingPreview {
@@ -314,7 +364,8 @@ pub enum RefreshError {
 pub fn is_safe_audit_event(event_type: &str) -> bool {
     matches!(
         event_type,
-        "passkey_registered"
+        "account_registered"
+            | "passkey_registered"
             | "passkey_revoked"
             | "pairing_completed"
             | "refresh_rotated"
@@ -325,6 +376,9 @@ pub fn is_safe_audit_event(event_type: &str) -> bool {
             | "device_renamed"
             | "account_deletion_accepted"
             | "account_deletion_completed"
+            | "operator_account_deactivated"
+            | "operator_device_revoked"
+            | "operator_passkey_revoked"
     )
 }
 

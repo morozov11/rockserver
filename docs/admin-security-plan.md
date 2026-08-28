@@ -93,3 +93,14 @@ without affecting other clients; failed logins are throttled; the admin can
 list stations and filtered request records; security-sensitive values never
 appear in response bodies, trace logs, or persisted audit records. Every
 public HTTP change is represented in `api/openapi.yaml`.
+
+## RM-011-G6 operator boundary
+
+The staging cleanup path is deliberately separate from this future admin-session console. The
+`account_cleanup` one-shot binary runs only from the root-scoped deployment wrapper, defaults to
+read-only preview, and accepts one exact account/device/passkey row UUID plus an action-specific
+confirmation phrase for mutation. It uses the existing PostgreSQL tombstone/revoke policy and
+safe audit vocabulary; it does not create an admin role, add a public HTTP route, merge accounts,
+or expose token/credential material. A live admin identity, if represented in the reserved
+`account_identities` table, blocks account deactivation, and a live account's last passkey cannot
+be revoked.
