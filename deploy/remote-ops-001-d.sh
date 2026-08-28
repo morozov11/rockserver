@@ -112,7 +112,7 @@ bootstrap() {
   printf '%s\n' 'Bootstrap completed. Key login and a command-scoped non-interactive deploy sudo rule are installed. Review firewall manually: restrict TCP 22; expose only 80/443; never expose 3000/5432. SSH password-login policy is unchanged.'
 }
 validate_artifact() {
-  local stage="$1" image="$2" commit="$3" archive_hash="$4" actual_hash loaded_id label
+  local stage="$1" image="$2" commit="$3" archive_hash="$4" expected_id="${5:-}" actual_hash loaded_id label
   [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || fail 'commit must be a full lowercase SHA'
   [ "$image" = "rockserver:sha-$commit" ] || fail 'image reference must exactly match the source commit'
   [[ "$archive_hash" =~ ^[0-9a-f]{64}$ ]] || fail 'artifact SHA-256 is invalid'
@@ -127,6 +127,10 @@ validate_artifact() {
   # byte transfer; the revision label binds that verified artifact to commit.
   [[ "$loaded_id" =~ ^sha256:[0-9a-f]{64}$ ]] || fail 'loaded image ID is invalid'
   [ "$label" = "$commit" ] || fail 'loaded image revision label does not match the current commit'
+  if [ -n "$expected_id" ]; then
+    [[ "$expected_id" =~ ^sha256:[0-9a-f]{64}$ ]] || fail 'portable image ID is invalid'
+    [ "$loaded_id" = "$expected_id" ] || fail 'portable image config ID mismatch'
+  fi
   printf '%s\n' "$loaded_id"
 }
 validate_caddy_artifact() {
@@ -245,15 +249,25 @@ write_catalog_marker() {
   printf 'catalog_version=%s\ncatalog_count=%s\ncatalog_sha256=%s\n' "$version" "$count" "$checksum" > "$marker"
   chmod 0600 "$marker"
 }
+prune_backups() {
+  local retained_backup
+  retained_backup="${1:?retained backup required}"
+  [ -f "$retained_backup" ] || fail 'refusing to prune backups before the new backup is available'
+  find -P "$release_root/backups" -mindepth 1 -maxdepth 1 -type f -name 'rockserver-*.dump' ! -path "$retained_backup" -delete
+}
 deploy_internal() {
-  local stage="${1:?stage required}" image="${2:?image required}" caddy_image="${3:?Caddy image required}" commit="${4:?commit required}" archive_hash="${5:?artifact hash required}" caddy_archive_hash="${6:?Caddy artifact hash required}"
+  local stage="${1:?stage required}" image="${2:?image required}" caddy_image="${3:?Caddy image required}" commit="${4:?commit required}" archive_hash="${5:?artifact hash required}" caddy_archive_hash="${6:?Caddy artifact hash required}" portable_image_id="${7:-}" legacy_caddy="${8:-0}"
   local backup container backup_hash domain catalog_version catalog_count compose loaded_id
   require_root; validate_stage "$stage"
   [ -f "$env_file" ] || fail 'bootstrap has not provisioned the protected runtime env-file'
   ensure_host_log_dir
   install_owner_files "$stage"
-  loaded_id="$(validate_artifact "$stage" "$image" "$commit" "$archive_hash")"
-  validate_caddy_artifact "$stage" "$caddy_image" "$commit" "$caddy_archive_hash"
+  loaded_id="$(validate_artifact "$stage" "$image" "$commit" "$archive_hash" "$portable_image_id")"
+  if [ "$legacy_caddy" = 1 ]; then
+    [[ "$caddy_image" =~ ^[A-Za-z0-9._:/@-]+$ ]] || fail 'existing Caddy image reference is invalid'
+  else
+    validate_caddy_artifact "$stage" "$caddy_image" "$commit" "$caddy_archive_hash"
+  fi
   download_onnx
   compose="docker compose --project-name rockserver --env-file $env_file --file $release_root/compose.yaml --file $release_root/compose.production.yaml"
   ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose config >/dev/null
@@ -264,6 +278,11 @@ deploy_internal() {
   docker cp "${container}:/tmp/ops001d.dump" "$backup"
   ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose exec -T postgres rm -f /tmp/ops001d.dump
   backup_hash="$(sha256sum "$backup" | awk '{print $1}')"
+  [ "${#backup_hash}" -eq 64 ] || fail 'new PostgreSQL backup checksum is invalid; previous backups were kept'
+  # Keep exactly one on-VPS deploy rollback point.  This happens only after a
+  # complete new dump was copied and checksummed, so a failed backup never
+  # erases the last recoverable dump.
+  prune_backups "$backup"
   # A full release replacement deletes/rebuilds derived vectors.  Skip that
   # costly operation only when the exact pinned release was already completed
   # and PostgreSQL still contains every station and every embedding.
@@ -289,8 +308,34 @@ deploy_internal() {
 # be tied to a caller's SSH session: a lost laptop/network connection must not
 # leave a loaded image and seeded database without starting the web service.
 submit_deploy() {
-  local stage="${1:?stage required}" image="${2:?image required}" caddy_image="${3:?Caddy image required}" commit="${4:?commit required}"
+  local stage image caddy_image commit archive_hash caddy_archive_hash portable_image_id legacy_caddy
   local existing_commit worker_log pid
+  # Accept the former five-argument form while an older root-owned operator
+  # script may still be installed on the VPS. Its fourth value is the
+  # portable image config ID; the current detached form adds a Caddy image and
+  # its artifact hash. The four-argument form is retained for the same
+  # migration window, without weakening the validation below.
+  case "$#" in
+    6)
+      stage="$1"; image="$2"; caddy_image="$3"; commit="$4"
+      archive_hash="$5"; caddy_archive_hash="$6"; portable_image_id=''; legacy_caddy=0
+      ;;
+    5)
+      stage="$1"; image="$2"; commit="$3"; portable_image_id="$4"; archive_hash="$5"
+      caddy_image="$(docker ps --filter label=com.docker.compose.project=rockserver --filter label=com.docker.compose.service=caddy --format '{{.Image}}')"
+      [[ -n "$caddy_image" && "$caddy_image" != *$'\n'* ]] || fail 'former deploy form requires an existing Caddy container'
+      caddy_archive_hash='legacy-existing'; legacy_caddy=1
+      ;;
+    4)
+      stage="$1"; image="$2"; commit="$3"; archive_hash="$4"; portable_image_id=''
+      caddy_image="$(docker ps --filter label=com.docker.compose.project=rockserver --filter label=com.docker.compose.service=caddy --format '{{.Image}}')"
+      [[ -n "$caddy_image" && "$caddy_image" != *$'\n'* ]] || fail 'former deploy form requires an existing Caddy container'
+      caddy_archive_hash='legacy-existing'; legacy_caddy=1
+      ;;
+    *)
+      fail 'deploy requires stage, image, commit, and artifact hash'
+      ;;
+  esac
   require_root; validate_stage "$stage"; validate_commit "$commit"
   [ -f "$env_file" ] || fail 'bootstrap has not provisioned the protected runtime env-file'
   install -d -m 0750 "$release_root/releases"
@@ -313,7 +358,7 @@ submit_deploy() {
   write_deploy_status "$commit" queued
   # nohup detaches the worker from SSH's SIGHUP.  All output goes to a
   # protected host log, while the status file contains only safe metadata.
-  nohup "$release_root/remote-ops-001-d.sh" deploy-worker "$@" > "$worker_log" 2>&1 < /dev/null &
+  nohup "$release_root/remote-ops-001-d.sh" deploy-worker "$stage" "$image" "$caddy_image" "$commit" "$archive_hash" "$caddy_archive_hash" "$portable_image_id" "$legacy_caddy" > "$worker_log" 2>&1 < /dev/null &
   pid="$!"
   printf '%s\n' "$pid" > "$deploy_lock/pid"
   printf 'status=queued commit=%s pid=%s\n' "$commit" "$pid"

@@ -76,7 +76,7 @@ try {
     if ($launcher -notmatch 'docker image save' -or $remote -notmatch 'docker image load') { throw 'registry-free artifact transfer is missing' }
     if ($remote -notmatch 'transferred image artifact checksum mismatch' -or $remote -notmatch 'revision label binds that verified artifact to commit' -or $remote -match 'loaded image ID does not match') { throw 'cross-engine image artifact verification is not portable' }
     if ($remote -notmatch 'Accept the former five-argument form' -or $remote -notmatch 'deploy requires stage, image, commit, and artifact hash') { throw 'operator-script upgrade compatibility is missing' }
-    if ($remote -notmatch 'ROCKSERVER_IMAGE="\$image" \$compose exec' -or $remote -notmatch 'ROCKSERVER_IMAGE="\$image" \$compose ps') { throw 'Compose interpolation environment is not preserved for database commands' }
+    if ($remote -notmatch 'ROCKSERVER_IMAGE="\$image".*\$compose exec' -or $remote -notmatch 'ROCKSERVER_IMAGE="\$image".*\$compose ps') { throw 'Compose interpolation environment is not preserved for database commands' }
     if ($remote -notmatch 'os\.chmod\(path, 0o755 if name == .libonnxruntime\.so. else 0o644\)') { throw 'ONNX runtime executable permissions are not repaired after download' }
     if ($remote -notmatch 'os\.chmod\(root, 0o755\)') { throw 'ONNX asset directory is not traversable by the container user' }
     if (($remote -notmatch 'tarfile\.open') -or ($remote -notmatch 'for _ in range\(8\)') -or ($remote -notmatch 'member\.issym\(\)') -or ($remote -notmatch 'member\.islnk\(\)')) { throw 'ONNX runtime symlink archive extraction is not safe' }
@@ -84,6 +84,7 @@ try {
     if ($remote -notmatch 'nohup.*deploy-worker' -or $remote -notmatch 'write_deploy_status.*running' -or $remote -notmatch 'write_deploy_status.*succeeded' -or $remote -notmatch 'write_deploy_status.*failed' -or $remote -notmatch 'reattached=true') { throw 'remote deploy worker is not resilient to a lost SSH session' }
     if ($remote -notmatch 'status \*' -or $launcher -notmatch 'statusCommand' -or $launcher -notmatch 'connection-retrying' -or $launcher -notmatch 'AddMinutes\(90\)') { throw 'launcher cannot reconnect to a detached remote deploy worker' }
     if ($remote -notmatch 'catalog_seed_is_current' -or $remote -notmatch 'catalog seed skipped' -or $remote -notmatch 'OPS001D_CATALOG_SHA256' -or $remote -notmatch 'station_embeddings') { throw 'unchanged full catalog cannot skip redundant ONNX backfill' }
+    if ($remote -notmatch 'prune_backups\(\)' -or $remote -notmatch 'find -P "\$release_root/backups" -mindepth 1 -maxdepth 1 -type f -name ''rockserver-\*\.dump''' -or $remote -notmatch 'new PostgreSQL backup checksum is invalid; previous backups were kept') { throw 'on-VPS backup retention is not safe and bounded to one verified dump' }
     $backupAt = $remote.IndexOf('pg_dump --format=custom')
     $seedAt = $remote.IndexOf('run --rm catalog_seed')
     $readyAt = $remote.IndexOf('/health/ready')

@@ -97,6 +97,17 @@ try {
         & docker image save --output $archive $image
         if ($LASTEXITCODE -ne 0) { throw 'Could not create the local image artifact.' }
         $archiveHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+        # Docker Desktop may save an OCI manifest list while a Linux Docker
+        # Engine loads the platform image's config ID. Read the config digest
+        # from this exact tarball so the release summary uses the portable
+        # identity that the remote engine will see after docker load.
+        $archiveManifestJson = (& tar.exe -xOf $archive 'manifest.json' | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Could not read manifest.json from the local image artifact.' }
+        $archiveManifest = @(ConvertFrom-Json -InputObject $archiveManifestJson)
+        if ($archiveManifest.Count -ne 1 -or [string]$archiveManifest[0].Config -notmatch '^(?:blobs/sha256/)?(?<id>[0-9a-f]{64})(?:\.json)?$') { throw 'Local image artifact has an invalid manifest config reference.' }
+        $portableImageId = "sha256:$($Matches.id)"
+        Test-Ops001DArtifactIdentity -Image $image -Commit $commit -ImageId $portableImageId -LabelCommit $labelCommit | Out-Null
+        $imageId = $portableImageId
         & docker build --label "org.opencontainers.image.revision=$commit" --file (Join-Path $PSScriptRoot 'Dockerfile.caddy') --tag $caddyImage $repoRoot
         if ($LASTEXITCODE -ne 0) { throw 'Local Caddy image build failed.' }
         $caddyLabelsJson = (& docker image inspect --format '{{json .Config.Labels}}' $caddyImage).Trim()
