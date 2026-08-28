@@ -16,7 +16,8 @@
   `cargo test` (100 passed; five PostgreSQL tests ignored without `TEST_DATABASE_URL`), OpenAPI
   contract tests included in the full suite, and `git diff --check` passed. `cargo check
   --all-targets --all-features` also passed.
-- Status: **implemented locally; refactor changes remain uncommitted and were not pushed or deployed.**
+- Status: **implemented, committed as `2afcae0`, pushed to `origin/master`, and deployed through
+  the OPS-001-D staging rollout; readiness passed.**
 
 ## HTTP transport architecture guardrail — 2026-08-28
 

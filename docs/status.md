@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-28
 
-## REFACTOR-001 — HTTP transport module extraction (local, 2026-08-28)
+## REFACTOR-001 — HTTP transport module extraction (deployed, 2026-08-28)
 
 The behavior-preserving HTTP extraction is complete for the first slice. The former 3,704-line
 `src/http/endpoints.rs` is now a 392-line composition root. Route handlers and their local
@@ -15,6 +15,10 @@ pairing ownership, audit classifications, rate limits, and voice limits are unch
 and DTO regressions now sit beside their transport boundaries. Verified locally with formatting,
 strict Clippy, full Rust tests (100 passed; five disposable PostgreSQL tests remain opt-in without
 `TEST_DATABASE_URL`), OpenAPI contract tests, and `git diff --check`. No web files were changed.
+
+Commit `2afcae0` was pushed to `origin/master` and deployed through the OPS-001-D staging
+rollout. The immutable server image was accepted by the remote worker and the public readiness
+gate passed.
 
 The next reasonable extractions are `src/persistence/account_postgres.rs` (1,150 lines),
 `src/search/mod.rs` (1,103 lines), and the PostgreSQL integration test module (1,184 lines); they
