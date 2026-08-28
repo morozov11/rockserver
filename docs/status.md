@@ -27,8 +27,9 @@ The deploy hardening follow-up preserves the requested on-VPS backup retention b
 new dump is copied and checksummed, older `rockserver-*.dump` files are removed while the new dump
 is retained; any earlier failure leaves the previous dump untouched. The launcher also records the
 portable image config ID from the exact saved archive, and the remote wrapper retains compatibility
-with the former deploy argument shape. The deploy-script suite passes locally. These changes are in
-commit `392d8b4`; push and staging readiness are pending.
+with the former deploy argument shape. The deploy-script suite passes locally. Commits `392d8b4`
+and `26906ef` reached `origin/master`; OPS-001-D reported `status=succeeded` and readiness passed
+for image `sha256:bf80ed529b0a7c1ffc14c2333730851fdaddfadf401a90a1c03a6052e190cd3f`.
 
 ## RM-011-G6 — preview-first staging account cleanup (local, 2026-08-28)
 

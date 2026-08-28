@@ -1254,6 +1254,7 @@
   extraction on Windows, preserve former deploy argument compatibility, and update the static deploy
   checks for the current Caddy-aware compose environment.
 - Result: a new dump is verified before old matching dumps are removed; a failed dump/checksum does
-  not prune the previous backup. Local OPS-001-D tests pass. Commit `392d8b4` was created locally;
-  push and deploy are the next steps.
-- Status: **ready for push and staging deploy.**
+  not prune the previous backup. Local OPS-001-D tests pass. Commit `392d8b4` contains the behavior
+  and `26906ef` records the verification; both reached `origin/master`, and OPS-001-D reported
+  `status=succeeded` with readiness passed.
+- Status: **deployed and readiness-verified; manual account/device smoke remains.**

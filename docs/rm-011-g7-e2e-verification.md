@@ -254,6 +254,8 @@ physical devices are attached. Run later in a separately authorized, disposable 
   remains.
 
 Pairing fixes are in RockServer commit `99c2783`, RockCast commit `0bd9639`, and RockMobile commit
-`fd1693d`. Deploy/backup hardening is in RockServer commit `392d8b4`. These commits have not yet
-been reflected in this report as a successful staging rollout; the real passkey/device smoke
-checklist remains manual and no staging data was changed by the verification run.
+`fd1693d`. Deploy/backup hardening is in RockServer commits `392d8b4` and `26906ef`; they reached
+`origin/master`, and OPS-001-D completed successfully with readiness passed for the immutable
+RockServer image `sha256:bf80ed529b0a7c1ffc14c2333730851fdaddfadf401a90a1c03a6052e190cd3f`.
+The real passkey/device smoke checklist remains manual; no staging account data was changed by the
+verification run.
