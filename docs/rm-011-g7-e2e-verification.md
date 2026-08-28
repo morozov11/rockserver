@@ -262,4 +262,7 @@ verification run.
 
 On 2026-08-29 a read-only staging audit found that the prior deploy had left 19 historical
 `rockserver-*.dump` files because the uploaded operator script was not activated before the worker
-started. The corrective deploy-path change is pending rollout; no backup was deleted by the audit.
+started. Commit `27beb6c` activated the staged operator before the worker; the deploy reported
+`status=succeeded` with readiness passed, and a read-only post-deploy audit confirmed exactly one
+`rockserver-*.dump` remains (`rockserver-20260828-210609Z.dump`). No backup was deleted by the
+audit itself.

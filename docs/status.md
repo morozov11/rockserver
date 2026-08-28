@@ -31,10 +31,11 @@ with the former deploy argument shape. The deploy-script suite passes locally. C
 and `26906ef` reached `origin/master`; OPS-001-D reported `status=succeeded` and readiness passed
 for image `sha256:bf80ed529b0a7c1ffc14c2333730851fdaddfadf401a90a1c03a6052e190cd3f`.
 
-Follow-up verification found that this rollout did not activate the uploaded root-side operator
-script, so staging still retained older backup files. The fix is prepared locally: after acquiring
-the deploy lock, normal deploy validates and installs the bundle operator script before starting
-the detached worker. OPS-001-D local tests pass; the fixed deploy is pending.
+Follow-up verification found that the previous rollout did not activate the uploaded root-side
+operator script, so staging retained older backup files. Commit `27beb6c` now validates and installs
+the bundle operator script after acquiring the deploy lock and before starting the detached worker.
+OPS-001-D local tests pass; the fix was deployed successfully and staging now has exactly one
+`rockserver-*.dump` rollback backup.
 
 ## RM-011-G6 — preview-first staging account cleanup (local, 2026-08-28)
 

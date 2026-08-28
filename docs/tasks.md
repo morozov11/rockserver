@@ -1268,5 +1268,7 @@
 - Fix: after taking the deploy lock and before starting the worker, validate the staged operator
   file is a regular non-symlink and install it as the active root-side script. If lock or bundle
   validation fails, the old script remains active.
-- Checks: OPS-001-D local tests and `git diff --check` pass. Push and staging deploy are pending.
-- Status: **ready for push and staging deploy.**
+- Checks: OPS-001-D local tests and `git diff --check` pass. Commit `27beb6c` reached
+  `origin/master`; OPS-001-D reported `status=succeeded` and readiness passed. A read-only audit
+  confirmed exactly one staging `rockserver-*.dump` remains after deploy.
+- Status: **deployed, readiness-verified, and backup retention confirmed.**
