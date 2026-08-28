@@ -1,4 +1,4 @@
-//! Shared state and admission controls for HTTP handlers.
+//! Shared HTTP state and process-local admission controls.
 
 use std::{
     collections::HashMap,
@@ -12,13 +12,25 @@ use axum::{
 };
 use serde_json::json;
 
-use super::{
-    GLOBAL_VOICE_SESSIONS, PublicLimit, RATE_WINDOW, RETRY_AFTER_SECONDS,
-    VOICE_CAPACITY_RETRY_AFTER_SECONDS, VoiceSlot, constant_time_eq, error_response, retry_after,
-};
 use crate::{persistence::PostgresAccountStore, search::SearchService, voice::SpeechRecognizers};
 
-/// Runtime dependencies and process-local admission state for HTTP handlers.
+use super::{
+    transport::{constant_time_eq, error_response, retry_after},
+    voice::VoiceSlot,
+};
+
+const GLOBAL_VOICE_SESSIONS: usize = 100;
+const RATE_WINDOW: Duration = Duration::from_secs(60);
+const RETRY_AFTER_SECONDS: u64 = 60;
+const VOICE_CAPACITY_RETRY_AFTER_SECONDS: u64 = 30;
+
+#[derive(Clone, Copy)]
+/// Per-endpoint anonymous request and burst limits.
+pub(super) struct PublicLimit {
+    pub(super) requests: usize,
+    pub(super) burst: usize,
+}
+
 #[derive(Clone)]
 pub(super) struct AppState {
     pub(super) search_service: SearchService,
@@ -30,8 +42,8 @@ pub(super) struct AppState {
     pub(super) public_limits: Arc<Mutex<PublicLimitState>>,
 }
 
-/// Process-local counters used by the anonymous HTTP quota and voice admission guard.
 #[derive(Default)]
+/// Process-local buckets used by anonymous HTTP admission control.
 pub(super) struct PublicLimitState {
     pub(super) requests: HashMap<&'static str, Vec<std::time::Instant>>,
     pub(super) active_voice: usize,

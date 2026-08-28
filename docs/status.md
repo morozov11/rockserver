@@ -2,6 +2,24 @@
 
 Last updated: 2026-08-28
 
+## REFACTOR-001 — HTTP transport module extraction (local, 2026-08-28)
+
+The behavior-preserving HTTP extraction is complete for the first slice. The former 3,704-line
+`src/http/endpoints.rs` is now a 392-line composition root. Route handlers and their local
+transport types live in `auth.rs`, `account.rs`, `pairing.rs`, `catalog.rs`, `search.rs`, and
+`voice.rs`; shared request/response and trust-boundary helpers live in `transport.rs`, admission
+state remains in `state.rs`, and liveness/admin behavior lives in `health.rs`.
+
+All existing routes, OpenAPI files, migrations, serialization, authentication, CSRF, proxy trust,
+pairing ownership, audit classifications, rate limits, and voice limits are unchanged. Security
+and DTO regressions now sit beside their transport boundaries. Verified locally with formatting,
+strict Clippy, full Rust tests (100 passed; five disposable PostgreSQL tests remain opt-in without
+`TEST_DATABASE_URL`), OpenAPI contract tests, and `git diff --check`. No web files were changed.
+
+The next reasonable extractions are `src/persistence/account_postgres.rs` (1,150 lines),
+`src/search/mod.rs` (1,103 lines), and the PostgreSQL integration test module (1,184 lines); they
+are intentionally left for separate, independently verifiable tasks.
+
 ## HTTP transport maintainability (2026-08-28)
 
 Added the always-applied project rule `.cursor/rules/http-module-boundaries.mdc`: new HTTP work

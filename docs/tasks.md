@@ -1,5 +1,23 @@
 # Task log
 
+## REFACTOR-001 — 2026-08-28 — HTTP transport module extraction
+
+- Goal: separate the mixed HTTP endpoint module into understandable domain and transport layers
+  without changing public behavior.
+- Scope: route composition, auth, account/device management, pairing, catalog, search, voice,
+  health/admin, shared HTTP transport, admission state, and boundary-local unit tests. No OpenAPI,
+  migration, persistence, web, authorization, or business-logic changes.
+- Result: `src/http/endpoints.rs` decreased from 3,704 to 392 lines and now only builds the shared
+  router and preserves the public router constructors. The extracted modules have one clear
+  responsibility each; common request IDs, error bodies, JSON parsing, proxy/origin trust,
+  credential hashing, and response DTOs are in `transport.rs`, while rate admission remains in
+  `state.rs`. Security, pairing-preview, and device-name regressions moved next to their modules.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
+  `cargo test` (100 passed; five PostgreSQL tests ignored without `TEST_DATABASE_URL`), OpenAPI
+  contract tests included in the full suite, and `git diff --check` passed. `cargo check
+  --all-targets --all-features` also passed.
+- Status: **implemented locally; refactor changes remain uncommitted and were not pushed or deployed.**
+
 ## HTTP transport architecture guardrail — 2026-08-28
 
 - Goal: prevent further growth of the legacy mixed HTTP endpoint module.
