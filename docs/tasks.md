@@ -19,8 +19,10 @@
   API harness rendered both the named RockMobile target/anonymous choices and the named signed-in
   confirmation. No passkey, account or staging pairing request was created. PostgreSQL tests remain
   opt-in without `TEST_DATABASE_URL`.
-- Status: **implemented locally; standard staging deploy awaits an immutable clean commit and was
-  not bypassed.**
+- Deployment: commit `efc405a` completed through the standard detached staging worker with
+  `readiness=passed`. A fresh read-only browser session displays the new anonymous landing without
+  a UUID or general pairing-code field; no account or passkey was created.
+- Status: **deployed to staging.**
 
 ## RM-011-G1 — 2026-08-28 — account and pairing contract
 

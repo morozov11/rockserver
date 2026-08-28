@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-28
 
-## RM-011-G2 — browser account and pairing UX (implemented locally, staging deploy pending)
+## RM-011-G2 — browser account and pairing UX (deployed to staging, 2026-08-28)
 
 The ordinary page is now a safe account landing page: it states whether the browser is signed in,
 offers username-less passkey sign-in when anonymous, and has no general pairing-code or device
@@ -26,8 +26,9 @@ tests; four disposable PostgreSQL tests remain ignored without `TEST_DATABASE_UR
 regressions, typecheck/lint and production build. A clean browser automation session confirmed no
 UUID/code field on the landing page, then used a local deterministic API harness (no account,
 credential or staging request) to verify both the anonymous target-device screen and the signed-in
-named account confirmation. Staging deployment is pending the primary flow's immutable commit
-because this task must not commit or bypass the clean-worktree gate.
+named account confirmation. Staging deploy of `efc405a` completed through the standard detached
+worker with readiness passed; a fresh read-only browser session shows the new anonymous landing
+without a UUID or general pairing-code field.
 
 ## RM-011-F P0 blocker fix — username-less discoverable passkey login (deployed, 2026-08-27)
 
