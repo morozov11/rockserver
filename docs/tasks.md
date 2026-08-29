@@ -1,5 +1,20 @@
 # Task log
 
+## RM-011-R2 — 2026-08-30 — native availability recovery
+
+- Goal: reproduce and remove the reported native account-service-unavailable condition using a
+  disposable Android emulator and the official RockCast runtime.
+- Scope: safe staging health/schema/proxy probes; a disposable anonymous Mobile pairing creation;
+  Mobile stale-endpoint recovery and release metadata; local RockCast startup and tests. No
+  account lookup, credential/proof capture, passkey bypass, destructive database action, or push.
+- Result: staging account service/proxy/migrations are healthy, and a clean Mobile release reaches
+  pairing confirmation. Mobile commit `4f7495d` fixes retained unsupported endpoint overrides and
+  uses the actual build version. RockCast release starts and its account/session suite passes.
+- Checks: RockServer format, strict Clippy, 103 tests, web 11/11 and build; Mobile unit tests,
+  lint, release build, APK certificate/metadata and emulator install; RockCast format and 93 tests.
+- Status: availability fault addressed and verified without a user account. Passkey-dependent
+  completion/session/device-list E2E remains unverified and is not claimed.
+
 ## RM-011-E2E-R1 — 2026-08-30 — late browser-session state regression
 
 - Goal: diagnose the first permitted disposable staging pairing attempt without retaining sensitive

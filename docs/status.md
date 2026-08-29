@@ -17,6 +17,15 @@ evidence. The investigation is continuing without collecting account, session, c
 QR, or device identifiers. The correct public release certificate SHA-256 is
 `92:E7:BE:49:13:A9:4A:4B:50:E3:75:87:BA:BA:13:F3:60:D4:94:7C:48:30:CD:FD:E1:04:02:13:E6:34:25:39`.
 
+On 2026-08-30, staging containers, PostgreSQL readiness and all account migrations were verified
+healthy, and anonymous probes through Caddy returned the expected `401 authentication_required`
+for both browser account endpoints. A clean disposable Android emulator running the official
+RockMobile release created a pairing request and reached its confirmation state without an
+availability error. RockMobile `0.1.3`/`versionCode=4` now removes stale endpoint overrides and
+reports its actual build version; its signed APK was verified against the public App Link
+fingerprint. RockCast release started locally and its 93 tests passed. A passkey-approved native
+completion and device list still need an available authenticator; no E2E pass is claimed.
+
 ## RM-011 — final integration (staging deploy complete; E2E blocked, 2026-08-29)
 
 RockServer commit `e171096e55ce1b5912fb76615c584775313a8fb9` now publishes the Android

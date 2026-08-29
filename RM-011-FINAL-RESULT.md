@@ -8,6 +8,12 @@ Date: 2026-08-29
 > returned `200`. E2E is nevertheless not passed pending a fresh disposable flow. No sensitive flow
 > data is recorded here.
 
+> Update, 2026-08-30 (R2): staging health, account schema and trusted-proxy anonymous behaviour
+> were verified. RockMobile release `0.1.3`/`versionCode=4` removes stale endpoint settings and
+> reports its actual build version; a clean disposable emulator reaches pairing confirmation.
+> RockCast release starts locally and its 93-test suite passes. A passkey-approved native
+> completion remains unverified, so this is not an E2E completion claim.
+
 ## Outcome
 
 RockServer staging deploy is complete for
