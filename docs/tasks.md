@@ -10,9 +10,10 @@
   SQLSTATE `42601`. They now use Rust string continuations and emit valid whitespace.
 - Checks: the existing disposable PostgreSQL
   `postgres_browser_account_centre_owns_rename_and_revoke` regression passed after the fix;
-  the ordinary Rust suite passed 103 tests. Staging deployment and renewed physical pairing are
-  pending.
-- Status: **complete locally; staging deployment pending.**
+  the ordinary Rust suite passed 103 tests; formatting and strict Clippy passed. OPS-001-D deployed
+  commit `c36e652` with `status=succeeded`, and public readiness returned `200`. Renewed physical
+  pairing remains pending.
+- Status: **staging deployment verified; physical pairing pending.**
 
 ## RM-011-E2E-R2 — 2026-08-30 — stale browser reauthentication guard
 
