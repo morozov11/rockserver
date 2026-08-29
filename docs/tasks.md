@@ -6,8 +6,9 @@
   rollout path and the existing pairing lifecycle.
 - Scope: existing Preact URL parsing and deterministic regressions only; no server API, OpenAPI,
   deploy, staging or account/device operation.
-- Result: new handoffs use `?code=<code>#secret=<proof>`; fragment/query secrets are memory-only
-  and immediately scrubbed with `history.replaceState`. Legacy query support ends at
+- Result: new handoffs use `?code=<code>#secret=<proof>`; fragment/query secrets are memory-only,
+  retained across rerenders only in the first render's ref, and immediately scrubbed with
+  `history.replaceState`. Legacy query support ends at
   2026-09-29T00:00:00Z. Regression coverage asserts fragment parsing, cleanup, bounded legacy
   support and no console output.
 - Checks: web `pnpm test` (10/10), web `pnpm build`, `cargo fmt --check`, strict Clippy and

@@ -7,7 +7,9 @@ Last updated: 2026-08-29
 The web pairing handoff now takes the approval secret from `#secret` while retaining the short
 code in `?code`. It parses that fragment only in memory and replaces the current history entry
 immediately with a URL that has no fragment or `secret` query parameter, before pairing lookup or
-other effects run. The former query-secret shape is accepted only until 2026-09-29T00:00:00Z and
+other effects run. The parsed handoff is retained only in the first render's memory, so later
+rerenders cannot recover it from the cleaned URL. The former query-secret shape is accepted only
+until 2026-09-29T00:00:00Z and
 is removed from the address bar in the same way. The secret is not rendered, logged, persisted or
 sent in a navigation/referrer; approval continues to submit it only in the existing same-origin
 request body.
