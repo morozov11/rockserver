@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { api, browserAuthenticationOptions, browserRegistrationOptions, serializeAuthentication, serializeRegistration, type ApiError, type BrowserAccount, type PairingPreview } from "./api";
 import "./style.css";
 
@@ -18,6 +18,11 @@ const passkeyErrorMessage = (error: unknown) => {
   return (error as ApiError)?.code ? "Сервер временно недоступен. Повторите попытку позже." : "Не удалось выполнить вход с passkey.";
 };
 
+const registrationErrorMessage = (error: unknown) => {
+  if (error instanceof DOMException && (error.name === "AbortError" || error.name === "NotAllowedError")) return "Создание отменено. Имя аккаунта сохранено — попробуйте ещё раз, когда будете готовы.";
+  return errorMessage(error);
+};
+
 const deviceProductName = (deviceType: string) => deviceType.toLowerCase().includes("mobile") ? "RockMobile" : "RockCast";
 const formatDate = (value: string) => new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 type PairingState = "loading" | "anonymous" | "authenticated" | "approving" | "approved" | "terminal" | "unavailable";
@@ -28,6 +33,7 @@ export function App() {
   const code = params.get("code")?.trim().toUpperCase() ?? "";
   const approvalSecret = params.get("secret") ?? "";
   const isPairing = Boolean(code && approvalSecret);
+  const [screen, setScreen] = useState<"main" | "register">(() => location.pathname === "/register" ? "register" : "main");
   const [preview, setPreview] = useState<PairingPreview>();
   const [message, setMessage] = useState("");
   const [csrf, setCsrf] = useState("");
@@ -36,6 +42,8 @@ export function App() {
   const [pairingState, setPairingState] = useState<PairingState>("loading");
   const [busy, setBusy] = useState(false);
   const [account, setAccount] = useState<BrowserAccount>();
+  const [registrationComplete, setRegistrationComplete] = useState(false);
+  const registrationBusy = useRef(false);
 
   const lookup = async () => {
     try {
@@ -60,17 +68,25 @@ export function App() {
   useEffect(() => { void restoreSession(); if (isPairing) void lookup(); }, []);
 
   const register = async () => {
+    if (registrationBusy.current) return;
+    if (!registrationName.trim()) { setMessage("Введите имя аккаунта или выберите «Rock account»."); return; }
+    registrationBusy.current = true;
     setBusy(true); setMessage("");
     try {
       if (!window.PublicKeyCredential) throw new Error("Браузер не поддерживает passkey.");
-      const started = await api.registrationOptions(registrationName.trim() ? { account_display_name: registrationName.trim() } : undefined);
+      const started = await api.registrationOptions({ account_display_name: registrationName.trim() });
       const credential = await navigator.credentials.create({ publicKey: browserRegistrationOptions(started) });
       if (!(credential instanceof PublicKeyCredential)) throw new Error("Passkey не создан.");
       const result = await api.registrationVerify({ challenge_id: started.challenge_id, ...serializeRegistration(credential) });
       setCsrf(result.csrf_token); setAuthenticatedAccountName(result.account_display_name);
-      setMessage("Rock-аккаунт создан. Теперь можно подтвердить устройство.");
-      if (isPairing) await lookup();
-    } catch (error) { setMessage(errorMessage(error)); } finally { setBusy(false); }
+      if (isPairing) {
+        history.replaceState(null, "", `/${location.search}`);
+        setScreen("main");
+        setMessage("Rock-аккаунт создан, вход выполнен. Теперь подтвердите показанное устройство.");
+        await lookup();
+        setPairingState("authenticated");
+      } else setRegistrationComplete(true);
+    } catch (error) { setMessage(registrationErrorMessage(error)); } finally { registrationBusy.current = false; setBusy(false); }
   };
   const authenticate = async () => {
     if (!window.PublicKeyCredential) { setMessage("Браузер не поддерживает passkey."); return; }
@@ -114,7 +130,24 @@ export function App() {
     try { await api.logoutBrowser(csrf); setCsrf(""); setAuthenticatedAccountName(""); setAccount(undefined); setMessage("Вы вышли из аккаунта в этом браузере."); } catch (error) { setMessage(errorMessage(error)); } finally { setBusy(false); }
   };
 
-  if (!isPairing) return <main><header><span>ROCK</span><h1>Rock-аккаунт</h1></header><section><h2>{authenticatedAccountName ? `Аккаунт «${authenticatedAccountName}»` : "Вы не вошли"}</h2><p>{authenticatedAccountName ? "RockCast и RockMobile, показанные ниже, принадлежат этому аккаунту." : "Войдите, чтобы увидеть подключённые устройства или подтвердить устройство по защищённой ссылке."}</p>{!authenticatedAccountName && <button onClick={authenticate} disabled={busy}>{busy ? "Проверяем…" : "Войти с passkey"}</button>}{authenticatedAccountName && <button className="secondary" onClick={logout} disabled={busy}>Выйти из браузера</button>}</section>{account && <><section><h2>Устройства ({account.devices.length} из {account.device_limit})</h2><p>Чтобы подключить новое устройство после достижения лимита, отключите здесь ненужное устройство. Управление системными passkey выполняется в настройках браузера или ОС.</p>{account.devices.length === 0 ? <p>Пока нет подключённых устройств.</p> : <ul className="devices">{account.devices.map(device => <li key={device.device_id}><div><strong>{deviceProductName(device.device_type)} — {device.device_display_name}</strong><p>{device.session_status === "active" ? "Сессия активна" : "Нет активной сессии"} · Подключено {formatDate(device.connected_at)}{device.last_seen_at && ` · Активность ${formatDate(device.last_seen_at)}`}</p></div><div><button className="secondary" onClick={() => rename(device.device_id, device.device_display_name)} disabled={busy}>Переименовать</button><button className="danger" onClick={() => revoke(device.device_id, device.device_display_name)} disabled={busy}>Отключить</button></div></li>)}</ul>}</section><section><h2>Безопасность доступа</h2><p>«Отключить» завершает native-сессии выбранного RockCast или RockMobile. Это не завершает вход в текущем браузере; для него используйте «Выйти из браузера» выше.</p><p>Сервер отключает устройства и сессии, но не удаляет passkey из браузера или Google Password Manager. Старый ключ удаляйте вручную только после успешного входа новым ключом. Одинаковое имя «RockServer user» само по себе не доказывает, что запись старая.</p></section></>}{message && <p role="alert">{message}</p>}<footer>Passkey и данные сессии не сохраняются в браузере.</footer></main>;
+  const openRegistration = () => {
+    history.pushState(null, "", `/register${location.search}`);
+    setMessage("");
+    setScreen("register");
+  };
+  const returnFromRegistration = () => {
+    history.replaceState(null, "", `/${location.search}`);
+    setMessage("");
+    setScreen("main");
+  };
+
+  if (screen === "register") return <main><header><span>ROCK</span><h1>Создать Rock-аккаунт</h1></header>
+    {registrationComplete ? <section><p className="eyebrow">Аккаунт создан</p><h2>Вход в браузере выполнен</h2><p>Rock-аккаунт «{authenticatedAccountName}» создан и защищён passkey.</p><a className="button" href="/">Открыть аккаунт и устройства</a></section>
+      : <section><p>Создайте новый Rock-аккаунт с passkey. Для входа в существующий аккаунт используйте отдельный вход.</p><label htmlFor="account-name">Имя аккаунта <span className="example">Например, Алексей</span></label><input id="account-name" value={registrationName} maxLength={128} placeholder="Например, Алексей" disabled={busy} onInput={event => setRegistrationName(event.currentTarget.value)} />
+        <button className="secondary" onClick={() => setRegistrationName("Rock account")} disabled={busy}>Использовать «Rock account»</button><button onClick={register} disabled={busy}>{busy ? "Создаём…" : "Создать аккаунт с passkey"}</button><button className="link-button" onClick={returnFromRegistration} disabled={busy}>У меня уже есть аккаунт</button></section>}
+    {message && <p role="alert">{message}</p>}<footer>Passkey и данные сессии не сохраняются в браузере.</footer></main>;
+
+  if (!isPairing) return <main><header><span>ROCK</span><h1>Rock-аккаунт</h1></header><section><h2>{authenticatedAccountName ? `Аккаунт «${authenticatedAccountName}»` : "Вы не вошли"}</h2><p>{authenticatedAccountName ? "RockCast и RockMobile, показанные ниже, принадлежат этому аккаунту." : "Вход открывает существующий Rock-аккаунт. Создание аккаунта создаёт новый аккаунт с passkey."}</p>{!authenticatedAccountName && <><button onClick={authenticate} disabled={busy}>{busy ? "Проверяем…" : "Войти с passkey"}</button><button className="secondary" onClick={openRegistration} disabled={busy}>Создать Rock-аккаунт</button></>}{authenticatedAccountName && <button className="secondary" onClick={logout} disabled={busy}>Выйти из браузера</button>}</section>{account && <><section><h2>Устройства ({account.devices.length} из {account.device_limit})</h2><p>Чтобы подключить новое устройство после достижения лимита, отключите здесь ненужное устройство. Управление системными passkey выполняется в настройках браузера или ОС.</p>{account.devices.length === 0 ? <p>Пока нет подключённых устройств.</p> : <ul className="devices">{account.devices.map(device => <li key={device.device_id}><div><strong>{deviceProductName(device.device_type)} — {device.device_display_name}</strong><p>{device.session_status === "active" ? "Сессия активна" : "Нет активной сессии"} · Подключено {formatDate(device.connected_at)}{device.last_seen_at && ` · Активность ${formatDate(device.last_seen_at)}`}</p></div><div><button className="secondary" onClick={() => rename(device.device_id, device.device_display_name)} disabled={busy}>Переименовать</button><button className="danger" onClick={() => revoke(device.device_id, device.device_display_name)} disabled={busy}>Отключить</button></div></li>)}</ul>}</section><section><h2>Безопасность доступа</h2><p>«Отключить» завершает native-сессии выбранного RockCast или RockMobile. Это не завершает вход в текущем браузере; для него используйте «Выйти из браузера» выше.</p><p>Сервер отключает устройства и сессии, но не удаляет passkey из браузера или Google Password Manager. Старый ключ удаляйте вручную только после успешного входа новым ключом. Одинаковое имя «RockServer user» само по себе не доказывает, что запись старая.</p></section></>}{message && <p role="alert">{message}</p>}<footer>Passkey и данные сессии не сохраняются в браузере.</footer></main>;
 
   const deviceType = deviceProductName(preview?.device_type ?? "");
   return <main><header><span>ROCK</span><h1>Подключение устройства</h1></header>
@@ -122,7 +155,7 @@ export function App() {
     {message && <p role="alert">{message}</p>}
     {preview && pairingState === "approved" ? <section><p className="eyebrow">Устройство подключено</p><h2>{deviceType} — {preview.device_display_name} подключён к «{authenticatedAccountName}»</h2>{deviceType === "RockMobile" ? <a className="button" href="/return/rockmobile">Вернуться в RockMobile</a> : <p>Вернитесь в RockCast.</p>}<a className="button secondary" href="/">Открыть аккаунт и устройства</a></section>
       : preview && authenticatedAccountName && csrf ? <section><h2>Подключить {deviceType} к аккаунту «{authenticatedAccountName}»?</h2><p>Будет подключено только показанное выше устройство.</p><button onClick={approve} disabled={pairingState !== "authenticated"}>{pairingState === "approving" ? "Подключаем…" : "Подключить"}</button><a className="button secondary" href="/">Отмена</a></section>
-      : preview ? <section><h2>Чтобы продолжить</h2><p>Войдите в существующий Rock-аккаунт или создайте новый. После этого вы вернётесь к этому устройству.</p><button onClick={authenticate} disabled={busy}>{busy ? "Проверяем…" : "Войти с passkey"}</button><div className="create"><h3>Создать Rock-аккаунт</h3><p>Это создаст новый отдельный аккаунт, а не войдёт в существующий.</p><label>Имя аккаунта <input value={registrationName} maxLength={128} placeholder="Например, Алексей" onInput={event => setRegistrationName(event.currentTarget.value)} /></label><button className="secondary" onClick={register} disabled={busy}>Создать Rock-аккаунт</button></div></section>
+      : preview ? <section><h2>Чтобы продолжить</h2><p>Войдите в существующий Rock-аккаунт или создайте новый. После этого вы вернётесь к этому устройству.</p><button onClick={authenticate} disabled={busy}>{busy ? "Проверяем…" : "Войти с passkey"}</button><button className="secondary" onClick={openRegistration} disabled={busy}>Создать Rock-аккаунт</button></section>
       : <section><h2>Ссылка подключения недействительна</h2><p>Откройте новую защищённую ссылку на устройстве, которое хотите подключить.</p></section>}
     <footer>Passkey и данные сессии не сохраняются в браузере.</footer></main>;
 }
