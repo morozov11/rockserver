@@ -2,6 +2,29 @@
 
 Last updated: 2026-08-29
 
+## RM-011-09 — Wave 9 A4 secure pairing handoff (local, 2026-08-29)
+
+The web pairing handoff now takes the approval secret from `#secret` while retaining the short
+code in `?code`. It parses that fragment only in memory and replaces the current history entry
+immediately with a URL that has no fragment or `secret` query parameter, before pairing lookup or
+other effects run. The former query-secret shape is accepted only until 2026-09-29T00:00:00Z and
+is removed from the address bar in the same way. The secret is not rendered, logged, persisted or
+sent in a navigation/referrer; approval continues to submit it only in the existing same-origin
+request body.
+
+No API/OpenAPI, server lifecycle, deployment, staging data or account/device state changed. The
+repository has no `assetlinks.json`/`.well-known` asset: production Caddy serves only the web build
+from `/srv`. Therefore production Android App Link verification remains an external release
+blocker: the operator must publish the domain-owned `/.well-known/assetlinks.json` with package
+`com.rockmobile` and the SHA-256 certificate fingerprint of the private release signer. No such
+signer fingerprint was read; `keystore.properties` is deliberately untracked.
+
+Verified locally: web `pnpm test` (10/10) and `pnpm build`; `cargo fmt --check`; strict
+`cargo clippy --all-targets --all-features -- -D warnings`; and `cargo test` (103 library tests,
+with six disposable PostgreSQL and six credential/live tests intentionally ignored). No push,
+deploy, staging mutation, browser ceremony, account/device operation or production App Link claim
+was made.
+
 ## RM-011-08 — authenticated web cabinet UX (local, 2026-08-29)
 
 RM-011 web A8–A12 is complete locally. The existing Preact cabinet now has exclusive loading,
