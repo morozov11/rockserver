@@ -1317,5 +1317,5 @@
 - Checks: `cd web && pnpm test` (9/9), `cd web && pnpm build`, `cargo fmt --check`, strict
   all-target/all-feature Clippy, and `cargo test` passed; six disposable PostgreSQL, four billable
   Yandex LLM, one SpeechKit, and one ONNX live test remain intentionally ignored. `git diff
-  --check` is pending the final documentation/result records.
+  --check` passed.
 - Status: **complete locally; no deploy, push, staging, or real account/device operation.**
