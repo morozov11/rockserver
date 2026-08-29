@@ -23,6 +23,12 @@ account but its passkey was deleted: the cookie cannot approve a new device, the
 be restored, and the user may create a separate Rock account for the current pairing. It neither
 alters nor merges the original account.
 
+Commit `a247ffc` was verified with the same 11/11 Web regressions, typecheck/lint/build, Rust
+formatting, strict Clippy, and 103 Rust tests. OPS-001-D deployed it with `status=succeeded`;
+public readiness returned `200` and the published bundle contains the distinct-account recovery
+control. A user-held passkey ceremony is still required for a new account, so no completion E2E is
+claimed by this verification.
+
 ## RM-011 — live E2E regression found; web race fixed locally (2026-08-30)
 
 The first permitted disposable staging attempt exposed a real regression: an initial browser-session

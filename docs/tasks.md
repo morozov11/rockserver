@@ -22,7 +22,15 @@
   browser cookie as a substitute for authentication.
 - Scope: pairing-page explanation and a route to create a distinct account for the active pairing.
   It never restores, changes, merges, or deletes the existing account.
-- Result: implementation complete; verification and staging deployment pending.
+- Result: the page explains that a deleted passkey cannot be recovered from a browser cookie and
+  offers a separate-account registration route while retaining the active pairing context.
+- Checks: Web regression tests 11/11, typecheck/lint/build, `cargo fmt --check`, strict Clippy,
+  and `cargo test` (103 passed) completed. Existing disposable PostgreSQL and credential/live tests
+  remain intentionally ignored. OPS-001-D deployed commit `a247ffc` with `status=succeeded`;
+  public readiness was `200` and the published bundle contains the distinct-account recovery
+  control.
+- Status: staging deployment verified. A user passkey ceremony and physical native completion
+  remain pending and are not claimed.
 
 ## RM-011-R2 — 2026-08-30 — native availability recovery
 
