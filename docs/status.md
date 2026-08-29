@@ -888,6 +888,20 @@ has no `node` command).
 RM-011-C is complete at its server/browser boundary. Real-client staging pairing and mobile/native
 session UX are explicitly deferred to RM-011-D/E.
 
+## RM-011 wave 1 — A1/A2 browser pairing state
+
+The Preact pairing page now keeps editable registration input separate from the verified browser
+account name. Approval requires a verified account, CSRF token, pending preview, and the exclusive
+`authenticated` pairing state. A successful approval enters a dedicated success screen; pending
+details and registration/passkey/approval controls are removed, and Mobile/RockCast-specific return
+guidance plus an account-centre link are shown. Reloading an approved or consumed request resolves
+to a terminal screen because lookup no longer returns a pending preview.
+
+Verification: all eight web UX regressions, TypeScript typecheck/lint, Vite production build,
+`cargo fmt --check`, strict all-target/all-feature Clippy, and all available Rust tests pass. Six
+disposable PostgreSQL tests and six credential/asset-dependent live tests remain intentionally
+ignored. OpenAPI and server behavior were not changed; staging/manual browser smoke was not run.
+
 ## HTTP transport refactor
 
 The HTTP module is now a thin public facade. Route handlers and transport logic live in

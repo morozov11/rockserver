@@ -24,6 +24,28 @@ test("an existing browser session receives a tab-local CSRF proof before approva
   assert.match(api, /browserSession\(\).*\/v1\/auth\/browser-session/);
   assert.match(app, /Подключить \{deviceType\} к аккаунту/);
   assert.match(app, /approvalSecret, preview\.verification_phrase, csrf/);
+  assert.match(app, /!authenticatedAccountName \|\| !csrf \|\| pairingState !== "authenticated"/);
+});
+
+test("typing the first registration letter stays on the registration form", () => {
+  assert.match(app, /const \[registrationName, setRegistrationName\]/);
+  assert.match(app, /const \[authenticatedAccountName, setAuthenticatedAccountName\]/);
+  assert.match(app, /onInput=\{event => setRegistrationName\(event\.currentTarget\.value\)\}/);
+  assert.doesNotMatch(app, /onInput=\{event => setAuthenticatedAccountName/);
+});
+
+test("a 204 approval enters an exclusive success state with clear CTAs", () => {
+  assert.match(app, /await api\.approvePairing[\s\S]*setPairingState\("approved"\)/);
+  assert.match(app, /pairingState === "approved"/);
+  assert.match(app, /Вернуться в RockMobile/);
+  assert.match(app, /Вернитесь в RockCast/);
+  assert.match(app, /Открыть аккаунт и устройства/);
+  assert.match(app, /pairingState !== "approved"/);
+});
+
+test("an approved or consumed request reload cannot expose enabled approval", () => {
+  assert.match(app, /setPreview\(undefined\);[\s\S]*setPairingState\(\(error as ApiError\)\?\.code === "server_unavailable" \? "unavailable" : "terminal"\)/);
+  assert.match(app, /disabled=\{pairingState !== "authenticated"\}/);
 });
 
 test("unavailable API responses stay user-facing and never expose HTTP details", () => {

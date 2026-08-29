@@ -1272,3 +1272,16 @@
   `origin/master`; OPS-001-D reported `status=succeeded` and readiness passed. A read-only audit
   confirmed exactly one staging `rockserver-*.dump` remains after deploy.
 - Status: **deployed, readiness-verified, and backup retention confirmed.**
+
+## RM-011-01 — 2026-08-29 — web registration and pairing state
+
+- Goal: fix RM-011 A1/A2 without changing the API contract or native clients.
+- Scope: split editable registration input from authenticated browser account state; require the
+  verified account and CSRF proof for approval; add exclusive browser pairing states and a real
+  post-204 success screen with return/account CTAs.
+- Result: typing no longer unlocks approval, success removes pending and approval controls, and a
+  reload of an approved/consumed request cannot restore an enabled approval action.
+- Checks: eight web regressions, TypeScript typecheck/lint, Vite production build, Rust fmt, strict
+  Clippy, and all available Rust tests passed. Six disposable PostgreSQL and six live external
+  tests remained intentionally ignored.
+- Status: **complete locally; staging/manual browser smoke remains.**
