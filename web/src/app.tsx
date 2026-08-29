@@ -89,8 +89,8 @@ export function App() {
     try {
       const session = await api.browserSession();
       setCsrf(session.csrf_token); setAuthenticatedAccountName(session.account_display_name);
-      // The initial session request may resolve after a successful approval; never reopen it.
-      setPairingState(current => current === "approved" ? current : "authenticated");
+      // A restored cookie is not a fresh passkey assertion, so it cannot approve a pairing.
+      setPairingState(current => current === "approved" || current === "authenticated" || current === "approving" ? current : "anonymous");
     } catch (error) {
       if (!isAuthenticationError(error)) { setPairingState("unavailable"); setMessage(errorMessage(error)); }
     }
@@ -172,8 +172,8 @@ export function App() {
     {preview && pairingState !== "approved" && <section><p className="eyebrow">Проверьте, что это ваше устройство</p><h2>{deviceName(preview)}</h2><dl><div><dt>Проверочная фраза</dt><dd aria-label={`Проверочная фраза: ${preview.verification_phrase}`}>{preview.verification_phrase}</dd></div><div><dt>Короткий код</dt><dd aria-label={`Короткий код: ${preview.short_code}`}>{preview.short_code}</dd></div><div><dt>Действует до</dt><dd>{formatDate(preview.expires_at)}</dd></div></dl></section>}
     {message && <p role="alert">{message}</p>}
     {preview && pairingState === "approved" ? <section><p className="eyebrow">✓ Устройство подключено</p><h2>{deviceName(preview)} подключён к «{authenticatedAccountName}»</h2>{deviceType === "RockMobile" ? <a className="button" href="/return/rockmobile">Вернуться в RockMobile</a> : <p role="status">Вернитесь в RockCast или закройте браузер.</p>}<button className="secondary" onClick={openCabinet}>Открыть аккаунт и устройства</button></section>
-      : preview && authenticatedAccountName && csrf ? <section><h2>Подключить {deviceType} к аккаунту «{authenticatedAccountName}»?</h2><p>Будет подключено только показанное выше устройство.</p><button onClick={approve} disabled={pairingState !== "authenticated"}>{pairingState === "approving" ? "Подключаем…" : "Подключить"}</button><a className="button secondary" href="/">Отмена</a></section>
-      : preview ? <section><h2>Чтобы продолжить</h2><p>Войдите в существующий Rock-аккаунт или создайте новый. После этого вы вернётесь к этому устройству.</p><button onClick={authenticate} disabled={authBusy}>{authBusy ? "Проверяем…" : "Войти с passkey"}</button><button className="secondary" onClick={openRegistration} disabled={authBusy}>Создать Rock-аккаунт</button></section>
+      : preview && authenticatedAccountName && csrf && (pairingState === "authenticated" || pairingState === "approving") ? <section><h2>Подключить {deviceType} к аккаунту «{authenticatedAccountName}»?</h2><p>Будет подключено только показанное выше устройство.</p><button onClick={approve} disabled={pairingState !== "authenticated"}>{pairingState === "approving" ? "Подключаем…" : "Подключить"}</button><a className="button secondary" href="/">Отмена</a></section>
+      : preview ? <section><h2>{authenticatedAccountName ? `Подтвердите вход в «${authenticatedAccountName}»` : "Чтобы продолжить"}</h2><p>{authenticatedAccountName ? "Для подключения устройства требуется свежая проверка passkey." : "Войдите в существующий Rock-аккаунт или создайте новый. После этого вы вернётесь к этому устройству."}</p><button onClick={authenticate} disabled={authBusy}>{authBusy ? "Проверяем…" : authenticatedAccountName ? "Подтвердить passkey" : "Войти с passkey"}</button>{!authenticatedAccountName && <button className="secondary" onClick={openRegistration} disabled={authBusy}>Создать Rock-аккаунт</button>}</section>
       : <section><h2>Ссылка подключения недействительна</h2><p>Откройте новую защищённую ссылку на устройстве, которое хотите подключить.</p></section>}
     <footer>Passkey и данные сессии не сохраняются в браузере.</footer></main>;
 }

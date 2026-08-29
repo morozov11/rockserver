@@ -2,6 +2,20 @@
 
 Last updated: 2026-08-30
 
+## RM-011 — fresh-passkey pairing approval repair (verified locally, 2026-08-30)
+
+The live browser evidence identified a second Web state defect: a restored browser cookie was shown
+as ready to approve a pairing even though the server correctly requires a passkey assertion no
+older than two minutes. The server returned `409 pairing_not_approvable`, which the UI rendered as
+an expired/used request. The Web client now treats a restored cookie as account context only and
+requires an explicit fresh passkey before it renders the approval action. It retains terminal,
+explicitly authenticated, and in-flight approval states against late session restoration.
+
+Verified locally: Web regression tests 11/11, typecheck/lint/build, `cargo fmt --check`, strict
+all-target/all-feature Clippy, and `cargo test` (103 tests; the existing disposable PostgreSQL and
+credential/live tests remain intentionally ignored) passed. Controlled staging deployment and
+renewed physical completion remain pending; no new E2E success is claimed by this entry.
+
 ## RM-011 — live E2E regression found; web race fixed locally (2026-08-30)
 
 The first permitted disposable staging attempt exposed a real regression: an initial browser-session

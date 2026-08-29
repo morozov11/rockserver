@@ -1,5 +1,19 @@
 # Task log
 
+## RM-011-E2E-R2 — 2026-08-30 — stale browser reauthentication guard
+
+- Goal: prevent a restored browser cookie from exposing a pairing approval action that the server
+  must reject without a fresh passkey assertion.
+- Scope: Web pairing state and regression assertion only; no account/device data, proof, token, or
+  browser storage was read or retained.
+- Result: pairing now requires an explicit fresh passkey after cookie restoration and preserves
+  terminal, explicit-authentication, and in-flight approval states against late restoration.
+- Checks: Web regression tests 11/11, typecheck/lint/build, `cargo fmt --check`, strict Clippy,
+  and `cargo test` (103 passed) completed. Existing disposable PostgreSQL and credential/live tests
+  remain intentionally ignored. Controlled staging deployment and physical passkey completion are
+  still pending.
+- Status: local verification complete; deployment pending.
+
 ## RM-011-R2 — 2026-08-30 — native availability recovery
 
 - Goal: reproduce and remove the reported native account-service-unavailable condition using a

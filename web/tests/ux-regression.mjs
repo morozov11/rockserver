@@ -26,8 +26,11 @@ test("secure pairing keeps only its current URL context and cannot approve from 
   assert.match(app, /setPairingState\("terminal"\)/);
 });
 
-test("a late browser-session restore cannot overwrite pairing success", () => {
-  assert.match(app, /current === "approved" \? current : "authenticated"/);
+test("a restored browser cookie requires a fresh passkey before pairing approval", () => {
+  assert.match(app, /current === "approved" \|\| current === "authenticated" \|\| current === "approving" \? current : "anonymous"/);
+  assert.match(app, /Для подключения устройства требуется свежая проверка passkey/);
+  assert.match(app, /Подтвердить passkey/);
+  assert.match(app, /pairingState === "authenticated" \|\| pairingState === "approving"/);
 });
 
 test("registration remains distinct from browser authentication", () => {
