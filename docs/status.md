@@ -2,6 +2,42 @@
 
 Last updated: 2026-08-29
 
+## RM-011 — final integration (staging deploy complete; E2E blocked, 2026-08-29)
+
+RockServer commit `e171096e55ce1b5912fb76615c584775313a8fb9` now publishes the Android
+Digital Asset Links statement at `/.well-known/assetlinks.json`. The asset has one target only:
+`com.rockmobile`, relation `delegate_permission/common.handle_all_urls`, and the SHA-256
+fingerprint `92:E7:BE:49:13:A9:4A:B5:0E:37:58:7B:AB:A1:3F:36:0D:49:47:C4:83:0C:DF:DE:10:40:21:3E:63:42:53:9`.
+It was obtained by verifying the authorized local signed release APK with `apksigner`; no private
+signing material was read or recorded. Vite copies this checked-in public asset into `web/dist`,
+and the existing Caddy file server owns its deployment.
+
+The documented `deploy/ops-001-d.ps1` workflow completed for that immutable commit. Its detached
+remote worker reported `status=succeeded`; unauthenticated public checks then returned `200` for
+`/health/ready` and `200 application/json` for the exact assetlinks target above. No destructive DB
+operation, push, account/device/session mutation, QR payload, credential or proof inspection was
+performed. The source contract remains `?code=<code>#secret=<proof>`; the web client immediately
+scrubs a fragment or permitted legacy query secret, and legacy query support ends
+2026-09-29T00:00:00Z. RockMobile accepts only the no-query/no-fragment HTTPS App Link
+`/return/rockmobile`.
+
+Current source identities are RockServer `e171096`, RockMobile `3b0c47e` (version `0.1.1`,
+`versionCode=2`) and RockCast `00f6d1e` (crate `0.1.0`). Completion compatibility is the current
+unversioned `202 pairing_pending` contract; no `pairing_protocol_version` was found. Static source
+and regression evidence cover secret scrubbing/no browser console output, exact client handoff
+shape, one-prefix presentation and narrow Android return handling. The fresh server checks passed:
+web `pnpm test` (10/10) and `pnpm build`; `cargo fmt --check`; strict all-target/all-feature
+Clippy; and `cargo test` (103 library tests; disposable PostgreSQL and credential/live tests remain
+intentionally ignored).
+
+Disposable staging E2E was not run: this host has neither `adb`/a connected Android device nor a
+running RockCast process. Passkey, physical-device, QR-camera, installed-build and browser-return
+outcomes therefore remain unverified; no security boundary was bypassed. The integration audit also
+found one user-owned dirty detached RockMobile worktree (its `AndroidManifest.xml` and
+`build.gradle.kts`) and a stale Wave 2 RESULT implementation hash (`a1d7acb` is not an ancestor of
+RockMobile master; the current equivalent master change is `98b7e09`). Those items were preserved,
+not changed. Full evidence and all RM-011 commit/report references are in `RM-011-FINAL-RESULT.md`.
+
 ## RM-011-09 — Wave 9 A4 secure pairing handoff (local, 2026-08-29)
 
 The web pairing handoff now takes the approval secret from `#secret` while retaining the short

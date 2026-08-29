@@ -1,5 +1,28 @@
 # Task log
 
+## RM-011-FINAL — 2026-08-29 — cross-repository final integration
+
+- Goal: audit all RM-011 waves in RockServer, RockMobile and RockCast; publish the verified Android
+  App Link association through the existing staging release workflow; and run one disposable staging
+  E2E only if the physical/security prerequisites were actually available.
+- Scope: read-only cross-repository commit/RESULT/worktree audit; local source contract checks;
+  public certificate verification from the existing signed release APK; one new checked-in static
+  Caddy/Vite asset; documented controlled staging deployment and public readiness validation.
+- Result: RockServer commit `e171096` deployed successfully. Public `GET /health/ready` returned
+  `200`; public `GET /.well-known/assetlinks.json` returned `200 application/json` with the single
+  verified `com.rockmobile` association. The local certificate check used `apksigner` against the
+  existing release APK and recorded only its public SHA-256 fingerprint. No push, destructive DB
+  action, account/device/session mutation, credential/proof capture or real pairing flow occurred.
+- Checks: JSON target validation; web `pnpm test` (10/10) and `pnpm build`; `cargo fmt --check`;
+  `cargo clippy --all-targets --all-features -- -D warnings`; and `cargo test` passed. Release
+  preflight, commit-bound image build, remote worker `status=succeeded`, public HTTPS readiness and
+  public asset content validation passed.
+- Status: deploy and App Link association complete. Disposable E2E is blocked by absent connected
+  Android/ADB and absent running RockCast; passkey, physical QR scanning and installed-client UI
+  outcomes remain unverified. Audit exceptions preserved: one dirty user worktree in RockMobile and
+  the non-ancestral Wave 2 implementation hash recorded in its RESULT file. See
+  `RM-011-FINAL-RESULT.md`.
+
 ## RM-011-09 — 2026-08-29 — Wave 9 A4 secure pairing handoff
 
 - Goal: remove the browser approval secret from pairing URL queries while preserving a bounded
