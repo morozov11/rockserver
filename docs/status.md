@@ -1,13 +1,26 @@
 # Project status
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
+
+## RM-011 — live E2E regression found; web race fixed locally (2026-08-30)
+
+The first permitted disposable staging attempt exposed a real regression: an initial browser-session
+request could complete after pairing approval and overwrite the `approved` screen with the pending
+confirmation screen. `web/src/app.tsx` now preserves `approved` against that late response, with a
+new regression assertion. Web `pnpm test` passes 11/11 and `pnpm build` passes locally.
+
+This is not yet deployed. The live E2E is **not passed**: the browser account centre also showed its
+recoverable unavailable state, and neither native client has yet produced verified persisted-session
+and device-list evidence. The investigation is continuing without collecting account, session,
+credential, proof, QR, or device identifiers. The correct public release certificate SHA-256 is
+`92:E7:BE:49:13:A9:4A:4B:50:E3:75:87:BA:BA:13:F3:60:D4:94:7C:48:30:CD:FD:E1:04:02:13:E6:34:25:39`.
 
 ## RM-011 — final integration (staging deploy complete; E2E blocked, 2026-08-29)
 
 RockServer commit `e171096e55ce1b5912fb76615c584775313a8fb9` now publishes the Android
 Digital Asset Links statement at `/.well-known/assetlinks.json`. The asset has one target only:
 `com.rockmobile`, relation `delegate_permission/common.handle_all_urls`, and the SHA-256
-fingerprint `92:E7:BE:49:13:A9:4A:B5:0E:37:58:7B:AB:A1:3F:36:0D:49:47:C4:83:0C:DF:DE:10:40:21:3E:63:42:53:9`.
+fingerprint `92:E7:BE:49:13:A9:4A:4B:50:E3:75:87:BA:BA:13:F3:60:D4:94:7C:48:30:CD:FD:E1:04:02:13:E6:34:25:39`.
 It was obtained by verifying the authorized local signed release APK with `apksigner`; no private
 signing material was read or recorded. Vite copies this checked-in public asset into `web/dist`,
 and the existing Caddy file server owns its deployment.

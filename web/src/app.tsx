@@ -88,7 +88,9 @@ export function App() {
     if (!isPairing || showCabinet) { await loadAccount(); return; }
     try {
       const session = await api.browserSession();
-      setCsrf(session.csrf_token); setAuthenticatedAccountName(session.account_display_name); setPairingState("authenticated");
+      setCsrf(session.csrf_token); setAuthenticatedAccountName(session.account_display_name);
+      // The initial session request may resolve after a successful approval; never reopen it.
+      setPairingState(current => current === "approved" ? current : "authenticated");
     } catch (error) {
       if (!isAuthenticationError(error)) { setPairingState("unavailable"); setMessage(errorMessage(error)); }
     }

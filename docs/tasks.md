@@ -1,5 +1,19 @@
 # Task log
 
+## RM-011-E2E-R1 — 2026-08-30 — late browser-session state regression
+
+- Goal: diagnose the first permitted disposable staging pairing attempt without retaining sensitive
+  handoff, account, credential, device, or browser-session data.
+- Scope: source-level state analysis, safe local client-storage presence check, and the minimal
+  web-only race fix. No database mutation, remote push, credential/proof capture, or new pairing
+  attempt.
+- Result: a late `browserSession` response could overwrite `approved` with `authenticated` after a
+  successful approval, causing the browser to show the pending confirmation again. The web reducer
+  now keeps `approved` terminal for that response and has regression coverage. The live account
+  centre was unavailable and end-to-end client persistence/device-list verification remains open.
+- Checks: web `pnpm test` passed 11/11 and `pnpm build` passed.
+- Status: implemented locally; staging redeploy and a fresh disposable E2E are still required.
+
 ## RM-011-FINAL — 2026-08-29 — cross-repository final integration
 
 - Goal: audit all RM-011 waves in RockServer, RockMobile and RockCast; publish the verified Android

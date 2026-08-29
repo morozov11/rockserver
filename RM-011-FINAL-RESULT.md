@@ -2,6 +2,11 @@
 
 Date: 2026-08-29
 
+> Update, 2026-08-30: this report is superseded as a completion claim. The first permitted
+> disposable staging attempt found a browser success-state race and an unverified native-session
+> outcome. The race is fixed locally and verified by web tests, but it has not yet been deployed;
+> E2E is therefore not passed. No sensitive flow data is recorded here.
+
 ## Outcome
 
 RockServer staging deploy is complete for
@@ -11,7 +16,7 @@ RockServer staging deploy is complete for
 `/.well-known/assetlinks.json` is now a checked-in Vite public asset and was served publicly as
 `200 application/json` after deploy. Its single Android target is `com.rockmobile` with relation
 `delegate_permission/common.handle_all_urls` and release certificate SHA-256
-`92:E7:BE:49:13:A9:4A:B5:0E:37:58:7B:AB:A1:3F:36:0D:49:47:C4:83:0C:DF:DE:10:40:21:3E:63:42:53:9`.
+`92:E7:BE:49:13:A9:4A:4B:50:E3:75:87:BA:BA:13:F3:60:D4:94:7C:48:30:CD:FD:E1:04:02:13:E6:34:25:39`.
 The public fingerprint was obtained with `apksigner verify --print-certs` from the authorized local
 signed release APK; private keystore material was neither read nor recorded.
 

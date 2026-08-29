@@ -26,6 +26,10 @@ test("secure pairing keeps only its current URL context and cannot approve from 
   assert.match(app, /setPairingState\("terminal"\)/);
 });
 
+test("a late browser-session restore cannot overwrite pairing success", () => {
+  assert.match(app, /current === "approved" \? current : "authenticated"/);
+});
+
 test("registration remains distinct from browser authentication", () => {
   assert.match(app, /const \[registrationName, setRegistrationName\]/);
   assert.match(app, /const \[authenticatedAccountName, setAuthenticatedAccountName\]/);
