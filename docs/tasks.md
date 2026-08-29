@@ -10,9 +10,11 @@
   terminal, explicit-authentication, and in-flight approval states against late restoration.
 - Checks: Web regression tests 11/11, typecheck/lint/build, `cargo fmt --check`, strict Clippy,
   and `cargo test` (103 passed) completed. Existing disposable PostgreSQL and credential/live tests
-  remain intentionally ignored. Controlled staging deployment and physical passkey completion are
-  still pending.
-- Status: local verification complete; deployment pending.
+  remain intentionally ignored. OPS-001-D deployed commit `82382b1` with worker
+  `status=succeeded`; public readiness was `200` and the published bundle contained both the guard
+  and reauthentication control.
+- Status: staging deployment verified. Physical passkey completion is still pending and not
+  claimed.
 
 ## RM-011-R2 — 2026-08-30 — native availability recovery
 

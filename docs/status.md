@@ -13,8 +13,10 @@ explicitly authenticated, and in-flight approval states against late session res
 
 Verified locally: Web regression tests 11/11, typecheck/lint/build, `cargo fmt --check`, strict
 all-target/all-feature Clippy, and `cargo test` (103 tests; the existing disposable PostgreSQL and
-credential/live tests remain intentionally ignored) passed. Controlled staging deployment and
-renewed physical completion remain pending; no new E2E success is claimed by this entry.
+credential/live tests remain intentionally ignored) passed. Commit `82382b1` was deployed through
+OPS-001-D; the detached worker reported `status=succeeded`, public readiness returned `200`, and
+the published bundle contains the fresh-passkey guard and reauthentication control. Renewed
+physical completion remains pending; no new E2E success is claimed by this entry.
 
 ## RM-011 — live E2E regression found; web race fixed locally (2026-08-30)
 
