@@ -6,8 +6,17 @@ const app = await readFile(new URL("../src/app.tsx", import.meta.url), "utf8");
 const api = await readFile(new URL("../src/api.ts", import.meta.url), "utf8");
 const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
 
-test("secure pairing keeps only its current URL context and cannot approve from a terminal state", () => {
+test("secure pairing reads a fragment secret once, immediately removes it, and keeps bounded legacy query support", () => {
   assert.match(app, /new URLSearchParams\(location\.search\)/);
+  assert.match(app, /new URLSearchParams\(location\.hash\.slice\(1\)\)/);
+  assert.match(app, /const fragmentSecret = fragment\.get\("secret"\) \?\? ""/);
+  assert.match(app, /LEGACY_QUERY_SECRET_ROLLOUT_END/);
+  assert.match(app, /Date\.now\(\) <= LEGACY_QUERY_SECRET_ROLLOUT_END \? legacySecret : ""/);
+  assert.match(app, /params\.delete\("secret"\);[\s\S]*history\.replaceState/);
+  assert.doesNotMatch(app, /console\.(log|debug|info|warn|error)\(/);
+});
+
+test("secure pairing keeps only its current URL context and cannot approve from a terminal state", () => {
   assert.match(app, /const isPairing = Boolean\(code && approvalSecret\)/);
   assert.match(app, /isPairing && !showCabinet\) void lookup\(\)/);
   assert.match(app, /disabled=\{pairingState !== "authenticated"\}/);

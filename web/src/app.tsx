@@ -28,12 +28,22 @@ const deviceName = (device: Pick<BrowserDevice, "device_type" | "device_display_
 };
 const formatDate = (value: string) => new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 const isAuthenticationError = (error: unknown) => (error as ApiError)?.code === "authentication_required";
+const LEGACY_QUERY_SECRET_ROLLOUT_END = Date.parse("2026-09-29T00:00:00Z");
 
 /** Renders the account landing page or the secure, request-specific pairing screen. */
 export function App() {
   const params = new URLSearchParams(location.search);
   const code = params.get("code")?.trim().toUpperCase() ?? "";
-  const approvalSecret = params.get("secret") ?? "";
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  const fragmentSecret = fragment.get("secret") ?? "";
+  const legacySecret = params.get("secret") ?? "";
+  // Keep the old query handoff only through the bounded rollout window.
+  const approvalSecret = fragmentSecret || (Date.now() <= LEGACY_QUERY_SECRET_ROLLOUT_END ? legacySecret : "");
+  if (fragmentSecret || legacySecret) {
+    params.delete("secret");
+    history.replaceState(null, "", `${location.pathname}${params.size ? `?${params}` : ""}`);
+  }
+  const pairingSearch = params.size ? `?${params}` : "";
   const isPairing = Boolean(code && approvalSecret);
   const [screen, setScreen] = useState<"main" | "register">(() => location.pathname === "/register" ? "register" : "main");
   const [preview, setPreview] = useState<PairingPreview>();
@@ -90,7 +100,7 @@ export function App() {
       if (!(credential instanceof PublicKeyCredential)) throw new Error("Passkey не создан.");
       const result = await api.registrationVerify({ challenge_id: started.challenge_id, ...serializeRegistration(credential) });
       setCsrf(result.csrf_token); setAuthenticatedAccountName(result.account_display_name);
-      if (isPairing) { history.replaceState(null, "", `/${location.search}`); setScreen("main"); setMessage("Rock-аккаунт создан, вход выполнен. Теперь подтвердите показанное устройство."); await lookup(); setPairingState("authenticated"); }
+      if (isPairing) { history.replaceState(null, "", `/${pairingSearch}`); setScreen("main"); setMessage("Rock-аккаунт создан, вход выполнен. Теперь подтвердите показанное устройство."); await lookup(); setPairingState("authenticated"); }
       else setRegistrationComplete(true);
     } catch (error) { setMessage(registrationErrorMessage(error)); } finally { registrationBusy.current = false; setAuthBusy(false); }
   };
@@ -135,8 +145,8 @@ export function App() {
     try { await api.logoutBrowser(csrf); setCsrf(""); setAuthenticatedAccountName(""); setAccount(undefined); setAccountState("anonymous"); setAccountMessage("Вы вышли из аккаунта в этом браузере."); }
     catch (error) { if (isAuthenticationError(error)) { setAccount(undefined); setAccountState("expired"); } else setAccountMessage(errorMessage(error)); } finally { setLogoutBusy(false); }
   };
-  const openRegistration = () => { history.pushState(null, "", `/register${location.search}`); setMessage(""); setScreen("register"); };
-  const returnFromRegistration = () => { history.replaceState(null, "", `/${location.search}`); setMessage(""); setScreen("main"); };
+  const openRegistration = () => { history.pushState(null, "", `/register${pairingSearch}`); setMessage(""); setScreen("register"); };
+  const returnFromRegistration = () => { history.replaceState(null, "", `/${pairingSearch}`); setMessage(""); setScreen("main"); };
   const openCabinet = () => {
     if (preview) setJustConnected({ device_display_name: preview.device_display_name, device_type: preview.device_type });
     history.replaceState(null, "", "/"); setShowCabinet(true); setAccountState("loading");
