@@ -1,6 +1,28 @@
 # Project status
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
+
+## RM-011-07 — anonymous landing and separate registration (local, 2026-08-29)
+
+RM-011 web A6+A7 is complete locally. Anonymous `/` now makes the existing-account passkey
+sign-in primary and separate Rock-account registration secondary, with a short explanation of the
+difference and no manual pairing input. The existing Preact root uses `location.pathname` and
+`location.search` for `/register` and pairing-context return; no router, UI, or state-machine
+dependency was added.
+
+Registration has a dedicated labelled form, explicit default-name selection, click-only WebAuthn
+ceremony, disabled busy controls, and a ref guard against double submit. Cancelling a passkey
+keeps the typed name and shows recovery text without creating an account. Verified pairing-context
+registration returns only to that pairing confirmation; standalone `/register` shows signed-in
+success and leads to the account centre. Pairing URL/proof handling and the A4 contract were not
+changed.
+
+Local verification passed: web regression tests (11/11), typecheck/lint and Vite production build;
+`cargo fmt --check`; strict `cargo clippy --all-targets --all-features -- -D warnings`; `cargo test`
+(103 library tests and all available target suites). Six disposable PostgreSQL and six live external
+tests remained intentionally ignored. `git diff --check` passed. No staging access, deployment,
+push, account/device data operation, OpenAPI/server change, RockMobile, or RockCast change was
+performed. Implementation commit: `d26fde0c170fd1db5524d3fcf8929d8de4441d40`.
 
 ## RM-011-G7 — cross-repository account/pairing E2E verification (2026-08-28)
 

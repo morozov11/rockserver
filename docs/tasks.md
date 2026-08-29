@@ -1285,3 +1285,19 @@
   Clippy, and all available Rust tests passed. Six disposable PostgreSQL and six live external
   tests remained intentionally ignored.
 - Status: **complete locally; staging/manual browser smoke remains.**
+
+## RM-011-07 — 2026-08-29 — A6+A7 anonymous landing and separate registration
+
+- Goal: implement only RM-011 web A6+A7 on the existing Preact root.
+- Scope: anonymous `/` sign-in/registration distinction, `/register` form, explicit default-name
+  choice, click-only and double-submit-safe registration ceremony, cancellation recovery, and
+  pairing-context return. No API, OpenAPI, native client, A4 URL-contract, staging, or account/data
+  change.
+- Result: registration input stays isolated from lifecycle state; cancelling preserves the typed
+  name; standalone registration exposes browser-signed-in success with the account-centre CTA;
+  registration from a pairing URL returns to its exact confirmation context. Eleven deterministic
+  web regressions cover A6/A7 and the earlier A1/A2 protections.
+- Checks: `cd web && pnpm test` (11/11), `cd web && pnpm build`, `cargo fmt --check`, strict
+  all-target/all-feature Clippy, `cargo test`, and `git diff --check` passed. Six disposable
+  PostgreSQL and six live external tests remain ignored by design.
+- Status: **complete locally; no deploy, push, staging, or manual WebAuthn ceremony.**
