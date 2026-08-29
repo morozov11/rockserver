@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::auth::ActiveSession;
+use crate::auth::{ActiveSession, MAX_ACCOUNT_DEVICES};
 
 use super::{
     state::AppState,
@@ -155,7 +155,7 @@ pub(super) async fn browser_account(State(state): State<AppState>, headers: Head
             let mut response = with_request_id(
                 Json(BrowserAccountDto {
                     account_display_name,
-                    device_limit: 10,
+                    device_limit: MAX_ACCOUNT_DEVICES,
                     devices: devices
                         .into_iter()
                         .map(|device| BrowserDeviceDto {

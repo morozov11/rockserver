@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::auth::{NewPairingRequest, NewPairingSession, PairingCompletionOutcome};
+use crate::auth::{
+    MAX_ACCOUNT_DEVICES, NewPairingRequest, NewPairingSession, PairingCompletionOutcome,
+};
 
 use super::{
     state::AppState,
@@ -464,13 +466,17 @@ pub(super) async fn complete_pairing_request(
             &request_id,
             json!({}),
         ),
-        Ok(PairingCompletionOutcome::DeviceLimit) => error_response(
-            StatusCode::CONFLICT,
-            "device_limit_reached",
-            "This account has reached the 10-device limit.",
-            &request_id,
-            json!({"limit": 10}),
-        ),
+        Ok(PairingCompletionOutcome::DeviceLimit) => {
+            let message =
+                format!("This account has reached the {MAX_ACCOUNT_DEVICES}-device limit.");
+            error_response(
+                StatusCode::CONFLICT,
+                "device_limit_reached",
+                &message,
+                &request_id,
+                json!({"limit": MAX_ACCOUNT_DEVICES}),
+            )
+        },
         Ok(PairingCompletionOutcome::InvalidProof) => error_response(
             StatusCode::UNAUTHORIZED,
             "pairing_rejected",

@@ -187,7 +187,33 @@ function AccountCentre({ account, accountState, accountName, accountMessage, aut
   if (!account) return null;
   const limitReached = account.devices.length >= account.device_limit;
   return <main><header><span>ROCK</span><h1>Rock-аккаунт «{accountName}»</h1><p className="badge" role="status">✓ Выполнен вход в браузере</p></header>
-    <section><h2>Устройства</h2><p className="eyebrow">{account.devices.length} из {account.device_limit} устройств</p>{limitReached && <p role="status">⚠ Лимит устройств достигнут. Сначала отключите старое устройство.</p>}{account.devices.length === 0 ? <p>Подключённых устройств пока нет. Откройте RockMobile или RockCast и начните подключение там.</p> : <ul className="devices">{account.devices.map(device => { const fresh = justConnected?.device_display_name === device.device_display_name && justConnected.device_type === device.device_type; const busy = deviceBusy === device.device_id; return <li key={device.device_id}>{fresh && <p className="fresh" role="status">✓ Только что подключено</p>}<div><strong>{deviceName(device)}</strong><p>{device.session_status === "active" ? "● Сессия активна" : "○ Нет активной сессии"} · Подключено {formatDate(device.connected_at)}{device.last_seen_at && ` · Активность ${formatDate(device.last_seen_at)}`}</p></div><div className="device-actions"><button className="secondary" onClick={() => onRename(device)} disabled={busy}>{busy ? "Обновляем…" : "Переименовать"}</button><button className="danger" onClick={() => onRevoke(device)} disabled={busy}>Отключить</button></div></li>; })}</ul>}</section>
+    <section>
+      <h2>Подключённые устройства ({account.devices.length})</h2>
+      {limitReached && <p role="status">⚠ Лимит устройств достигнут ({account.device_limit}). Сначала отключите старое устройство.</p>}
+      {account.devices.length === 0 ? (
+        <p>Подключённых устройств пока нет. Откройте RockMobile или RockCast и начните подключение там.</p>
+      ) : (
+        <ul className="devices" aria-label="Список подключённых устройств">
+          {account.devices.map(device => {
+            const fresh = justConnected?.device_display_name === device.device_display_name && justConnected.device_type === device.device_type;
+            const busy = deviceBusy === device.device_id;
+            return (
+              <li key={device.device_id}>
+                {fresh && <p className="fresh" role="status">✓ Только что подключено</p>}
+                <div>
+                  <strong>{deviceName(device)}</strong>
+                  <p>{device.session_status === "active" ? "● Сессия активна" : "○ Нет активной сессии"} · Подключено {formatDate(device.connected_at)}{device.last_seen_at && ` · Активность ${formatDate(device.last_seen_at)}`}</p>
+                </div>
+                <div className="device-actions">
+                  <button className="secondary" onClick={() => onRename(device)} disabled={busy}>{busy ? "Обновляем…" : "Переименовать"}</button>
+                  <button className="danger" onClick={() => onRevoke(device)} disabled={busy}>Отключить</button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
     <section><h2>Как подключить новое устройство</h2><p>Откройте RockMobile или RockCast на устройстве и начните подключение из приложения. Браузер подтверждает устройство, но не является RockMobile или RockCast и не считается текущим native-устройством.</p></section>
     <section><h2>Безопасность доступа</h2><p>Passkey подтверждает вход в этот браузер. «Отключить» завершает native-сессии выбранного устройства, но не завершает вход в текущем браузере; для него используйте действие ниже.</p><p>Сервер не удаляет passkey из браузера или Google Password Manager. Старый ключ удаляйте вручную только после успешного входа новым ключом. Одинаковое имя «RockServer user» само по себе не доказывает, что запись старая.</p></section>
     <section><h2>Вход в браузере</h2><button className="secondary" onClick={onLogout} disabled={logoutBusy}>{logoutBusy ? "Выходим…" : "Выйти из браузера"}</button>{accountMessage && <p role="status">{accountMessage}</p>}</section><footer>Passkey и данные сессии не сохраняются в браузере.</footer></main>;

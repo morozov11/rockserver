@@ -864,10 +864,10 @@ components:
       required: [account_display_name, device_limit, devices]
       properties:
         account_display_name: { type: string, minLength: 1, maxLength: 128 }
-        device_limit: { type: integer, const: 10 }
+        device_limit: { type: integer, const: 50 }
         devices:
           type: array
-          maxItems: 10
+          maxItems: 50
           items: { $ref: "#/components/schemas/BrowserDevice" }
     BrowserDevice:
       type: object

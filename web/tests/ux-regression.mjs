@@ -74,6 +74,9 @@ test("device actions are confirmed, independently busy, and refresh account data
 test("cabinet explains browser safety and distinguishes empty and full device limits", () => {
   assert.match(app, /Выполнен вход в браузере/);
   assert.match(app, /Браузер подтверждает устройство, но не является RockMobile или RockCast/);
+  assert.match(app, /Подключённые устройства/);
+  assert.match(app, /aria-label="Список подключённых устройств"/);
+  assert.doesNotMatch(app, /из \{account\.device_limit\} устройств/);
   assert.match(app, /Подключённых устройств пока нет/);
   assert.match(app, /Лимит устройств достигнут/);
   assert.match(app, /Passkey подтверждает вход в этот браузер/);

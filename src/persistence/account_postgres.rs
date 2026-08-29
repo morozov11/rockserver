@@ -11,8 +11,9 @@ use crate::account_cleanup::{
 use crate::auth::{
     AccountProjection, ActiveSession, BrowserDevice, NewBrowserSession, NewPairingRequest,
     NewPairingSession, NewPasskeyRegistration, NewSession, NewWebAuthnChallenge, OwnedDevice,
-    PairingCompletion, PairingCompletionOutcome, PairingPreview, PasskeyRegistrationOutcome,
-    RefreshError, RefreshRotation, SecretHash, WebAuthnCeremony, is_safe_audit_event,
+    MAX_ACCOUNT_DEVICES, PairingCompletion, PairingCompletionOutcome, PairingPreview,
+    PasskeyRegistrationOutcome, RefreshError, RefreshRotation, SecretHash, WebAuthnCeremony,
+    is_safe_audit_event,
 };
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
@@ -875,13 +876,14 @@ impl PostgresAccountStore {
         };
         let inserted = sqlx::query(
             "INSERT INTO devices (id, user_id, device_display_name, device_type, app_version) \
-             SELECT $1, $2, $3, $4, $5 WHERE (SELECT COUNT(*) FROM devices WHERE user_id = $2 AND revoked_at IS NULL) < 10",
+             SELECT $1, $2, $3, $4, $5 WHERE (SELECT COUNT(*) FROM devices WHERE user_id = $2 AND revoked_at IS NULL) < $6",
         )
         .bind(session.device_id)
         .bind(user_id)
         .bind(&request.device_display_name)
         .bind(&request.device_type)
         .bind(request.app_version)
+        .bind(i64::from(MAX_ACCOUNT_DEVICES))
         .execute(&mut *transaction)
         .await?;
         if inserted.rows_affected() != 1 {

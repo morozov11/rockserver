@@ -6,6 +6,9 @@ use std::fmt;
 
 use uuid::Uuid;
 
+/// Maximum number of concurrently active native devices per Rock account.
+pub const MAX_ACCOUNT_DEVICES: u8 = 50;
+
 /// A fixed-size keyed digest of a bearer secret, safe to persist but deliberately opaque in logs.
 #[derive(Clone, Eq, PartialEq)]
 pub struct SecretHash([u8; 32]);
