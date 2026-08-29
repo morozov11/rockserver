@@ -33,17 +33,23 @@ const LEGACY_QUERY_SECRET_ROLLOUT_END = Date.parse("2026-09-29T00:00:00Z");
 /** Renders the account landing page or the secure, request-specific pairing screen. */
 export function App() {
   const params = new URLSearchParams(location.search);
-  const code = params.get("code")?.trim().toUpperCase() ?? "";
+  const parsedCode = params.get("code")?.trim().toUpperCase() ?? "";
   const fragment = new URLSearchParams(location.hash.slice(1));
   const fragmentSecret = fragment.get("secret") ?? "";
   const legacySecret = params.get("secret") ?? "";
   // Keep the old query handoff only through the bounded rollout window.
-  const approvalSecret = fragmentSecret || (Date.now() <= LEGACY_QUERY_SECRET_ROLLOUT_END ? legacySecret : "");
+  const parsedApprovalSecret = fragmentSecret || (Date.now() <= LEGACY_QUERY_SECRET_ROLLOUT_END ? legacySecret : "");
   if (fragmentSecret || legacySecret) {
     params.delete("secret");
     history.replaceState(null, "", `${location.pathname}${params.size ? `?${params}` : ""}`);
   }
-  const pairingSearch = params.size ? `?${params}` : "";
+  const handoff = useRef({
+    code: parsedCode,
+    approvalSecret: parsedApprovalSecret,
+    pairingSearch: params.size ? `?${params}` : "",
+  });
+  const { code, approvalSecret: inMemoryApprovalSecret, pairingSearch } = handoff.current;
+  const approvalSecret = inMemoryApprovalSecret;
   const isPairing = Boolean(code && approvalSecret);
   const [screen, setScreen] = useState<"main" | "register">(() => location.pathname === "/register" ? "register" : "main");
   const [preview, setPreview] = useState<PairingPreview>();

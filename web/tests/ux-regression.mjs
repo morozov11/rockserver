@@ -13,6 +13,8 @@ test("secure pairing reads a fragment secret once, immediately removes it, and k
   assert.match(app, /LEGACY_QUERY_SECRET_ROLLOUT_END/);
   assert.match(app, /Date\.now\(\) <= LEGACY_QUERY_SECRET_ROLLOUT_END \? legacySecret : ""/);
   assert.match(app, /params\.delete\("secret"\);[\s\S]*history\.replaceState/);
+  assert.match(app, /const handoff = useRef\(\{[\s\S]*approvalSecret/);
+  assert.match(app, /approvalSecret: inMemoryApprovalSecret/);
   assert.doesNotMatch(app, /console\.(log|debug|info|warn|error)\(/);
 });
 
