@@ -2,6 +2,31 @@
 
 Last updated: 2026-08-29
 
+## RM-011-08 — authenticated web cabinet UX (local, 2026-08-29)
+
+RM-011 web A8–A12 is complete locally. The existing Preact cabinet now has exclusive loading,
+anonymous, authenticated, browser-session-expired, and service-unavailable views, so it does not
+flash anonymous content while session recovery is pending and removes stale device data after a
+confirmed authentication failure. A retry remains available for service failures.
+
+The authenticated cabinet identifies the browser session separately from native RockMobile and
+RockCast devices; shows the current `N из 10` count, distinct empty and limit guidance, human
+readable activity, rename/revoke confirmations, account-data refresh and inline success. Device
+and logout operations have independent busy states. Device display names receive at most one
+product prefix, and the UI renders no device/user/session identifiers, tokens, or proofs.
+
+Pairing success can open this cabinet in the same Preact instance and marks the matching card
+`Только что подключено` only in memory. It neither persists the marker nor re-enables approval.
+The layout retains the existing dependency-free Preact/CSS approach, adds visible keyboard focus,
+semantic alert/status messaging, labelled phrase/code text, and mobile full-width actions.
+
+Local verification passed: `cd web && pnpm test` (9/9), `cd web && pnpm build`, `cargo fmt
+--check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` (103
+library tests plus all available target suites). Six disposable PostgreSQL, four billable Yandex
+LLM, one SpeechKit, and one ONNX live test remain intentionally ignored. No staging, deploy,
+push, account/device operation, API/OpenAPI, A4 URL-contract, RockMobile, or RockCast change was
+performed.
+
 ## RM-011-07 — anonymous landing and separate registration (local, 2026-08-29)
 
 RM-011 web A6+A7 is complete locally. Anonymous `/` now makes the existing-account passkey

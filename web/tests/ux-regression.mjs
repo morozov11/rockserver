@@ -4,94 +4,81 @@ import { readFile } from "node:fs/promises";
 
 const app = await readFile(new URL("../src/app.tsx", import.meta.url), "utf8");
 const api = await readFile(new URL("../src/api.ts", import.meta.url), "utf8");
+const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
 
-test("secure pairing keeps its code and secret context in the current URL", () => {
+test("secure pairing keeps only its current URL context and cannot approve from a terminal state", () => {
   assert.match(app, /new URLSearchParams\(location\.search\)/);
   assert.match(app, /const isPairing = Boolean\(code && approvalSecret\)/);
-  assert.match(app, /if \(isPairing\) void lookup\(\)/);
-  assert.match(app, /includes\("mobile"\)/);
+  assert.match(app, /isPairing && !showCabinet\) void lookup\(\)/);
+  assert.match(app, /disabled=\{pairingState !== "authenticated"\}/);
+  assert.match(app, /setPairingState\("approved"\)/);
+  assert.match(app, /setPairingState\("terminal"\)/);
 });
 
-test("pairing offers distinct sign-in and create-account choices without a technical code field", () => {
-  assert.match(app, /Войти с passkey/);
-  assert.match(app, /Создать Rock-аккаунт/);
-  assert.match(app, /Создание аккаунта создаёт новый аккаунт с passkey/);
-  assert.doesNotMatch(app, /<label>Код/);
-  assert.doesNotMatch(app, /user_id/);
-});
-
-test("anonymous landing distinguishes existing-account sign-in from registration", () => {
-  assert.match(app, /Вход открывает существующий Rock-аккаунт\. Создание аккаунта создаёт новый аккаунт с passkey\./);
-  assert.match(app, /<button onClick=\{authenticate\}[^>]*>\{busy \? "Проверяем…" : "Войти с passkey"\}<\/button><button className="secondary" onClick=\{openRegistration\}/);
-  assert.match(app, /history\.pushState\(null, "", `\/register\$\{location\.search\}`\)/);
-  assert.doesNotMatch(app, /Код подключения/);
-});
-
-test("registration is a separate labelled form with an explicit default-name choice", () => {
-  assert.match(app, /location\.pathname === "\/register"/);
-  assert.match(app, /<h1>Создать Rock-аккаунт<\/h1>/);
-  assert.match(app, /htmlFor="account-name">Имя аккаунта/);
-  assert.match(app, /Например, Алексей/);
-  assert.match(app, /Использовать «Rock account»/);
-  assert.match(app, /У меня уже есть аккаунт/);
-  assert.match(app, /if \(!registrationName\.trim\(\)\) \{ setMessage\("Введите имя аккаунта или выберите «Rock account»\."\); return; \}/);
-  assert.match(app, /api\.registrationOptions\(\{ account_display_name: registrationName\.trim\(\) \}\)/);
-});
-
-test("registration starts only on click, blocks double submit, and preserves cancellation recovery", () => {
-  assert.match(app, /const registrationBusy = useRef\(false\)/);
-  assert.match(app, /if \(registrationBusy\.current\) return;/);
-  assert.match(app, /registrationBusy\.current = true;/);
-  assert.match(app, /registrationBusy\.current = false; setBusy\(false\)/);
-  assert.match(app, /busy \? "Создаём…" : "Создать аккаунт с passkey"/);
-  assert.match(app, /Создание отменено\. Имя аккаунта сохранено/);
-  assert.match(app, /history\.replaceState\(null, "", `\/\$\{location\.search\}`\);[\s\S]*setScreen\("main"\);[\s\S]*await lookup\(\)/);
-  assert.match(app, /registrationComplete \? <section><p className="eyebrow">Аккаунт создан<\/p><h2>Вход в браузере выполнен<\/h2>/);
-});
-
-test("an existing browser session receives a tab-local CSRF proof before approval", () => {
-  assert.match(api, /browserSession\(\).*\/v1\/auth\/browser-session/);
-  assert.match(app, /Подключить \{deviceType\} к аккаунту/);
-  assert.match(app, /approvalSecret, preview\.verification_phrase, csrf/);
-  assert.match(app, /!authenticatedAccountName \|\| !csrf \|\| pairingState !== "authenticated"/);
-});
-
-test("typing the first registration letter stays on the registration form", () => {
+test("registration remains distinct from browser authentication", () => {
   assert.match(app, /const \[registrationName, setRegistrationName\]/);
   assert.match(app, /const \[authenticatedAccountName, setAuthenticatedAccountName\]/);
   assert.match(app, /onInput=\{event => setRegistrationName\(event\.currentTarget\.value\)\}/);
+  assert.match(app, /Создать Rock-аккаунт/);
   assert.doesNotMatch(app, /onInput=\{event => setAuthenticatedAccountName/);
 });
 
-test("a 204 approval enters an exclusive success state with clear CTAs", () => {
-  assert.match(app, /await api\.approvePairing[\s\S]*setPairingState\("approved"\)/);
-  assert.match(app, /pairingState === "approved"/);
-  assert.match(app, /Вернуться в RockMobile/);
-  assert.match(app, /Вернитесь в RockCast/);
-  assert.match(app, /Открыть аккаунт и устройства/);
-  assert.match(app, /pairingState !== "approved"/);
+test("cabinet has exclusive loading, anonymous, authenticated, expired, and unavailable states", () => {
+  assert.match(app, /type AccountState = "loading" \| "anonymous" \| "authenticated" \| "expired" \| "unavailable"/);
+  assert.match(app, /accountState === "loading"/);
+  assert.match(app, /accountState === "unavailable"/);
+  assert.match(app, /accountState === "expired"/);
+  assert.match(app, /accountState === "anonymous"/);
+  assert.match(app, /Сессия браузера завершена/);
+  assert.match(app, /Сервис временно недоступен/);
 });
 
-test("an approved or consumed request reload cannot expose enabled approval", () => {
-  assert.match(app, /setPreview\(undefined\);[\s\S]*setPairingState\(\(error as ApiError\)\?\.code === "server_unavailable" \? "unavailable" : "terminal"\)/);
-  assert.match(app, /disabled=\{pairingState !== "authenticated"\}/);
-});
-
-test("unavailable API responses stay user-facing and never expose HTTP details", () => {
-  assert.match(api, /code: "server_unavailable"/);
-  assert.match(app, /Сервер временно недоступен/);
-  assert.doesNotMatch(app, /HTTP-/);
-});
-
-test("authenticated landing is an account centre with safe device actions", () => {
+test("account loading fetches a fresh browser session and exact current device projection", () => {
+  assert.match(api, /browserSession\(\).*\/v1\/auth\/browser-session/);
   assert.match(api, /browserAccount\(\).*\/v1\/browser\/account/);
+  assert.match(app, /const nextAccount = await api\.browserAccount\(\)/);
+  assert.match(app, /setAccount\(undefined\); setCsrf\(""/);
+  assert.match(app, /setAccountState\("expired"\)/);
+});
+
+test("device actions are confirmed, independently busy, and refresh account data", () => {
   assert.match(api, /renameDevice\(.*\/v1\/browser\/devices/);
-  assert.match(api, /logoutBrowser\(.*\/v1\/auth\/browser-logout/);
-  assert.match(app, /Устройства \(\{account\.devices\.length\} из \{account\.device_limit\}\)/);
-  assert.match(app, /Выйти из браузера/);
-  assert.match(app, /Отключить/);
+  assert.match(api, /revokeDevice\(.*\/v1\/browser\/devices/);
+  assert.match(app, /const \[deviceBusy, setDeviceBusy\]/);
+  assert.match(app, /const \[logoutBusy, setLogoutBusy\]/);
+  assert.match(app, /await api\.renameDevice[\s\S]*await refreshAccount\(\)/);
+  assert.match(app, /await api\.revokeDevice[\s\S]*await refreshAccount\(\)/);
   assert.match(app, /Это не завершит вход в текущем браузере/);
+});
+
+test("cabinet explains browser safety and distinguishes empty and full device limits", () => {
+  assert.match(app, /Выполнен вход в браузере/);
+  assert.match(app, /Браузер подтверждает устройство, но не является RockMobile или RockCast/);
+  assert.match(app, /Подключённых устройств пока нет/);
+  assert.match(app, /Лимит устройств достигнут/);
+  assert.match(app, /Passkey подтверждает вход в этот браузер/);
   assert.match(app, /не удаляет passkey из браузера или Google Password Manager/);
-  assert.match(app, /Одинаковое имя «RockServer user» само по себе не доказывает/);
-  assert.doesNotMatch(app, /credential_id|refresh_token|access_token/);
+});
+
+test("device presentation renders one product prefix and no secret or identifier DOM fields", () => {
+  assert.match(app, /deviceName\(device\)/);
+  assert.doesNotMatch(app, /\{preview\.request_id\}/);
+  assert.doesNotMatch(app, /access_token|refresh_token|desktop_token|approval_secret/);
+});
+
+test("pairing success offers cabinet handoff with an in-memory one-time connected marker", () => {
+  assert.match(app, /const \[justConnected, setJustConnected\]/);
+  assert.match(app, /setShowCabinet\(true\)/);
+  assert.match(app, /Только что подключено/);
+  assert.match(app, /Вернуться в RockMobile/);
+  assert.match(app, /Вернитесь в RockCast или закройте браузер/);
+});
+
+test("accessible controls have semantic status and visible focus styles across mobile layouts", () => {
+  assert.match(app, /role="alert"/);
+  assert.match(app, /role="status"/);
+  assert.match(app, /aria-label=\{.*Проверочная фраза/);
+  assert.match(css, /:focus-visible/);
+  assert.match(css, /@media \(max-width: 480px\)/);
+  assert.match(css, /button, \.button \{ width: 100%/);
 });

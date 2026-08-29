@@ -1301,3 +1301,21 @@
   all-target/all-feature Clippy, `cargo test`, and `git diff --check` passed. Six disposable
   PostgreSQL and six live external tests remain ignored by design.
 - Status: **complete locally; no deploy, push, staging, or manual WebAuthn ceremony.**
+
+## RM-011-08 — 2026-08-29 — web cabinet A8–A12
+
+- Goal: implement only RM-011 web cabinet information architecture, safe native-device actions,
+  account/session states, responsive accessibility, and pairing-success cabinet handoff.
+- Scope: updated the existing Preact/CSS cabinet and deterministic web regressions. Browser login
+  is visibly separate from native devices; card actions remain confirmed and owner-scoped through
+  existing APIs; success handoff uses only in-memory target metadata and creates no database state.
+- Result: loading has no anonymous flash; confirmed auth failure clears device data into a session
+  expired view; service failure offers retry; rename/revoke/logout have independent busy state;
+  empty and `10 из 10` states differ; legacy product-prefixed display names are not doubled; no
+  IDs, proofs, or tokens are rendered. The mobile layout keeps actions full width with focus,
+  semantic status/alert text, and non-colour status symbols.
+- Checks: `cd web && pnpm test` (9/9), `cd web && pnpm build`, `cargo fmt --check`, strict
+  all-target/all-feature Clippy, and `cargo test` passed; six disposable PostgreSQL, four billable
+  Yandex LLM, one SpeechKit, and one ONNX live test remain intentionally ignored. `git diff
+  --check` is pending the final documentation/result records.
+- Status: **complete locally; no deploy, push, staging, or real account/device operation.**
