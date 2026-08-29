@@ -30,6 +30,8 @@ test("a restored browser cookie requires a fresh passkey before pairing approval
   assert.match(app, /current === "approved" \|\| current === "authenticated" \|\| current === "approving" \? current : "anonymous"/);
   assert.match(app, /Для подключения устройства требуется свежая проверка passkey/);
   assert.match(app, /Подтвердить passkey/);
+  assert.match(app, /восстановить его без сохранённого ключа нельзя/);
+  assert.match(app, /Создать другой Rock-аккаунт/);
   assert.match(app, /pairingState === "authenticated" \|\| pairingState === "approving"/);
 });
 

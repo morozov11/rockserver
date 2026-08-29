@@ -18,6 +18,11 @@ OPS-001-D; the detached worker reported `status=succeeded`, public readiness ret
 the published bundle contains the fresh-passkey guard and reauthentication control. Renewed
 physical completion remains pending; no new E2E success is claimed by this entry.
 
+The pairing page also now explains the distinct recovery boundary when a browser cookie names an
+account but its passkey was deleted: the cookie cannot approve a new device, the deleted key cannot
+be restored, and the user may create a separate Rock account for the current pairing. It neither
+alters nor merges the original account.
+
 ## RM-011 — live E2E regression found; web race fixed locally (2026-08-30)
 
 The first permitted disposable staging attempt exposed a real regression: an initial browser-session

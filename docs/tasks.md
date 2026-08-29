@@ -16,6 +16,14 @@
 - Status: staging deployment verified. Physical passkey completion is still pending and not
   claimed.
 
+## RM-011-E2E-R3 — 2026-08-30 — deleted-passkey pairing recovery guidance
+
+- Goal: make the secure consequence of a deleted passkey actionable without treating a retained
+  browser cookie as a substitute for authentication.
+- Scope: pairing-page explanation and a route to create a distinct account for the active pairing.
+  It never restores, changes, merges, or deletes the existing account.
+- Result: implementation complete; verification and staging deployment pending.
+
 ## RM-011-R2 — 2026-08-30 — native availability recovery
 
 - Goal: reproduce and remove the reported native account-service-unavailable condition using a
