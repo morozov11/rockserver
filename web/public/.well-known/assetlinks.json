@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.rockmobile",
+      "sha256_cert_fingerprints": [
+        "92:E7:BE:49:13:A9:4A:B5:0E:37:58:7B:AB:A1:3F:36:0D:49:47:C4:83:0C:DF:DE:10:40:21:3E:63:42:53:9"
+      ]
+    }
+  }
+]
