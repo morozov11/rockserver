@@ -328,8 +328,8 @@ impl PostgresAccountStore {
         csrf_hash: &SecretHash,
     ) -> Result<Option<Uuid>, sqlx::Error> {
         sqlx::query_scalar(
-            "SELECT b.user_id FROM browser_sessions b JOIN users u ON u.id = b.user_id \\
-             WHERE b.session_token_hash = $1 AND b.csrf_token_hash = $2 AND b.revoked_at IS NULL \\
+            "SELECT b.user_id FROM browser_sessions b JOIN users u ON u.id = b.user_id \
+             WHERE b.session_token_hash = $1 AND b.csrf_token_hash = $2 AND b.revoked_at IS NULL \
              AND b.expires_at > now() AND u.status = 'active'",
         )
         .bind(session_token_hash.as_bytes())
@@ -344,7 +344,7 @@ impl PostgresAccountStore {
         session_token_hash: &SecretHash,
     ) -> Result<Option<Uuid>, sqlx::Error> {
         sqlx::query_scalar(
-            "SELECT b.user_id FROM browser_sessions b JOIN users u ON u.id = b.user_id \\
+            "SELECT b.user_id FROM browser_sessions b JOIN users u ON u.id = b.user_id \
              WHERE b.session_token_hash = $1 AND b.revoked_at IS NULL AND b.expires_at > now() AND u.status = 'active'",
         )
         .bind(session_token_hash.as_bytes())
@@ -358,10 +358,10 @@ impl PostgresAccountStore {
         user_id: Uuid,
     ) -> Result<Vec<BrowserDevice>, sqlx::Error> {
         sqlx::query_as::<_, BrowserDeviceRow>(
-            "SELECT d.id, d.device_display_name, d.device_type, \\
-             to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, \\
-             to_char(GREATEST(d.last_seen_at, (SELECT max(s.last_seen_at) FROM sessions s WHERE s.device_id = d.id)) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS last_seen_at, \\
-             CASE WHEN EXISTS (SELECT 1 FROM sessions s WHERE s.device_id = d.id AND s.revoked_at IS NULL AND s.access_expires_at > now()) THEN 'active' ELSE 'inactive' END AS session_status \\
+            "SELECT d.id, d.device_display_name, d.device_type, \
+             to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, \
+             to_char(GREATEST(d.last_seen_at, (SELECT max(s.last_seen_at) FROM sessions s WHERE s.device_id = d.id)) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS last_seen_at, \
+             CASE WHEN EXISTS (SELECT 1 FROM sessions s WHERE s.device_id = d.id AND s.revoked_at IS NULL AND s.access_expires_at > now()) THEN 'active' ELSE 'inactive' END AS session_status \
              FROM devices d JOIN users u ON u.id = d.user_id WHERE d.user_id = $1 AND d.revoked_at IS NULL AND u.status = 'active' ORDER BY d.created_at, d.id",
         )
         .bind(user_id)
@@ -379,7 +379,7 @@ impl PostgresAccountStore {
     ) -> Result<bool, sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
         let updated = sqlx::query(
-            "UPDATE devices SET device_display_name = $3 WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL \\
+            "UPDATE devices SET device_display_name = $3 WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL \
              AND EXISTS (SELECT 1 FROM users WHERE id = $2 AND status = 'active')",
         )
         .bind(device_id)
@@ -411,7 +411,7 @@ impl PostgresAccountStore {
     ) -> Result<bool, sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
         let updated = sqlx::query(
-            "UPDATE browser_sessions SET revoked_at = now() WHERE user_id = $1 AND session_token_hash = $2 AND csrf_token_hash = $3 \\
+            "UPDATE browser_sessions SET revoked_at = now() WHERE user_id = $1 AND session_token_hash = $2 AND csrf_token_hash = $3 \
              AND revoked_at IS NULL AND expires_at > now()",
         )
         .bind(user_id)

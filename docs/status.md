@@ -4,6 +4,13 @@ Last updated: 2026-08-30
 
 ## RM-011 — fresh-passkey pairing approval repair (verified locally, 2026-08-30)
 
+The account-centre availability regression reported during the physical flow is traced to literal
+backslashes emitted in six multiline PostgreSQL browser-session/device queries. PostgreSQL rejected
+them with SQLSTATE `42601`, while the HTTP boundary correctly exposed only the safe
+`auth_unavailable` response. The query continuations now emit whitespace instead; the existing
+disposable PostgreSQL browser-account ownership regression passes after the fix. Staging deployment
+and renewed physical pairing remain pending.
+
 The live browser evidence identified a second Web state defect: a restored browser cookie was shown
 as ready to approve a pairing even though the server correctly requires a passkey assertion no
 older than two minutes. The server returned `409 pairing_not_approvable`, which the UI rendered as

@@ -1,5 +1,19 @@
 # Task log
 
+## RM-011-E2E-R4 — 2026-08-30 — browser account SQL availability repair
+
+- Goal: remove the common account-service failure observed in the browser cabinet during the
+  permitted physical pairing flow.
+- Scope: PostgreSQL multiline query continuations for browser-session ownership, device listing,
+  rename, and browser logout. No account data, cookie, token, proof, or request URL was read.
+- Result: six query strings had emitted a literal backslash, which PostgreSQL rejected with
+  SQLSTATE `42601`. They now use Rust string continuations and emit valid whitespace.
+- Checks: the existing disposable PostgreSQL
+  `postgres_browser_account_centre_owns_rename_and_revoke` regression passed after the fix;
+  the ordinary Rust suite passed 103 tests. Staging deployment and renewed physical pairing are
+  pending.
+- Status: **complete locally; staging deployment pending.**
+
 ## RM-011-E2E-R2 — 2026-08-30 — stale browser reauthentication guard
 
 - Goal: prevent a restored browser cookie from exposing a pairing approval action that the server
