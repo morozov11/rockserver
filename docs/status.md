@@ -7,12 +7,14 @@ Last updated: 2026-08-30
 The first permitted disposable staging attempt exposed a real regression: an initial browser-session
 request could complete after pairing approval and overwrite the `approved` screen with the pending
 confirmation screen. `web/src/app.tsx` now preserves `approved` against that late response, with a
-new regression assertion. Web `pnpm test` passes 11/11 and `pnpm build` passes locally.
+new regression assertion. Commit `82521f7` was deployed through OPS-001-D; the detached worker
+reported `status=succeeded`, and public readiness returned `200`. Web `pnpm test` passes 11/11 and
+`pnpm build` passes locally.
 
-This is not yet deployed. The live E2E is **not passed**: the browser account centre also showed its
-recoverable unavailable state, and neither native client has yet produced verified persisted-session
-and device-list evidence. The investigation is continuing without collecting account, session,
-credential, proof, QR, or device identifiers. The correct public release certificate SHA-256 is
+The live E2E is **not passed**: the browser account centre also showed its recoverable unavailable
+state, and neither native client has yet produced verified persisted-session and device-list
+evidence. The investigation is continuing without collecting account, session, credential, proof,
+QR, or device identifiers. The correct public release certificate SHA-256 is
 `92:E7:BE:49:13:A9:4A:4B:50:E3:75:87:BA:BA:13:F3:60:D4:94:7C:48:30:CD:FD:E1:04:02:13:E6:34:25:39`.
 
 ## RM-011 — final integration (staging deploy complete; E2E blocked, 2026-08-29)

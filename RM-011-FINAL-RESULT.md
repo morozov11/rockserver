@@ -4,8 +4,9 @@ Date: 2026-08-29
 
 > Update, 2026-08-30: this report is superseded as a completion claim. The first permitted
 > disposable staging attempt found a browser success-state race and an unverified native-session
-> outcome. The race is fixed locally and verified by web tests, but it has not yet been deployed;
-> E2E is therefore not passed. No sensitive flow data is recorded here.
+> outcome. The race is fixed and was deployed as `82521f7` through OPS-001-D; public readiness
+> returned `200`. E2E is nevertheless not passed pending a fresh disposable flow. No sensitive flow
+> data is recorded here.
 
 ## Outcome
 

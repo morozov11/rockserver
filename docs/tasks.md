@@ -12,7 +12,8 @@
   now keeps `approved` terminal for that response and has regression coverage. The live account
   centre was unavailable and end-to-end client persistence/device-list verification remains open.
 - Checks: web `pnpm test` passed 11/11 and `pnpm build` passed.
-- Status: implemented locally; staging redeploy and a fresh disposable E2E are still required.
+- Status: deployed as `82521f7` through OPS-001-D (`status=succeeded`; public readiness `200`). A
+  fresh disposable E2E is still required.
 
 ## RM-011-FINAL — 2026-08-29 — cross-repository final integration
 
