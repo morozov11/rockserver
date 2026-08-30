@@ -13,6 +13,10 @@ The old refresh and native-logout routes are absent. Migration `0017` drops refr
 resets existing native device/session rows, so staging clients pair once under the new model.
 Verified locally: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`
 passed (103 unit tests; PostgreSQL and live-credential suites remain opt-in/ignored).
+Staging deployment completed through OPS-001-D as commit `7916cee`; the remote worker reported
+`status=succeeded` and public readiness passed. The first rollout of `74589c7` exposed a migration
+ordering error before readiness; `7916cee` corrects it by dropping the dependent refresh table
+before removing sessions.
 
 ## RM-011 — fresh-passkey pairing approval repair (verified locally, 2026-08-30)
 

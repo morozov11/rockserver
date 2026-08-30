@@ -8,8 +8,11 @@
 - Result: access expiry triggers a safe credential-based session issuance; a lost response or
   temporary failure cannot unpair the device.
 - Checks: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test` passed
-  (103 unit tests; PostgreSQL/live suites remain opt-in). Staging rollout pending.
-- Status: **local verification complete; staging rollout pending.**
+  (103 unit tests; PostgreSQL/live suites remain opt-in). OPS-001-D staging deploy of `7916cee`
+  reported `status=succeeded` and public readiness passed. An initial deploy of `74589c7` failed
+  before readiness because migration `0017` deleted sessions before the dependent refresh table;
+  the follow-up commit corrects the order.
+- Status: **staging deployment verified.**
 
 ## RM-011-E2E-R4 — 2026-08-30 — browser account SQL availability repair
 
