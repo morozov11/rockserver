@@ -251,12 +251,8 @@ fn build_router(state: AppState) -> Router {
             axum::routing::post(pairing::complete_pairing_request),
         )
         .route(
-            "/v1/auth/refresh",
-            axum::routing::post(auth::refresh_native_session),
-        )
-        .route(
-            "/v1/auth/logout",
-            axum::routing::post(auth::logout_native_session),
+            "/v1/auth/device-session",
+            axum::routing::post(auth::create_device_session),
         )
         .route(
             "/v1/account/profile",

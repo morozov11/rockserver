@@ -2,6 +2,18 @@
 
 Last updated: 2026-08-30
 
+## RM-011 durable device-secret sessions (implemented locally, 2026-08-30)
+
+Native pairing is now a durable device binding rather than a refresh-token family. Pairing returns
+one 256-bit opaque `device_secret`; PostgreSQL stores only its hash. `POST /v1/auth/device-session`
+accepts the device UUID and secret, retires the previous short-lived access session, and returns a
+new 15-minute access token. Only a revoked, unknown, or deleted-account credential returns
+`401 device_credential_invalid`; transient store failures return `503` and never revoke a device.
+The old refresh and native-logout routes are absent. Migration `0017` drops refresh-token state and
+resets existing native device/session rows, so staging clients pair once under the new model.
+Verified locally: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`
+passed (103 unit tests; PostgreSQL and live-credential suites remain opt-in/ignored).
+
 ## RM-011 — fresh-passkey pairing approval repair (verified locally, 2026-08-30)
 
 The account-centre availability regression reported during the physical flow is traced to literal
@@ -1037,11 +1049,10 @@ requires an `HttpOnly` browser cookie proof, the `X-CSRF-Token` double-submit he
 first-party HTTPS origin, and the configured Caddy proxy proof. A new nullable cookie-hash column
 keeps old B2 rows readable while all newly created browser sessions bind an opaque cookie hash.
 
-Native session/account management is now exposed through `POST /v1/auth/refresh`,
-`POST /v1/auth/logout`, `GET /v1/account/profile`, `GET /v1/devices`, and
-`DELETE /v1/devices/{device_id}`. Access-token lookup and device revocation are owner-scoped in
-PostgreSQL; refresh rotation replaces the access token in the same transaction and replay revokes
-the refresh family.
+Native session/account management is exposed through `POST /v1/auth/device-session`,
+`GET /v1/account/profile`, `GET /v1/devices`, and `DELETE /v1/devices/{device_id}`.
+Access-token lookup and device revocation are owner-scoped in PostgreSQL; the durable device secret
+can create a replacement short-lived access session without rotating or storing a refresh token.
 
 Verification on this snapshot: `cargo fmt --check`, `cargo clippy --all-targets --all-features --jobs 1
 -- -D warnings`, `cargo test --jobs 1` (93 unit/library tests plus regular integration suites), web

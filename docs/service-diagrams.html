@@ -99,7 +99,7 @@
       <h2>3. Внутренняя схема RockServer</h2>
       <div class="grid">
         <article class="card current"><span class="badge current">CURRENT</span><h3>Axum API</h3><p>Public <code>GET /health/live</code>, DB-aware <code>GET /health/ready</code>, anonymous <code>/v1/search</code> and <code>/v1/voice/*</code>; legacy <code>/api/v1/*</code> search/voice routes retain the Bearer boundary.</p></article>
-        <article class="card current"><span class="badge current">CURRENT</span><h3>API access gate</h3><p>The deployment Bearer credential protects only legacy <code>/api/v1/*</code> compatibility routes. Account/device pairing uses passkey, browser cookie, CSRF, and short-lived native sessions; no credential is logged.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>API access gate</h3><p>The deployment Bearer credential protects only legacy <code>/api/v1/*</code> compatibility routes. Account/device pairing uses passkey, browser cookie, CSRF, and a durable device secret that issues short-lived native sessions; no credential is logged.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>tracing / config</h3><p>JSON tracing, HTTP и import config, run/page/count logs, graceful shutdown.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>DTO / validation</h3><p>Transport DTO, request_id и contract-compliant ошибки.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>SearchService</h3><p>Нормализованный запрос и стабильное repository-neutral ранжирование.</p></article>

@@ -135,15 +135,6 @@ pub struct BrowserDevice {
     pub session_status: String,
 }
 
-/// Result of an accepted refresh rotation; it intentionally contains no plaintext token.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RefreshRotation {
-    /// New append-only refresh-token record.
-    pub replacement_id: Uuid,
-    /// Session whose family was rotated.
-    pub session_id: Uuid,
-}
-
 /// Active native session owner resolved from a hashed access token.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ActiveSession {
@@ -155,7 +146,7 @@ pub struct ActiveSession {
     pub device_id: Uuid,
 }
 
-/// Hashed material required to create one native session and its initial refresh token.
+/// Hashed material required to create one short-lived native access session.
 pub struct NewSession<'a> {
     /// New session identifier.
     pub session_id: Uuid,
@@ -167,15 +158,9 @@ pub struct NewSession<'a> {
     pub access_hash: &'a SecretHash,
     /// Access expiry in PostgreSQL-validated RFC 3339 UTC form.
     pub access_expires_at_rfc3339: &'a str,
-    /// New initial refresh-token identifier.
-    pub refresh_id: Uuid,
-    /// Keyed hash of the opaque refresh token.
-    pub refresh_hash: &'a SecretHash,
-    /// Refresh expiry in PostgreSQL-validated RFC 3339 UTC form.
-    pub refresh_expires_at_rfc3339: &'a str,
 }
 
-/// Hashed material for a desktop session whose account owner is derived from an approved pairing request.
+/// Hashed material for a paired device whose account owner is derived from an approved pairing request.
 pub struct NewPairingSession<'a> {
     /// New native session identifier.
     pub session_id: Uuid,
@@ -185,12 +170,8 @@ pub struct NewPairingSession<'a> {
     pub access_hash: &'a SecretHash,
     /// Access expiry in PostgreSQL-validated RFC 3339 UTC form.
     pub access_expires_at_rfc3339: &'a str,
-    /// New initial refresh-token identifier.
-    pub refresh_id: Uuid,
-    /// Keyed hash of the opaque refresh token.
-    pub refresh_hash: &'a SecretHash,
-    /// Refresh expiry in PostgreSQL-validated RFC 3339 UTC form.
-    pub refresh_expires_at_rfc3339: &'a str,
+    /// Keyed hash of the persistent opaque device credential.
+    pub device_secret_hash: &'a SecretHash,
 }
 
 /// Hashed browser-session material created after a passkey ceremony.
@@ -356,13 +337,6 @@ pub struct AccountProjection {
     pub last_seen_at: Option<String>,
 }
 
-/// Safe refresh outcome that does not disclose whether a token existed or why it was rejected.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RefreshError {
-    /// The supplied hash is invalid, expired, revoked, or already consumed.
-    Rejected,
-}
-
 /// Recognizes the small audited security-event vocabulary allowed by this persistence stage.
 pub fn is_safe_audit_event(event_type: &str) -> bool {
     matches!(
@@ -371,6 +345,7 @@ pub fn is_safe_audit_event(event_type: &str) -> bool {
             | "passkey_registered"
             | "passkey_revoked"
             | "pairing_completed"
+            | "device_session_issued"
             | "refresh_rotated"
             | "refresh_reuse_detected"
             | "logout"
@@ -399,7 +374,7 @@ mod tests {
 
     #[test]
     fn audit_vocabulary_rejects_request_secrets() {
-        assert!(is_safe_audit_event("refresh_rotated"));
+        assert!(is_safe_audit_event("device_session_issued"));
         assert!(!is_safe_audit_event("refresh_token=secret"));
     }
 

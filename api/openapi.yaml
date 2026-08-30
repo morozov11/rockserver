@@ -138,34 +138,25 @@ paths:
         "204": { description: Current browser session revoked; native device sessions are unchanged. }
         "401": { description: Browser session cookie is absent, expired, or invalid. }
         "403": { description: Trusted proxy, origin, or CSRF proof is missing. }
-  /v1/auth/refresh:
+  /v1/auth/device-session:
     post:
-      operationId: refreshNativeSession
-      summary: Rotate a native refresh token and issue a new access token
+      operationId: createDeviceSession
+      summary: Issue a short-lived access token for a paired native device
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/RefreshRequest"
+              $ref: "#/components/schemas/DeviceSessionRequest"
       responses:
         "200":
-          description: New opaque native credentials; never cache or log.
+          description: New opaque access token; never cache or log.
           headers:
             Cache-Control: { schema: { type: string, example: no-store } }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/TokenPair" }
-        "401": { $ref: "#/components/responses/AuthenticationRequired" }
-  /v1/auth/logout:
-    post:
-      operationId: logoutNativeSession
-      summary: Revoke the current native session and refresh family
-      security:
-        - RockserverBearer: []
-      responses:
-        "204": { description: Session revoked. }
-        "401": { $ref: "#/components/responses/AuthenticationRequired" }
+              schema: { $ref: "#/components/schemas/DeviceSession" }
+        "401": { description: Device credential is invalid, revoked, or belongs to a deleted account. }
   /v1/account/profile:
     get:
       operationId: getAccountProfile
@@ -884,19 +875,19 @@ components:
         connected_at: { type: string, format: date-time }
         last_seen_at: { type: [string, "null"], format: date-time }
         session_status: { type: string, enum: [active, inactive] }
-    RefreshRequest:
+    DeviceSessionRequest:
       type: object
       additionalProperties: false
-      required: [refresh_token]
+      required: [device_id, device_secret]
       properties:
-        refresh_token: { type: string, minLength: 16, maxLength: 512, writeOnly: true }
-    TokenPair:
+        device_id: { type: string, format: uuid }
+        device_secret: { type: string, minLength: 32, maxLength: 512, writeOnly: true }
+    DeviceSession:
       type: object
       additionalProperties: false
-      required: [access_token, refresh_token]
+      required: [access_token]
       properties:
         access_token: { type: string, minLength: 16, maxLength: 128, writeOnly: true }
-        refresh_token: { type: string, minLength: 16, maxLength: 128, writeOnly: true }
     AccountProfile:
       type: object
       additionalProperties: false
@@ -961,13 +952,13 @@ components:
     PairingCompletion:
       type: object
       additionalProperties: false
-      required: [user_id, device_id, session_id, access_token, refresh_token, account_display_name, device_display_name, device_type]
+      required: [user_id, device_id, session_id, access_token, device_secret, account_display_name, device_display_name, device_type]
       properties:
         user_id: { type: string, format: uuid }
         device_id: { type: string, format: uuid }
         session_id: { type: string, format: uuid }
         access_token: { type: string, writeOnly: true }
-        refresh_token: { type: string, writeOnly: true }
+        device_secret: { type: string, minLength: 32, maxLength: 512, writeOnly: true }
         account_display_name: { type: string, minLength: 1, maxLength: 128 }
         device_display_name: { type: string, minLength: 1, maxLength: 128 }
         device_type: { type: string, minLength: 1, maxLength: 64 }

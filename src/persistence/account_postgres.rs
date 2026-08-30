@@ -9,11 +9,10 @@ use crate::account_cleanup::{
     CleanupError, CleanupPreview, validate_confirmation,
 };
 use crate::auth::{
-    AccountProjection, ActiveSession, BrowserDevice, NewBrowserSession, NewPairingRequest,
-    NewPairingSession, NewPasskeyRegistration, NewSession, NewWebAuthnChallenge, OwnedDevice,
-    MAX_ACCOUNT_DEVICES, PairingCompletion, PairingCompletionOutcome, PairingPreview,
-    PasskeyRegistrationOutcome, RefreshError, RefreshRotation, SecretHash, WebAuthnCeremony,
-    is_safe_audit_event,
+    AccountProjection, ActiveSession, BrowserDevice, MAX_ACCOUNT_DEVICES, NewBrowserSession,
+    NewPairingRequest, NewPairingSession, NewPasskeyRegistration, NewSession, NewWebAuthnChallenge,
+    OwnedDevice, PairingCompletion, PairingCompletionOutcome, PairingPreview,
+    PasskeyRegistrationOutcome, SecretHash, WebAuthnCeremony, is_safe_audit_event,
 };
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
@@ -71,16 +70,22 @@ impl PostgresAccountStore {
         Ok(())
     }
 
-    /// Creates a device only when its owner is still active.
+    /// Creates a fixture device with a deterministic placeholder credential hash.
+    ///
+    /// Production devices are created only by pairing, which generates a random device secret.
     pub async fn create_device(&self, device: &OwnedDevice) -> Result<bool, sqlx::Error> {
+        let mut test_only_secret_hash = [0_u8; 32];
+        test_only_secret_hash[..16].copy_from_slice(device.id.as_bytes());
+        test_only_secret_hash[16..].copy_from_slice(device.id.as_bytes());
         let inserted = sqlx::query(
-            "INSERT INTO devices (id, user_id, device_display_name, device_type) \
-             SELECT $1, id, $3, $4 FROM users WHERE id = $2 AND status = 'active'",
+            "INSERT INTO devices (id, user_id, device_display_name, device_type, device_secret_hash) \
+             SELECT $1, id, $3, $4, $5 FROM users WHERE id = $2 AND status = 'active'",
         )
         .bind(device.id)
         .bind(device.user_id)
         .bind(&device.device_display_name)
         .bind(&device.device_type)
+        .bind(test_only_secret_hash)
         .execute(&self.pool)
         .await?;
         Ok(inserted.rows_affected() == 1)
@@ -195,7 +200,7 @@ impl PostgresAccountStore {
         .map(|rows| rows.into_iter().map(Into::into).collect())
     }
 
-    /// Revokes one device and all native sessions/refresh tokens owned by it.
+    /// Revokes one device and all of its native access sessions.
     pub async fn revoke_owned_device(
         &self,
         user_id: Uuid,
@@ -216,8 +221,6 @@ impl PostgresAccountStore {
         }
         sqlx::query("UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND device_id = $2 AND revoked_at IS NULL")
             .bind(user_id).bind(device_id).execute(&mut *transaction).await?;
-        sqlx::query("UPDATE refresh_tokens SET revoked_at = now() WHERE session_id IN (SELECT id FROM sessions WHERE user_id = $1 AND device_id = $2) AND revoked_at IS NULL")
-            .bind(user_id).bind(device_id).execute(&mut *transaction).await?;
         audit(
             &mut transaction,
             Some(user_id),
@@ -229,44 +232,73 @@ impl PostgresAccountStore {
         Ok(true)
     }
 
-    /// Revokes the caller's native session and its refresh-token family.
-    pub async fn revoke_session(
-        &self,
-        session_id: Uuid,
-        user_id: Uuid,
-    ) -> Result<bool, sqlx::Error> {
-        let mut transaction = self.pool.begin().await?;
-        let updated = sqlx::query("UPDATE sessions SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL")
-            .bind(session_id).bind(user_id).execute(&mut *transaction).await?;
-        if updated.rows_affected() == 0 {
-            transaction.rollback().await?;
-            return Ok(false);
-        }
-        sqlx::query("UPDATE refresh_tokens SET revoked_at = now() WHERE session_id = $1 AND revoked_at IS NULL")
-            .bind(session_id).execute(&mut *transaction).await?;
-        audit(&mut transaction, Some(user_id), None, "logout").await?;
-        transaction.commit().await?;
-        Ok(true)
-    }
-
-    /// Persists a desktop/native session and its first hashed refresh token in one transaction.
+    /// Persists one short-lived native access session.
     pub async fn create_session(&self, session: NewSession<'_>) -> Result<bool, sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
-        let family_id = Uuid::new_v4();
         let inserted = sqlx::query(
-            "INSERT INTO sessions (id, user_id, device_id, access_token_hash, access_expires_at, refresh_family_id) \
-             SELECT $1, $2, d.id, $4, $5::timestamptz, $6 FROM devices d JOIN users u ON u.id = d.user_id \
+            "INSERT INTO sessions (id, user_id, device_id, access_token_hash, access_expires_at) \
+             SELECT $1, $2, d.id, $4, $5::timestamptz FROM devices d JOIN users u ON u.id = d.user_id \
              WHERE d.id = $3 AND d.user_id = $2 AND d.revoked_at IS NULL AND u.status = 'active'",
         )
         .bind(session.session_id).bind(session.user_id).bind(session.device_id).bind(session.access_hash.as_bytes())
-        .bind(session.access_expires_at_rfc3339).bind(family_id).execute(&mut *transaction).await?;
+        .bind(session.access_expires_at_rfc3339).execute(&mut *transaction).await?;
         if inserted.rows_affected() == 0 {
             transaction.rollback().await?;
             return Ok(false);
         }
-        sqlx::query("INSERT INTO refresh_tokens (id, session_id, family_id, token_hash, expires_at) VALUES ($1, $2, $3, $4, $5::timestamptz)")
-            .bind(session.refresh_id).bind(session.session_id).bind(family_id).bind(session.refresh_hash.as_bytes())
-            .bind(session.refresh_expires_at_rfc3339).execute(&mut *transaction).await?;
+        transaction.commit().await?;
+        Ok(true)
+    }
+
+    /// Replaces a device's access session after validating its persistent opaque credential.
+    pub async fn issue_device_session(
+        &self,
+        device_id: Uuid,
+        device_secret_hash: &SecretHash,
+        session_id: Uuid,
+        access_hash: &SecretHash,
+    ) -> Result<bool, sqlx::Error> {
+        let mut transaction = self.pool.begin().await?;
+        let owner = sqlx::query_scalar::<_, Uuid>(
+            "SELECT d.user_id FROM devices d JOIN users u ON u.id = d.user_id \
+             WHERE d.id = $1 AND d.device_secret_hash = $2 AND d.revoked_at IS NULL \
+             AND u.status = 'active' FOR UPDATE",
+        )
+        .bind(device_id)
+        .bind(device_secret_hash.as_bytes())
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some(user_id) = owner else {
+            transaction.rollback().await?;
+            return Ok(false);
+        };
+        sqlx::query(
+            "UPDATE sessions SET revoked_at = now() WHERE device_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(device_id)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "INSERT INTO sessions (id, user_id, device_id, access_token_hash, access_expires_at) \
+             VALUES ($1, $2, $3, $4, now() + interval '15 minutes')",
+        )
+        .bind(session_id)
+        .bind(user_id)
+        .bind(device_id)
+        .bind(access_hash.as_bytes())
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query("UPDATE devices SET last_seen_at = now() WHERE id = $1")
+            .bind(device_id)
+            .execute(&mut *transaction)
+            .await?;
+        audit(
+            &mut transaction,
+            Some(user_id),
+            Some(device_id),
+            "device_session_issued",
+        )
+        .await?;
         transaction.commit().await?;
         Ok(true)
     }
@@ -875,14 +907,15 @@ impl PostgresAccountStore {
             return Ok(PairingCompletionOutcome::NoLongerAvailable);
         };
         let inserted = sqlx::query(
-            "INSERT INTO devices (id, user_id, device_display_name, device_type, app_version) \
-             SELECT $1, $2, $3, $4, $5 WHERE (SELECT COUNT(*) FROM devices WHERE user_id = $2 AND revoked_at IS NULL) < $6",
+            "INSERT INTO devices (id, user_id, device_display_name, device_type, app_version, device_secret_hash) \
+             SELECT $1, $2, $3, $4, $5, $6 WHERE (SELECT COUNT(*) FROM devices WHERE user_id = $2 AND revoked_at IS NULL) < $7",
         )
         .bind(session.device_id)
         .bind(user_id)
         .bind(&request.device_display_name)
         .bind(&request.device_type)
         .bind(request.app_version)
+        .bind(session.device_secret_hash.as_bytes())
         .bind(i64::from(MAX_ACCOUNT_DEVICES))
         .execute(&mut *transaction)
         .await?;
@@ -890,21 +923,16 @@ impl PostgresAccountStore {
             transaction.rollback().await?;
             return Ok(PairingCompletionOutcome::DeviceLimit);
         }
-        let family_id = Uuid::new_v4();
         sqlx::query(
-            "INSERT INTO sessions (id, user_id, device_id, access_token_hash, access_expires_at, refresh_family_id) VALUES ($1, $2, $3, $4, CASE WHEN $5 = 'db:15m' THEN now() + interval '15 minutes' ELSE $5::timestamptz END, $6)",
+            "INSERT INTO sessions (id, user_id, device_id, access_token_hash, access_expires_at) VALUES ($1, $2, $3, $4, CASE WHEN $5 = 'db:15m' THEN now() + interval '15 minutes' ELSE $5::timestamptz END)",
         )
         .bind(session.session_id)
         .bind(user_id)
         .bind(session.device_id)
         .bind(session.access_hash.as_bytes())
         .bind(session.access_expires_at_rfc3339)
-        .bind(family_id)
         .execute(&mut *transaction)
         .await?;
-        sqlx::query("INSERT INTO refresh_tokens (id, session_id, family_id, token_hash, expires_at) VALUES ($1, $2, $3, $4, CASE WHEN $5 = 'db:30d' THEN now() + interval '30 days' ELSE $5::timestamptz END)")
-            .bind(session.refresh_id).bind(session.session_id).bind(family_id).bind(session.refresh_hash.as_bytes())
-            .bind(session.refresh_expires_at_rfc3339).execute(&mut *transaction).await?;
         sqlx::query("UPDATE pairing_requests SET consumed_at = now() WHERE id = $1")
             .bind(request_id)
             .execute(&mut *transaction)
@@ -971,112 +999,6 @@ impl PostgresAccountStore {
         Ok(row.is_some())
     }
 
-    /// Atomically consumes a refresh token; a replay revokes the entire family before returning a neutral error.
-    pub async fn rotate_refresh(
-        &self,
-        presented_hash: &SecretHash,
-        replacement_id: Uuid,
-        replacement_hash: &SecretHash,
-        replacement_expires_at_rfc3339: &str,
-    ) -> Result<RefreshRotation, RefreshError> {
-        self.rotate_refresh_internal(
-            presented_hash,
-            replacement_id,
-            replacement_hash,
-            replacement_expires_at_rfc3339,
-            None,
-        )
-        .await
-    }
-
-    /// Atomically rotates refresh and replaces the session's short-lived access token.
-    pub async fn rotate_refresh_with_access(
-        &self,
-        presented_hash: &SecretHash,
-        replacement_id: Uuid,
-        replacement_hash: &SecretHash,
-        replacement_expires_at_rfc3339: &str,
-        access_hash: &SecretHash,
-        access_expires_at_rfc3339: &str,
-    ) -> Result<RefreshRotation, RefreshError> {
-        self.rotate_refresh_internal(
-            presented_hash,
-            replacement_id,
-            replacement_hash,
-            replacement_expires_at_rfc3339,
-            Some((access_hash, access_expires_at_rfc3339)),
-        )
-        .await
-    }
-
-    async fn rotate_refresh_internal(
-        &self,
-        presented_hash: &SecretHash,
-        replacement_id: Uuid,
-        replacement_hash: &SecretHash,
-        replacement_expires_at_rfc3339: &str,
-        replacement_access: Option<(&SecretHash, &str)>,
-    ) -> Result<RefreshRotation, RefreshError> {
-        let mut transaction = self
-            .pool
-            .begin()
-            .await
-            .map_err(|_| RefreshError::Rejected)?;
-        let token = sqlx::query_as::<_, RefreshRow>(
-            "SELECT r.id, r.session_id, r.family_id, r.used_at IS NOT NULL OR r.revoked_at IS NOT NULL \
-             OR r.expires_at <= now() OR s.revoked_at IS NOT NULL AS rejected \
-             FROM refresh_tokens r JOIN sessions s ON s.id = r.session_id WHERE r.token_hash = $1 FOR UPDATE",
-        ).bind(presented_hash.as_bytes()).fetch_optional(&mut *transaction).await.map_err(|_| RefreshError::Rejected)?;
-        let Some(token) = token else {
-            return Err(RefreshError::Rejected);
-        };
-        if token.rejected {
-            revoke_family(&mut transaction, token.family_id, token.session_id).await?;
-            transaction
-                .commit()
-                .await
-                .map_err(|_| RefreshError::Rejected)?;
-            return Err(RefreshError::Rejected);
-        }
-        let inserted = sqlx::query("INSERT INTO refresh_tokens (id, session_id, family_id, token_hash, expires_at) VALUES ($1, $2, $3, $4, $5::timestamptz)")
-            .bind(replacement_id).bind(token.session_id).bind(token.family_id).bind(replacement_hash.as_bytes())
-            .bind(replacement_expires_at_rfc3339).execute(&mut *transaction).await.map_err(|_| RefreshError::Rejected)?;
-        if inserted.rows_affected() != 1 {
-            return Err(RefreshError::Rejected);
-        }
-        if let Some((access_hash, access_expires_at_rfc3339)) = replacement_access {
-            let updated = sqlx::query(
-                "UPDATE sessions SET access_token_hash = $2, access_expires_at = CASE WHEN $3 = 'db:15m' THEN now() + interval '15 minutes' ELSE $3::timestamptz END, last_seen_at = now() WHERE id = $1 AND revoked_at IS NULL",
-            )
-            .bind(token.session_id)
-            .bind(access_hash.as_bytes())
-            .bind(access_expires_at_rfc3339)
-            .execute(&mut *transaction)
-            .await
-            .map_err(|_| RefreshError::Rejected)?;
-            if updated.rows_affected() != 1 {
-                return Err(RefreshError::Rejected);
-            }
-        }
-        sqlx::query("UPDATE refresh_tokens SET used_at = now(), replaced_by_id = $2 WHERE id = $1")
-            .bind(token.id)
-            .bind(replacement_id)
-            .execute(&mut *transaction)
-            .await
-            .map_err(|_| RefreshError::Rejected)?;
-        audit(&mut transaction, None, None, "refresh_rotated")
-            .await
-            .map_err(|_| RefreshError::Rejected)?;
-        transaction
-            .commit()
-            .await
-            .map_err(|_| RefreshError::Rejected)?;
-        Ok(RefreshRotation {
-            replacement_id,
-            session_id: token.session_id,
-        })
-    }
-
     /// Returns a redacted account/dependency inventory for an operator's manual review.
     pub async fn account_cleanup_preview(&self) -> Result<CleanupPreview, sqlx::Error> {
         let accounts = sqlx::query_as::<_, CleanupAccountRow>(
@@ -1110,12 +1032,6 @@ SELECT s.user_id, 'session', s.id,
        to_char(s.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
        to_char(s.access_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), s.device_id, NULL::text
 FROM sessions s
-UNION ALL
-SELECT s.user_id, 'refresh_token', r.id,
-       CASE WHEN r.revoked_at IS NOT NULL THEN 'revoked' WHEN r.used_at IS NOT NULL THEN 'used' WHEN r.expires_at <= now() THEN 'expired' ELSE 'active' END,
-       to_char(r.issued_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), NULL::text,
-       to_char(r.expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), r.session_id, NULL::text
-FROM refresh_tokens r JOIN sessions s ON s.id = r.session_id
 UNION ALL
 SELECT b.user_id, 'browser_session', b.id,
        CASE WHEN b.revoked_at IS NOT NULL THEN 'revoked' WHEN b.expires_at <= now() THEN 'expired' ELSE 'active' END,
@@ -1314,14 +1230,6 @@ ORDER BY account_id, created_at, id
         .execute(&mut *transaction)
         .await
         .map_err(|_| CleanupError::Database)?;
-        let refresh_tokens = sqlx::query(
-            "UPDATE refresh_tokens SET revoked_at = now() WHERE session_id IN (SELECT id FROM sessions WHERE user_id = $1 AND device_id = $2) AND revoked_at IS NULL",
-        )
-        .bind(account_id)
-        .bind(device_id)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|_| CleanupError::Database)?;
         let audit_event_id = audit(
             &mut transaction,
             Some(account_id),
@@ -1342,7 +1250,6 @@ ORDER BY account_id, created_at, id
             revoked: CleanupCounts {
                 devices: affected_count(device_count),
                 sessions: affected_count(sessions),
-                refresh_tokens: affected_count(refresh_tokens),
                 ..CleanupCounts::default()
             },
             audit_event_id,
@@ -1491,10 +1398,6 @@ async fn revoke_account_dependencies(
     .bind(user_id)
     .execute(&mut **transaction)
     .await?;
-    let refresh_tokens = sqlx::query("UPDATE refresh_tokens SET revoked_at = now() WHERE session_id IN (SELECT id FROM sessions WHERE user_id = $1) AND revoked_at IS NULL")
-        .bind(user_id)
-        .execute(&mut **transaction)
-        .await?;
     let passkeys = sqlx::query(
         "UPDATE passkey_credentials SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
     )
@@ -1528,7 +1431,6 @@ async fn revoke_account_dependencies(
         account_identities: affected_count(account_identities),
         devices: affected_count(devices),
         sessions: affected_count(sessions),
-        refresh_tokens: affected_count(refresh_tokens),
         browser_sessions: affected_count(browser_sessions),
         pairing_requests: affected_count(pairing_requests),
         webauthn_challenges: affected_count(webauthn_challenges),
@@ -1644,14 +1546,6 @@ impl From<AccountProjectionRow> for AccountProjection {
     }
 }
 #[derive(sqlx::FromRow)]
-struct RefreshRow {
-    id: Uuid,
-    session_id: Uuid,
-    family_id: Uuid,
-    rejected: bool,
-}
-
-#[derive(sqlx::FromRow)]
 struct PairingRow {
     approved_by_user_id: Option<Uuid>,
     device_display_name: String,
@@ -1684,29 +1578,6 @@ impl From<PairingPreviewRow> for PairingPreview {
             expires_at: row.expires_at,
         }
     }
-}
-
-async fn revoke_family(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    family_id: Uuid,
-    session_id: Uuid,
-) -> Result<(), RefreshError> {
-    sqlx::query(
-        "UPDATE refresh_tokens SET revoked_at = now() WHERE family_id = $1 AND revoked_at IS NULL",
-    )
-    .bind(family_id)
-    .execute(&mut **transaction)
-    .await
-    .map_err(|_| RefreshError::Rejected)?;
-    sqlx::query("UPDATE sessions SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL")
-        .bind(session_id)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|_| RefreshError::Rejected)?;
-    audit(transaction, None, None, "refresh_reuse_detected")
-        .await
-        .map(|_| ())
-        .map_err(|_| RefreshError::Rejected)
 }
 
 async fn audit(

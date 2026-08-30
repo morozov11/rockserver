@@ -1,5 +1,16 @@
 # Task log
 
+## RM-011 — 2026-08-30 — durable device-secret server sessions
+
+- Goal: replace fragile rotating refresh tokens with a persistent revocable device credential.
+- Scope: add the device-session API, persist only device-secret hashes, remove native refresh/logout
+  routes and refresh-token table, and reset staging native bindings through migration `0017`.
+- Result: access expiry triggers a safe credential-based session issuance; a lost response or
+  temporary failure cannot unpair the device.
+- Checks: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test` passed
+  (103 unit tests; PostgreSQL/live suites remain opt-in). Staging rollout pending.
+- Status: **local verification complete; staging rollout pending.**
+
 ## RM-011-E2E-R4 — 2026-08-30 — browser account SQL availability repair
 
 - Goal: remove the common account-service failure observed in the browser cabinet during the

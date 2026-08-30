@@ -71,7 +71,7 @@ pub fn validate_confirmation(
 pub struct CleanupDependency {
     /// Stable server-side row identifier; token hashes and credential bytes are never returned.
     pub id: Uuid,
-    /// Sanitized dependency kind, such as `device` or `refresh_token`.
+    /// Sanitized dependency kind, such as `device` or `session`.
     pub kind: String,
     /// Safe lifecycle status of the dependency.
     pub status: String,
@@ -104,8 +104,6 @@ pub struct CleanupCounts {
     pub devices: usize,
     /// Number of native session rows.
     pub sessions: usize,
-    /// Number of refresh-token rows; token values are never returned.
-    pub refresh_tokens: usize,
     /// Number of browser-session rows.
     pub browser_sessions: usize,
     /// Number of pairing-request rows tied to the account.
@@ -124,7 +122,6 @@ impl CleanupCounts {
             "account_identity" => self.account_identities += 1,
             "device" => self.devices += 1,
             "session" => self.sessions += 1,
-            "refresh_token" => self.refresh_tokens += 1,
             "browser_session" => self.browser_sessions += 1,
             "pairing_request" => self.pairing_requests += 1,
             "webauthn_challenge" => self.webauthn_challenges += 1,

@@ -107,7 +107,7 @@ struct PairingCompletionResponseDto {
     device_id: String,
     session_id: String,
     access_token: String,
-    refresh_token: String,
+    device_secret: String,
     account_display_name: String,
     device_display_name: String,
     device_type: String,
@@ -414,19 +414,17 @@ pub(super) async fn complete_pairing_request(
         );
     };
     let access_token = Uuid::new_v4().simple().to_string();
-    let refresh_token = Uuid::new_v4().simple().to_string();
+    let device_secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let device_id = Uuid::new_v4();
     let session_id = Uuid::new_v4();
     let access_hash = token_hash(&access_token);
-    let refresh_hash = token_hash(&refresh_token);
+    let device_secret_hash = token_hash(&device_secret);
     let session = NewPairingSession {
         session_id,
         device_id,
         access_hash: &access_hash,
         access_expires_at_rfc3339: "db:15m",
-        refresh_id: Uuid::new_v4(),
-        refresh_hash: &refresh_hash,
-        refresh_expires_at_rfc3339: "db:30d",
+        device_secret_hash: &device_secret_hash,
     };
     match store
         .complete_pairing(pairing_id, &token_hash(&payload.desktop_token), session)
@@ -439,7 +437,7 @@ pub(super) async fn complete_pairing_request(
                     device_id: result.device_id.to_string(),
                     session_id: result.session_id.to_string(),
                     access_token,
-                    refresh_token,
+                    device_secret,
                     account_display_name: result.account_display_name,
                     device_display_name: result.device_display_name,
                     device_type: result.device_type,
@@ -476,7 +474,7 @@ pub(super) async fn complete_pairing_request(
                 &request_id,
                 json!({"limit": MAX_ACCOUNT_DEVICES}),
             )
-        },
+        }
         Ok(PairingCompletionOutcome::InvalidProof) => error_response(
             StatusCode::UNAUTHORIZED,
             "pairing_rejected",
@@ -516,6 +514,6 @@ mod tests {
         assert!(value.get("desktop_token").is_none());
         assert!(value.get("approval_secret").is_none());
         assert!(value.get("credential_id").is_none());
-        assert!(value.get("refresh_token").is_none());
+        assert!(value.get("device_secret").is_none());
     }
 }

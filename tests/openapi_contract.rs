@@ -21,8 +21,7 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
     for path in [
         "/health/live",
         "/health/ready",
-        "/v1/auth/refresh",
-        "/v1/auth/logout",
+        "/v1/auth/device-session",
         "/v1/auth/browser-logout",
         "/v1/browser/account",
         "/v1/account/profile",
@@ -175,8 +174,8 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         "NormalizedQuery",
         "StationResult",
         "ErrorResponse",
-        "RefreshRequest",
-        "TokenPair",
+        "DeviceSessionRequest",
+        "DeviceSession",
         "AccountProfile",
         "DeviceList",
         "BrowserAccount",
@@ -204,7 +203,7 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         .get("properties")
         .and_then(Value::as_mapping)
         .expect("browser device fields must be declared");
-    for secret in ["credential_id", "access_token", "refresh_token", "user_id"] {
+    for secret in ["credential_id", "access_token", "device_secret", "user_id"] {
         assert!(
             !browser_properties.contains_key(Value::String(secret.to_owned())),
             "browser device must not expose {secret}"
@@ -234,7 +233,7 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         "desktop_token",
         "approval_secret",
         "credential_id",
-        "refresh_token",
+        "device_secret",
     ] {
         assert!(
             !preview_properties.contains_key(Value::String(secret.to_owned())),

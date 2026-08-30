@@ -20,9 +20,8 @@ use crate::auth::{
 use super::{
     state::AppState,
     transport::{
-        bearer_token, cookie_value, error_response, is_trusted_browser_request, parse_json_request,
-        request_id, token_hash, trusted_proxy_header_matches, unauthorized_response,
-        with_request_id,
+        cookie_value, error_response, is_trusted_browser_request, parse_json_request, request_id,
+        token_hash, trusted_proxy_header_matches, unauthorized_response, with_request_id,
     },
 };
 
@@ -39,14 +38,14 @@ struct BrowserSessionDto {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RefreshRequestDto {
-    refresh_token: String,
+struct DeviceSessionRequestDto {
+    device_id: Uuid,
+    device_secret: String,
 }
 
 #[derive(Serialize)]
-struct NativeTokenPairDto {
+struct DeviceSessionResponseDto {
     access_token: String,
-    refresh_token: String,
 }
 
 #[derive(Deserialize)]
@@ -641,18 +640,19 @@ pub(super) async fn browser_session(State(state): State<AppState>, headers: Head
     }
 }
 
-/// Rotates a native refresh token and returns a fresh opaque access/refresh pair.
-pub(super) async fn refresh_native_session(
+/// Issues a short-lived access token for an already paired native device.
+pub(super) async fn create_device_session(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: Body,
 ) -> Response {
     let request_id = request_id(&headers);
-    let payload: RefreshRequestDto = match parse_json_request(&headers, body, &request_id).await {
-        Ok(payload) => payload,
-        Err(response) => return response,
-    };
-    if payload.refresh_token.len() < 16 || payload.refresh_token.len() > 512 {
+    let payload: DeviceSessionRequestDto =
+        match parse_json_request(&headers, body, &request_id).await {
+            Ok(payload) => payload,
+            Err(response) => return response,
+        };
+    if payload.device_secret.len() < 32 || payload.device_secret.len() > 512 {
         return unauthorized_response(&request_id);
     }
     let Some(store) = state.account_store.clone() else {
@@ -665,25 +665,18 @@ pub(super) async fn refresh_native_session(
         );
     };
     let access_token = Uuid::new_v4().simple().to_string();
-    let refresh_token = Uuid::new_v4().simple().to_string();
     let result = store
-        .rotate_refresh_with_access(
-            &token_hash(&payload.refresh_token),
+        .issue_device_session(
+            payload.device_id,
+            &token_hash(&payload.device_secret),
             Uuid::new_v4(),
-            &token_hash(&refresh_token),
-            "db:30d",
             &token_hash(&access_token),
-            "db:15m",
         )
         .await;
     match result {
-        Ok(_) => {
+        Ok(true) => {
             let mut response = with_request_id(
-                Json(NativeTokenPairDto {
-                    access_token,
-                    refresh_token,
-                })
-                .into_response(),
+                Json(DeviceSessionResponseDto { access_token }).into_response(),
                 &request_id,
             );
             response
@@ -691,50 +684,13 @@ pub(super) async fn refresh_native_session(
                 .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             response
         }
-        Err(_) => unauthorized_response(&request_id),
-    }
-}
-
-/// Revokes the current native session and its refresh-token family.
-pub(super) async fn logout_native_session(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Response {
-    let request_id = request_id(&headers);
-    let Some(store) = state.account_store.clone() else {
-        return error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "auth_unavailable",
-            "Account service is unavailable.",
+        Ok(false) => error_response(
+            StatusCode::UNAUTHORIZED,
+            "device_credential_invalid",
+            "This device credential is no longer valid.",
             &request_id,
             json!({}),
-        );
-    };
-    let Some(token) = bearer_token(&headers) else {
-        return unauthorized_response(&request_id);
-    };
-    let session = match store
-        .find_active_session_by_access_hash(&token_hash(token))
-        .await
-    {
-        Ok(Some(session)) => session,
-        Ok(None) => return unauthorized_response(&request_id),
-        Err(_) => {
-            return error_response(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "auth_unavailable",
-                "Account service is unavailable.",
-                &request_id,
-                json!({}),
-            );
-        }
-    };
-    match store
-        .revoke_session(session.session_id, session.user_id)
-        .await
-    {
-        Ok(true) => with_request_id(StatusCode::NO_CONTENT.into_response(), &request_id),
-        Ok(false) => unauthorized_response(&request_id),
+        ),
         Err(_) => error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "auth_unavailable",

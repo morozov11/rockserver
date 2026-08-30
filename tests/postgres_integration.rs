@@ -9,7 +9,7 @@ use rockserver::{
     account_cleanup::CleanupError,
     auth::{
         NewBrowserSession, NewPairingRequest, NewPairingSession, NewSession, NewWebAuthnChallenge,
-        OwnedDevice, PairingCompletionOutcome, RefreshError, SecretHash, WebAuthnCeremony,
+        OwnedDevice, PairingCompletionOutcome, SecretHash, WebAuthnCeremony,
     },
     catalog::{
         CatalogImportError, CatalogImportProvider, CatalogImporter, ImportLimits, ImportPage,
@@ -211,9 +211,7 @@ async fn postgres_b2_browser_pairing_webauthn_and_rate_limits() {
                     device_id: Uuid::new_v4(),
                     access_hash: &SecretHash::new([98; 32]),
                     access_expires_at_rfc3339: "2035-01-01T00:10:00Z",
-                    refresh_id: Uuid::new_v4(),
-                    refresh_hash: &SecretHash::new([97; 32]),
-                    refresh_expires_at_rfc3339: "2035-02-01T00:00:00Z",
+                    device_secret_hash: &SecretHash::new([97; 32]),
                 },
             )
             .await
@@ -270,9 +268,7 @@ async fn postgres_b2_browser_pairing_webauthn_and_rate_limits() {
                     device_id: Uuid::new_v4(),
                     access_hash: &SecretHash::new([15; 32]),
                     access_expires_at_rfc3339: "2035-01-01T00:10:00Z",
-                    refresh_id: Uuid::new_v4(),
-                    refresh_hash: &SecretHash::new([16; 32]),
-                    refresh_expires_at_rfc3339: "2035-02-01T00:00:00Z",
+                    device_secret_hash: &SecretHash::new([16; 32]),
                 },
             )
             .await
@@ -291,9 +287,7 @@ async fn postgres_b2_browser_pairing_webauthn_and_rate_limits() {
                 device_id,
                 access_hash: &SecretHash::new([6; 32]),
                 access_expires_at_rfc3339: "2035-01-01T00:10:00Z",
-                refresh_id: Uuid::new_v4(),
-                refresh_hash: &SecretHash::new([7; 32]),
-                refresh_expires_at_rfc3339: "2035-02-01T00:00:00Z",
+                device_secret_hash: &SecretHash::new([7; 32]),
             },
         )
         .await
@@ -313,9 +307,7 @@ async fn postgres_b2_browser_pairing_webauthn_and_rate_limits() {
                     device_id: Uuid::new_v4(),
                     access_hash: &SecretHash::new([8; 32]),
                     access_expires_at_rfc3339: "2035-01-01T00:10:00Z",
-                    refresh_id: Uuid::new_v4(),
-                    refresh_hash: &SecretHash::new([9; 32]),
-                    refresh_expires_at_rfc3339: "2035-02-01T00:00:00Z",
+                    device_secret_hash: &SecretHash::new([9; 32]),
                 },
             )
             .await
@@ -399,7 +391,6 @@ async fn postgres_account_session_rotation_deletion_and_ownership() {
     );
 
     let session = Uuid::new_v4();
-    let first_refresh = Uuid::new_v4();
     assert!(
         store
             .create_session(NewSession {
@@ -408,33 +399,9 @@ async fn postgres_account_session_rotation_deletion_and_ownership() {
                 device_id: device.id,
                 access_hash: &SecretHash::new([1; 32]),
                 access_expires_at_rfc3339: "2035-01-01T00:00:00Z",
-                refresh_id: first_refresh,
-                refresh_hash: &SecretHash::new([2; 32]),
-                refresh_expires_at_rfc3339: "2035-01-02T00:00:00Z",
             })
             .await
             .unwrap()
-    );
-    let rotation = store
-        .rotate_refresh(
-            &SecretHash::new([2; 32]),
-            Uuid::new_v4(),
-            &SecretHash::new([3; 32]),
-            "2035-01-03T00:00:00Z",
-        )
-        .await
-        .unwrap();
-    assert_eq!(rotation.session_id, session);
-    assert_eq!(
-        store
-            .rotate_refresh(
-                &SecretHash::new([2; 32]),
-                Uuid::new_v4(),
-                &SecretHash::new([4; 32]),
-                "2035-01-04T00:00:00Z"
-            )
-            .await,
-        Err(RefreshError::Rejected)
     );
     assert!(store.delete_account(owner).await.unwrap());
     assert_eq!(
@@ -442,13 +409,13 @@ async fn postgres_account_session_rotation_deletion_and_ownership() {
         None
     );
     let inspection = repository_pool(&database_url).await;
-    let state = sqlx::query_as::<_, (String, bool, bool)>("SELECT u.status, EXISTS(SELECT 1 FROM sessions s WHERE s.user_id = u.id AND s.revoked_at IS NULL), EXISTS(SELECT 1 FROM refresh_tokens r JOIN sessions s ON s.id = r.session_id WHERE s.user_id = u.id AND r.revoked_at IS NULL) FROM users u WHERE u.id = $1")
+    let state = sqlx::query_as::<_, (String, bool)>("SELECT u.status, EXISTS(SELECT 1 FROM sessions s WHERE s.user_id = u.id AND s.revoked_at IS NULL) FROM users u WHERE u.id = $1")
         .bind(owner).fetch_one(&inspection).await.unwrap();
-    assert_eq!(state, ("deleted".to_owned(), false, false));
+    assert_eq!(state, ("deleted".to_owned(), false));
     inspection.close().await;
 }
 
-/// Verifies the browser account centre keeps management actions owner-scoped and revocation blocks refresh.
+/// Verifies the browser account centre keeps management actions owner-scoped and revocation blocks access.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL pointing to a disposable PostgreSQL database"]
 async fn postgres_browser_account_centre_owns_rename_and_revoke() {
@@ -510,7 +477,6 @@ async fn postgres_browser_account_centre_owns_rename_and_revoke() {
         store.list_browser_devices(owner).await.unwrap()[0].device_display_name,
         "Studio PC"
     );
-    let refresh = SecretHash::new([43; 32]);
     assert!(
         store
             .create_session(NewSession {
@@ -519,26 +485,12 @@ async fn postgres_browser_account_centre_owns_rename_and_revoke() {
                 device_id: device.id,
                 access_hash: &SecretHash::new([44; 32]),
                 access_expires_at_rfc3339: "2035-01-01T00:15:00Z",
-                refresh_id: Uuid::new_v4(),
-                refresh_hash: &refresh,
-                refresh_expires_at_rfc3339: "2035-02-01T00:00:00Z"
             })
             .await
             .unwrap()
     );
     assert!(!store.revoke_owned_device(foreign, device.id).await.unwrap());
     assert!(store.revoke_owned_device(owner, device.id).await.unwrap());
-    assert!(matches!(
-        store
-            .rotate_refresh(
-                &refresh,
-                Uuid::new_v4(),
-                &SecretHash::new([45; 32]),
-                "2035-02-01T00:00:00Z"
-            )
-            .await,
-        Err(RefreshError::Rejected)
-    ));
     store.close().await;
 }
 
@@ -597,9 +549,6 @@ async fn postgres_account_cleanup_is_preview_first_and_cascade_safe() {
                 device_id,
                 access_hash: &SecretHash::new([41; 32]),
                 access_expires_at_rfc3339: "2035-01-01T00:00:00Z",
-                refresh_id: Uuid::new_v4(),
-                refresh_hash: &SecretHash::new([42; 32]),
-                refresh_expires_at_rfc3339: "2035-02-01T00:00:00Z",
             })
             .await
             .unwrap()
@@ -630,7 +579,6 @@ async fn postgres_account_cleanup_is_preview_first_and_cascade_safe() {
     assert_eq!(preview_account.dependency_counts.passkeys, 2);
     assert_eq!(preview_account.dependency_counts.devices, 1);
     assert_eq!(preview_account.dependency_counts.sessions, 1);
-    assert_eq!(preview_account.dependency_counts.refresh_tokens, 1);
     assert_eq!(preview_account.dependency_counts.browser_sessions, 1);
     assert!(
         preview_account
@@ -695,7 +643,6 @@ async fn postgres_account_cleanup_is_preview_first_and_cascade_safe() {
         .unwrap();
     assert_eq!(device_revoke.revoked.devices, 1);
     assert_eq!(device_revoke.revoked.sessions, 1);
-    assert_eq!(device_revoke.revoked.refresh_tokens, 1);
 
     let protected_account_id = Uuid::new_v4();
     store.create_user(protected_account_id).await.unwrap();
@@ -733,16 +680,15 @@ async fn postgres_account_cleanup_is_preview_first_and_cascade_safe() {
     assert_eq!(result.status, "deactivated");
     assert_eq!(result.revoked.devices, 1);
     assert_eq!(result.revoked.sessions, 1);
-    assert_eq!(result.revoked.refresh_tokens, 1);
     assert_eq!(result.revoked.passkeys, 1);
-    let state = sqlx::query_as::<_, (String, bool, bool, bool, bool)>(
-        "SELECT u.status, EXISTS(SELECT 1 FROM devices d WHERE d.user_id = u.id AND d.revoked_at IS NULL), EXISTS(SELECT 1 FROM sessions s WHERE s.user_id = u.id AND s.revoked_at IS NULL), EXISTS(SELECT 1 FROM refresh_tokens r JOIN sessions s ON s.id = r.session_id WHERE s.user_id = u.id AND r.revoked_at IS NULL), EXISTS(SELECT 1 FROM browser_sessions b WHERE b.user_id = u.id AND b.revoked_at IS NULL) FROM users u WHERE u.id = $1",
+    let state = sqlx::query_as::<_, (String, bool, bool, bool)>(
+        "SELECT u.status, EXISTS(SELECT 1 FROM devices d WHERE d.user_id = u.id AND d.revoked_at IS NULL), EXISTS(SELECT 1 FROM sessions s WHERE s.user_id = u.id AND s.revoked_at IS NULL), EXISTS(SELECT 1 FROM browser_sessions b WHERE b.user_id = u.id AND b.revoked_at IS NULL) FROM users u WHERE u.id = $1",
     )
     .bind(account_id)
     .fetch_one(&inspection)
     .await
     .unwrap();
-    assert_eq!(state, ("deleted".to_owned(), false, false, false, false));
+    assert_eq!(state, ("deleted".to_owned(), false, false, false));
     assert_eq!(
         sqlx::query_scalar::<_, String>(
             "SELECT event_type FROM account_audit_events WHERE id = $1"
