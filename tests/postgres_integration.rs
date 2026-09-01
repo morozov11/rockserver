@@ -12,6 +12,7 @@ use rockserver::{
         AdminPrincipalStatus, AdminSecurityEvent, AdminSecurityEventType, AdminStore,
         NewAdminPasswordCredential, NewAdminSession,
     },
+    admin_bootstrap::{AdminBootstrapConfig, bootstrap_admin},
     auth::{
         NewBrowserSession, NewPairingRequest, NewPairingSession, NewSession, NewWebAuthnChallenge,
         OwnedDevice, PairingCompletionOutcome, SecretHash, WebAuthnCeremony,
@@ -125,6 +126,80 @@ async fn postgres_admin_identity_foundation_rejects_invalid_hash_state() {
     assert!(sqlx::query("INSERT INTO admin_sessions (id, principal_id, token_hash, expires_at) VALUES ($1, $2, $3, $4::timestamptz)")
         .bind(Uuid::new_v4()).bind(principal_id).bind(vec![1_u8; 31]).bind("2035-01-01T00:00:00Z")
         .execute(&pool).await.is_err());
+    pool.close().await;
+}
+
+/// Verifies protected bootstrap is atomic, one-time, and safe under concurrent PostgreSQL attempts.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL pointing to a disposable PostgreSQL database"]
+async fn postgres_admin_bootstrap_is_atomic_and_idempotent() {
+    let database_url = env::var("TEST_DATABASE_URL")
+        .expect("set TEST_DATABASE_URL to an isolated PostgreSQL database");
+    let store = PostgresAdminStore::connect(&database_url)
+        .await
+        .expect("admin migrations must succeed");
+    let pool = PgPool::connect(&database_url).await.unwrap();
+    sqlx::query(
+        "TRUNCATE admin_security_events, admin_password_credentials, admin_sessions, admin_login_attempts, admin_principals",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let first = AdminBootstrapConfig::from_values(
+        Some("bootstrap-admin".to_owned()),
+        Some("a-deterministic-test-password".to_owned()),
+    )
+    .unwrap();
+    let second = AdminBootstrapConfig::from_values(
+        Some("other-bootstrap-admin".to_owned()),
+        Some("a-different-test-password".to_owned()),
+    )
+    .unwrap();
+    let (first, second) = tokio::join!(
+        bootstrap_admin(&store, first),
+        bootstrap_admin(&store, second)
+    );
+    assert!(
+        matches!(first, Ok(rockserver::admin::AdminBootstrapOutcome::Created))
+            ^ matches!(
+                second,
+                Ok(rockserver::admin::AdminBootstrapOutcome::Created)
+            )
+    );
+    assert!(
+        matches!(
+            first,
+            Ok(rockserver::admin::AdminBootstrapOutcome::AlreadyExists)
+        ) ^ matches!(
+            second,
+            Ok(rockserver::admin::AdminBootstrapOutcome::AlreadyExists)
+        )
+    );
+
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM admin_principals")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM admin_password_credentials")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM admin_security_events WHERE event_type = 'admin_created'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        1
+    );
     pool.close().await;
 }
 

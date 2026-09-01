@@ -1,5 +1,31 @@
 # Task log
 
+## RS-ADMIN-002 — 2026-09-01 — protected one-time administrator bootstrap
+
+- Goal: bootstrap exactly one administrator principal from a protected terminal/deployment
+  environment without adding public authentication behavior.
+- Scope: an explicit `bootstrap_admin` binary, Argon2id PHC hashing, username/singleton migration,
+  atomic PostgreSQL persistence, deterministic unit tests, opt-in disposable PostgreSQL coverage,
+  safe `.env.example` placeholders, and factual current-state documentation. No HTTP route, login,
+  logout, refresh, middleware, admin UI, deployment, staging, or password-change behavior.
+- Result: the binary consumes only `ROCKSERVER_ADMIN_BOOTSTRAP_USERNAME` and
+  `ROCKSERVER_ADMIN_BOOTSTRAP_PASSWORD` from its process environment; it does not load `.env` or
+  parse secret arguments. A password is never persisted or logged: Argon2id produces the only PHC
+  value accepted by the store. Migration `0019` adds username metadata and a singleton index; one
+  PostgreSQL CTE creates the principal, credential and `admin_created` event together. Existing or
+  concurrent-loser attempts return `AlreadyExists` without modifying a credential. Error and Debug
+  paths redact password/PHC material. `.env.example` contains placeholders only and `.env` remains
+  ignored.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features --jobs 1 -- -D warnings`,
+  `cargo test --jobs 1` (109 library tests plus all regular integration suites), and `git diff
+  --check` passed. `git check-ignore -v .env` confirmed the existing ignore rule. A local disposable
+  loopback `pgvector/pgvector:pg17` database was created because `TEST_DATABASE_URL` was not
+  preconfigured; `cargo test --test postgres_integration -- --ignored --exact
+  postgres_admin_bootstrap_is_atomic_and_idempotent` passed. It executes the new bootstrap query
+  concurrently and verifies one principal, credential and security event. The exact temporary
+  container was stopped and removed afterward.
+- Status: **complete locally.** RS-ADMIN-003 remains the next scope.
+
 ## RS-ADMIN-001 — 2026-09-01 — durable administrator identity foundation
 
 - Goal: add durable administrator principal, credential/session, login-attempt, and security-event

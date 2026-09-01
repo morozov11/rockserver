@@ -138,6 +138,60 @@ pub struct NewAdminPasswordCredential {
     pub password_hash: AdminPasswordHash,
 }
 
+/// Validated administrator username supplied only by a protected operator boundary.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminUsername(String);
+
+impl AdminUsername {
+    /// Validates the bounded identifier reserved for the single bootstrap administrator.
+    pub fn parse(value: String) -> Result<Self, AdminUsernameError> {
+        let valid = (3..=64).contains(&value.len())
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'));
+        if valid {
+            Ok(Self(value))
+        } else {
+            Err(AdminUsernameError::Invalid)
+        }
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Safe failure while accepting an administrator username.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AdminUsernameError {
+    /// The username is not 3–64 ASCII letters, digits, dots, underscores, or hyphens.
+    Invalid,
+}
+
+/// Fully hashed data required to atomically create the first administrator.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NewAdminBootstrap {
+    /// New administrator principal identifier.
+    pub principal_id: Uuid,
+    /// New administrator credential identifier.
+    pub credential_id: Uuid,
+    /// New security event identifier.
+    pub security_event_id: Uuid,
+    /// Administrator login identifier.
+    pub username: AdminUsername,
+    /// Argon2id PHC password hash produced outside persistence.
+    pub password_hash: AdminPasswordHash,
+}
+
+/// Safe result of attempting the one-time administrator bootstrap.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AdminBootstrapOutcome {
+    /// The missing administrator and its password credential were created together.
+    Created,
+    /// An administrator already existed, so no row or credential was changed.
+    AlreadyExists,
+}
+
 /// Hashed material needed to persist one opaque administrator session.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NewAdminSession {
@@ -195,6 +249,11 @@ pub enum AdminStoreError {
 /// Boundary for administrator credential and session verification state.
 #[async_trait]
 pub trait AdminStore: Send + Sync {
+    /// Atomically creates the only administrator principal and its initial credential when absent.
+    async fn bootstrap_admin(
+        &self,
+        bootstrap: NewAdminBootstrap,
+    ) -> Result<AdminBootstrapOutcome, AdminStoreError>;
     /// Persists one active administrator principal.
     async fn create_principal(&self, principal: AdminPrincipal) -> Result<(), AdminStoreError>;
     /// Persists an Argon2id password hash for an existing administrator.
@@ -270,6 +329,42 @@ impl FakeAdminStore {
 
 #[async_trait]
 impl AdminStore for FakeAdminStore {
+    async fn bootstrap_admin(
+        &self,
+        bootstrap: NewAdminBootstrap,
+    ) -> Result<AdminBootstrapOutcome, AdminStoreError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| AdminStoreError::Unavailable)?;
+        if !state.principals.is_empty() {
+            return Ok(AdminBootstrapOutcome::AlreadyExists);
+        }
+        state.principals.insert(
+            bootstrap.principal_id,
+            AdminPrincipal {
+                id: bootstrap.principal_id,
+                status: AdminPrincipalStatus::Active,
+            },
+        );
+        state.credentials.insert(
+            bootstrap.principal_id,
+            AdminPasswordCredential {
+                id: bootstrap.credential_id,
+                principal_id: bootstrap.principal_id,
+                password_hash: bootstrap.password_hash,
+            },
+        );
+        state.security_events.push(AdminSecurityEvent {
+            id: bootstrap.security_event_id,
+            principal_id: Some(bootstrap.principal_id),
+            session_id: None,
+            source_ip_hash: None,
+            event_type: AdminSecurityEventType::AdminCreated,
+        });
+        Ok(AdminBootstrapOutcome::Created)
+    }
+
     async fn create_principal(&self, principal: AdminPrincipal) -> Result<(), AdminStoreError> {
         let mut state = self
             .state

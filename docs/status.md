@@ -1,6 +1,26 @@
 # Project status
 
-Last updated: 2026-08-30
+Last updated: 2026-09-01
+
+## RS-ADMIN-002 protected administrator bootstrap (implemented locally, 2026-09-01)
+
+The new `bootstrap_admin` one-shot binary accepts `ROCKSERVER_ADMIN_BOOTSTRAP_USERNAME` and
+`ROCKSERVER_ADMIN_BOOTSTRAP_PASSWORD` only from its process environment. It does not load `.env`
+files and accepts no secret command-line arguments or HTTP input. The password is validated,
+hashed with Argon2id, and only its PHC representation reaches PostgreSQL. Migration `0019` adds
+the bootstrap username metadata and a singleton index. One CTE creates the principal, credential,
+and `admin_created` audit event atomically; an existing principal, including a concurrent winner,
+returns a no-op and never replaces its credential. Config, hash and store errors use safe messages,
+and secret-bearing config/hash debug output is redacted.
+
+Verified locally: `cargo fmt --check`, strict all-target/all-feature Clippy, `cargo test` (109
+library tests plus regular integration suites), `git diff --check`, and `.env` ignore verification
+passed. A temporary local loopback `pgvector/pgvector:pg17` PostgreSQL database was available for
+the required disposable test; `postgres_admin_bootstrap_is_atomic_and_idempotent` passed and proved
+that concurrent attempts produce exactly one principal, password credential, and creation event.
+The temporary container was removed. No HTTP login/session middleware, UI, deployment, staging, or
+external provider test was added. The next scope is RS-ADMIN-003: administrator login/session
+authentication and abuse resistance.
 
 ## RS-ADMIN-001 durable administrator identity foundation (implemented locally, 2026-09-01)
 

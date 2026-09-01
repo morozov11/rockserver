@@ -6,9 +6,9 @@ use uuid::Uuid;
 
 use crate::{
     admin::{
-        AdminLoginAttempt, AdminLoginOutcome, AdminPasswordCredential, AdminPrincipal,
-        AdminSecurityEvent, AdminSession, AdminStore, AdminStoreError, NewAdminPasswordCredential,
-        NewAdminSession,
+        AdminBootstrapOutcome, AdminLoginAttempt, AdminLoginOutcome, AdminPasswordCredential,
+        AdminPrincipal, AdminSecurityEvent, AdminSession, AdminStore, AdminStoreError,
+        NewAdminBootstrap, NewAdminPasswordCredential, NewAdminSession,
     },
     auth::SecretHash,
 };
@@ -43,6 +43,29 @@ impl PostgresAdminStore {
 
 #[async_trait]
 impl AdminStore for PostgresAdminStore {
+    async fn bootstrap_admin(
+        &self,
+        bootstrap: NewAdminBootstrap,
+    ) -> Result<AdminBootstrapOutcome, AdminStoreError> {
+        // The singleton index makes concurrent missing-admin attempts resolve to one safe winner.
+        let created = sqlx::query_scalar::<_, Uuid>(
+            "WITH new_principal AS (INSERT INTO admin_principals (id, username, status) SELECT $1, $2, 'active' WHERE NOT EXISTS (SELECT 1 FROM admin_principals) ON CONFLICT DO NOTHING RETURNING id), new_credential AS (INSERT INTO admin_password_credentials (id, principal_id, password_hash) SELECT $3, id, $4 FROM new_principal RETURNING principal_id) INSERT INTO admin_security_events (id, principal_id, event_type) SELECT $5, principal_id, 'admin_created' FROM new_credential RETURNING principal_id",
+        )
+        .bind(bootstrap.principal_id)
+        .bind(bootstrap.username.as_str())
+        .bind(bootstrap.credential_id)
+        .bind(bootstrap.password_hash.as_str())
+        .bind(bootstrap.security_event_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_error)?;
+        Ok(if created.is_some() {
+            AdminBootstrapOutcome::Created
+        } else {
+            AdminBootstrapOutcome::AlreadyExists
+        })
+    }
+
     async fn create_principal(&self, principal: AdminPrincipal) -> Result<(), AdminStoreError> {
         sqlx::query("INSERT INTO admin_principals (id, status) VALUES ($1, $2)")
             .bind(principal.id)

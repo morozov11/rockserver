@@ -2,6 +2,8 @@
 pub mod account_cleanup;
 /// Administrator identity and persistence contracts separate from Rock accounts.
 pub mod admin;
+/// Protected one-shot administrator bootstrap command boundary.
+pub mod admin_bootstrap;
 /// Passkey-only account, device, and native-session domain boundaries.
 pub mod auth;
 /// Catalog domain and controlled import orchestration.
