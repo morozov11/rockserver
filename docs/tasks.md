@@ -1,5 +1,84 @@
 # Task log
 
+## Local administrator launcher — 2026-09-01
+
+- Goal: provide a simple host-based launcher for RockServer plus local administrator SPA hosting
+  when PostgreSQL and admin bootstrap already exist on the workstation.
+- Result: `run-rockserver-admin-local.ps1` and `deploy/Caddyfile.dev-host` start RockServer through
+  `cargo run`, serve `web/dist` through a disposable Caddy container on loopback port `3080`, proxy
+  API traffic with the trusted-proxy header, and align `ROCKSERVER_LOCAL_ADMIN_ORIGIN` with the
+  browser origin. Missing `web/dist` triggers a one-time `pnpm build`. On Windows the launcher
+  rewrites stale `unix://` `DOCKER_HOST` values to `npipe:////./pipe/docker_engine` for Docker Desktop.
+- Checks: PowerShell parser accepted the launcher; documentation updated. No browser smoke was run.
+- Status: **implemented locally.**
+
+## RS-ADMIN-006 — 2026-09-01 — SPA admin console
+
+- Goal: replace the superseded server-rendered administrator shell with the existing first-party
+  Preact/Vite SPA served by Caddy, retaining the established revocable administrator boundary.
+- Result: `/admin` is a same-origin SPA route with Devices, Audit and Stations tabs. The browser
+  retains the Bearer only in current component memory; logout and `401` clear it. Devices and audit
+  use safe dedicated server read models; stations use server-side bounded pagination and name/tag
+  search. No admin mutation, credential lifecycle or token persistence was added.
+- Checks: web typecheck/lint/test/build, `cargo fmt --check`, strict all-target/all-feature Clippy,
+  `cargo test`, OpenAPI contract and `git diff --check` passed serially. A loopback-only disposable
+  Docker Desktop PostgreSQL database passed the changed admin durable-query integration test; it was
+  removed. Merged local Compose config validated. No local Caddy image was available for Caddyfile
+  validation or browser smoke, so `http://localhost/admin` was not manually exercised.
+- Status: **implemented locally; Caddy runtime smoke pending an available local image.**
+
+## Local launcher alignment — 2026-09-01
+
+- Goal: align `run-rockserver-local.ps1` with the administrator authentication and trusted-proxy
+  startup boundaries without weakening them.
+- Result: it creates a process-local `ROCKSERVER_TRUSTED_PROXY_TOKEN` when absent, corrects stale
+  admin-token messaging, and permits login only from its exact loopback `http://127.0.0.1:<port>`
+  origin. Bootstrap remains the separate protected command; LAN origins and production policy were
+  not weakened.
+- Checks: PowerShell parser validation, `cargo fmt --check`, strict all-target/all-feature Clippy,
+  `cargo test` (113 library tests plus regular target/contract suites), and `git diff --check`
+  passed. No migration, dependency, or PostgreSQL query changed.
+- Status: **complete locally.**
+
+## RS-ADMIN-005 — 2026-09-01 — administrator operational hardening
+
+- Goal: harden the already implemented administrator session boundary and establish bounded,
+  retention-safe operational evidence and runbooks without widening product authentication.
+- Scope: atomic admin-session refresh rotation, durable safe request records with a 30-day write-path
+  retention policy, deterministic fake/HTTP/PostgreSQL coverage, backup/incident/deployment
+  acceptance runbook and security-plan/status updates. RockCast machine-credential lifecycle was
+  explicitly excluded: product routes remain public and pairing remains its user-identity boundary.
+- Result: refresh inserts the replacement session hash and revokes the old session in one transaction;
+  failed refresh leaves no usable replacement. Authenticated administrator routes persist only static
+  endpoint, safe outcome, bounded duration, request ID and UUID correlations; credentials, headers,
+  bodies, search text and transcripts are not stored. `docs/admin-operations-runbook.md` documents
+  restore-triggered session revocation, incident handling, retention and acceptance checks.
+- Checks: `cargo fmt --check`, strict all-target/all-feature Clippy, `cargo test` (113 library
+  tests plus all non-ignored target/contract suites), OpenAPI contract checks and `git diff --check`
+  passed serially. A loopback-only disposable Docker Desktop `pgvector/pgvector:pg17` database
+  passed `postgres_admin_auth_queries_are_durable_and_revocable`; it covers every changed or new
+  administrator persistence query, including atomic rotation and request-record retention. The
+  disposable container was removed after the test.
+- Status: **complete locally.** No next RS-ADMIN task is currently defined.
+
+## RS-ADMIN-004 — 2026-09-01 — first-party administrator console
+
+- Goal: replace the unauthenticated local preview with the minimum protected, server-rendered
+  administrator console on the RS-ADMIN-003 Bearer boundary.
+- Scope: Axum HTML shell and locally served CSS/JS, existing login/logout hand-off, protected
+  bounded station listing read model, strict admin response headers, OpenAPI and deterministic
+  HTTP/contract checks. No new PostgreSQL query, migration, import/job, credential administration,
+  audit/log pages, password change, deployment, or external network access.
+- Result: the raw opaque Bearer is only the current page helper's JavaScript variable; it is never
+  rendered or persisted and is cleared on logout and `401`. Admin routes use no-store and a CSP
+  permitting only same-origin script/style/connect resources. The listing resolves the existing
+  revocable session before delegating to the catalog read service.
+- Checks: `cargo fmt --check`, strict all-target/all-feature Clippy, `cargo test` (111 library
+  tests plus all non-ignored target/contract suites), OpenAPI contract checks, and `git diff --check`
+  passed serially. `TEST_DATABASE_URL` was unavailable; no disposable PostgreSQL run was applicable
+  because this task introduces or changes no PostgreSQL query.
+- Status: **complete locally.** RS-ADMIN-005 is next.
+
 ## RS-ADMIN-003 — 2026-09-01 — administrator login, revocable sessions, and admin boundary
 
 - Goal: implement only the administrator authentication boundary on the RS-ADMIN-001/002 foundation.
@@ -1526,7 +1605,9 @@
   must additionally be covered by a disposable-database integration test via
   `TEST_DATABASE_URL`; fakes are not a substitute. Future Codex tasks default
   to the current `C:\repos\rockserver` master checkout rather than a worktree,
-  while preserving unrelated changes.
+  while preserving unrelated changes. The RS-ADMIN-005 backlog excludes obsolete
+  RockCast machine-credential lifecycle work: RockCast product routes are public
+  and its user identity uses pairing.
 - Checks: targeted inspection of the three repositories, RockServer status/tasks,
   architecture, OpenAPI, admin-security plan, station-icon roadmap and client
   icon implementations; Markdown content review. No build was needed because

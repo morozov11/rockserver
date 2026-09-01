@@ -20,6 +20,13 @@ if ([string]::IsNullOrWhiteSpace($env:ROCKSERVER_API_BEARER_TOKEN)) {
     Write-Host 'ROCKSERVER_API_BEARER_TOKEN is unset; using a process-local development credential for protected local routes.' -ForegroundColor Yellow
 }
 if ($env:ROCKSERVER_API_BEARER_TOKEN.Trim().Length -lt 32) { throw 'ROCKSERVER_API_BEARER_TOKEN must contain at least 32 characters.' }
+if ([string]::IsNullOrWhiteSpace($env:ROCKSERVER_TRUSTED_PROXY_TOKEN)) {
+    $proxyTokenBytes = New-Object byte[] 32
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($proxyTokenBytes)
+    $env:ROCKSERVER_TRUSTED_PROXY_TOKEN = [Convert]::ToBase64String($proxyTokenBytes)
+    Write-Host 'ROCKSERVER_TRUSTED_PROXY_TOKEN is unset; using a process-local proxy credential.' -ForegroundColor Yellow
+}
+if ($env:ROCKSERVER_TRUSTED_PROXY_TOKEN.Trim().Length -lt 32) { throw 'ROCKSERVER_TRUSTED_PROXY_TOKEN must contain at least 32 characters.' }
 $model = Join-Path $assetsRoot 'model.onnx'
 $tokenizer = Join-Path $assetsRoot 'tokenizer.json'
 $runtime = Get-ChildItem -LiteralPath (Join-Path $assetsRoot 'ort') -Recurse -Filter 'onnxruntime.dll' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
@@ -79,23 +86,25 @@ if ($bindAddress -notmatch ':(?<port>\d+)$') {
     throw "ROCKSERVER_BIND_ADDR has no valid port: $bindAddress"
 }
 $port = [int]$Matches.port
+$env:ROCKSERVER_LOCAL_ADMIN_ORIGIN = "http://127.0.0.1:$port"
 
 Set-Location -LiteralPath $projectRoot
 Write-Host "Starting RockServer listener at $bindAddress ..."
 if ($bindAddress -match '^0\.0\.0\.0:') {
-    Write-Host ("Admin preview (localhost): http://127.0.0.1:{0}/admin (token loaded from .env)" -f $port)
+    Write-Host ("Admin console shell (localhost): http://127.0.0.1:{0}/admin" -f $port)
     $lanAddresses = @(Get-LanIPv4Addresses)
     if ($lanAddresses.Count -eq 0) {
-        Write-Host 'Admin preview (LAN): no active LAN IPv4 address detected.' -ForegroundColor Yellow
+        Write-Host 'Admin console shell (LAN): no active LAN IPv4 address detected.' -ForegroundColor Yellow
     }
     else {
         foreach ($address in $lanAddresses) {
-            Write-Host ("Admin preview (LAN): http://{0}:{1}/admin (token loaded from .env)" -f $address, $port)
+            Write-Host ("Admin console shell (LAN): http://{0}:{1}/admin" -f $address, $port)
         }
     }
 }
 else {
     $displayAddress = $bindAddress -replace ':\d+$', ''
-    Write-Host ("Admin preview: http://{0}:{1}/admin (token loaded from .env)" -f $displayAddress, $port)
+    Write-Host ("Admin console shell: http://{0}:{1}/admin" -f $displayAddress, $port)
 }
+Write-Host ("Local admin login is enabled only for {0}." -f $env:ROCKSERVER_LOCAL_ADMIN_ORIGIN) -ForegroundColor Yellow
 cargo run --features onnx-local --bin rockserver

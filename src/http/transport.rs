@@ -209,6 +209,20 @@ pub(super) fn is_trusted_browser_request(headers: &HeaderMap) -> bool {
             .is_some_and(|protocol| protocol.eq_ignore_ascii_case("https"))
 }
 
+/// Accepts the production HTTPS origin or one explicitly configured loopback origin for admin routes.
+pub(super) fn is_trusted_admin_browser_request(
+    headers: &HeaderMap,
+    local_admin_origin: Option<&str>,
+) -> bool {
+    is_trusted_browser_request(headers)
+        || local_admin_origin.is_some_and(|expected| {
+            headers
+                .get("origin")
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|origin| origin == expected)
+        })
+}
+
 /// Requires the shared header that only the configured Caddy proxy may inject.
 pub(super) fn trusted_proxy_header_matches(headers: &HeaderMap, expected: Option<&str>) -> bool {
     let Some(expected) = expected.filter(|value| !value.is_empty()) else {

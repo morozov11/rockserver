@@ -1,6 +1,6 @@
 //! Versioned administrator authentication HTTP boundary.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use axum::{
@@ -17,8 +17,9 @@ use uuid::Uuid;
 
 use crate::{
     admin::{
-        AdminLoginAttempt, AdminLoginOutcome, AdminSecurityEvent, AdminSecurityEventType,
-        AdminStore, AdminUsername, NewAdminSession,
+        AdminLoginAttempt, AdminLoginOutcome, AdminRequestOutcome, AdminRequestRecord,
+        AdminSecurityEvent, AdminSecurityEventType, AdminSession, AdminStore, AdminUsername,
+        NewAdminSession,
     },
     auth::SecretHash,
 };
@@ -26,8 +27,8 @@ use crate::{
 use super::{
     state::AppState,
     transport::{
-        bearer_token, error_response, is_trusted_browser_request, parse_json_request, request_id,
-        request_rate_limit_scope, retry_after, unauthorized_response, with_request_id,
+        bearer_token, error_response, is_trusted_admin_browser_request, parse_json_request,
+        request_id, request_rate_limit_scope, retry_after, unauthorized_response, with_request_id,
     },
 };
 
@@ -57,7 +58,7 @@ pub(super) async fn login(
     body: Body,
 ) -> Response {
     let request_id = request_id(&headers);
-    if !is_trusted_browser_request(&headers) {
+    if !is_trusted_admin_browser_request(&headers, state.local_admin_origin.as_deref()) {
         return error_response(
             StatusCode::FORBIDDEN,
             "origin_required",
@@ -174,25 +175,51 @@ pub(super) async fn logout(State(state): State<AppState>, headers: HeaderMap) ->
 /// Proves that an admin-only route accepts only active administrator Bearer sessions.
 pub(super) async fn session(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let request_id = request_id(&headers);
-    let Some(token) = bearer_token(&headers) else {
-        return unauthorized_response(&request_id);
+    let started = Instant::now();
+    match active_session(&state, &headers, &request_id).await {
+        Ok(session) => {
+            let response = with_request_id(
+                (StatusCode::OK, Json(json!({"role":"admin"}))).into_response(),
+                &request_id,
+            );
+            record_request(
+                &state,
+                &session,
+                &request_id,
+                "/v1/admin/session",
+                AdminRequestOutcome::Succeeded,
+                started,
+            )
+            .await;
+            response
+        }
+        Err(response) => response,
+    }
+}
+
+/// Resolves an active administrator bearer session without exposing session identity.
+pub(super) async fn active_session(
+    state: &AppState,
+    headers: &HeaderMap,
+    request_id: &str,
+) -> Result<AdminSession, Response> {
+    let Some(token) = bearer_token(headers) else {
+        return Err(unauthorized_response(request_id));
     };
     let Some(store) = state.admin_store.as_ref() else {
-        return unavailable(&request_id);
+        return Err(unavailable(request_id));
     };
     match store.find_active_session(&secret_hash(token)).await {
-        Ok(Some(_)) => with_request_id(
-            (StatusCode::OK, Json(json!({"role":"admin"}))).into_response(),
-            &request_id,
-        ),
-        Ok(None) => unauthorized_response(&request_id),
-        Err(_) => unavailable(&request_id),
+        Ok(Some(session)) => Ok(session),
+        Ok(None) => Err(unauthorized_response(request_id)),
+        Err(_) => Err(unavailable(request_id)),
     }
 }
 
 async fn rotate(state: AppState, headers: HeaderMap, logout: bool) -> Response {
     let request_id = request_id(&headers);
-    if !is_trusted_browser_request(&headers) {
+    let started = Instant::now();
+    if !is_trusted_admin_browser_request(&headers, state.local_admin_origin.as_deref()) {
         return error_response(
             StatusCode::FORBIDDEN,
             "origin_required",
@@ -229,7 +256,17 @@ async fn rotate(state: AppState, headers: HeaderMap, logout: bool) -> Response {
                 event_type: AdminSecurityEventType::Logout,
             })
             .await;
-        return with_request_id(StatusCode::NO_CONTENT.into_response(), &request_id);
+        let response = with_request_id(StatusCode::NO_CONTENT.into_response(), &request_id);
+        record_request(
+            &state,
+            &session,
+            &request_id,
+            "/v1/admin/auth/logout",
+            AdminRequestOutcome::Succeeded,
+            started,
+        )
+        .await;
+        return response;
     }
     let token = new_token();
     let replacement = NewAdminSession {
@@ -238,9 +275,7 @@ async fn rotate(state: AppState, headers: HeaderMap, logout: bool) -> Response {
         token_hash: secret_hash(&token),
         ttl_seconds: SESSION_TTL_SECONDS,
     };
-    if store.create_session(replacement.clone()).await.is_err()
-        || store.revoke_session(session.id, Some(replacement.id)).await != Ok(true)
-    {
+    if store.rotate_session(session.id, replacement.clone()).await != Ok(true) {
         return unavailable(&request_id);
     }
     let _ = store
@@ -249,10 +284,10 @@ async fn rotate(state: AppState, headers: HeaderMap, logout: bool) -> Response {
             principal_id: Some(session.principal_id),
             session_id: Some(session.id),
             source_ip_hash: Some(source_hash),
-            event_type: AdminSecurityEventType::SessionRevoked,
+            event_type: AdminSecurityEventType::SessionRotated,
         })
         .await;
-    with_request_id(
+    let response = with_request_id(
         (
             StatusCode::OK,
             Json(SessionResponse {
@@ -263,7 +298,43 @@ async fn rotate(state: AppState, headers: HeaderMap, logout: bool) -> Response {
         )
             .into_response(),
         &request_id,
+    );
+    record_request(
+        &state,
+        &session,
+        &request_id,
+        "/v1/admin/auth/refresh",
+        AdminRequestOutcome::Succeeded,
+        started,
     )
+    .await;
+    response
+}
+
+/// Persists only bounded metadata for a completed authenticated admin route; failures stay out of responses.
+pub(super) async fn record_request(
+    state: &AppState,
+    session: &AdminSession,
+    request_id: &str,
+    endpoint: &'static str,
+    outcome: AdminRequestOutcome,
+    started: Instant,
+) {
+    let Some(store) = state.admin_store.as_ref() else {
+        return;
+    };
+    let duration_ms = u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX);
+    let _ = store
+        .record_request(AdminRequestRecord {
+            id: Uuid::new_v4(),
+            request_id: request_id.to_owned(),
+            principal_id: session.principal_id,
+            session_id: session.id,
+            endpoint,
+            outcome,
+            duration_ms,
+        })
+        .await;
 }
 
 async fn generic_login_failure(

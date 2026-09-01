@@ -23,6 +23,21 @@ pub struct PostgresAccountStore {
     pool: PgPool,
 }
 
+/// Secret-free device projection for the administrator read-only inventory.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminDeviceReadModel {
+    /// Product-neutral device type supplied during pairing.
+    pub device_type: String,
+    /// User-facing pairing label.
+    pub device_display_name: String,
+    /// Active, inactive, or revoked lifecycle state.
+    pub status: String,
+    /// Device creation time in RFC 3339 UTC form.
+    pub created_at: String,
+    /// Last device or session activity time in RFC 3339 UTC form.
+    pub last_seen_at: Option<String>,
+}
+
 impl PostgresAccountStore {
     /// Connects to PostgreSQL and applies the shared versioned migration sequence.
     pub async fn connect(database_url: &str) -> Result<Self, sqlx::Error> {
@@ -398,6 +413,26 @@ impl PostgresAccountStore {
              FROM devices d JOIN users u ON u.id = d.user_id WHERE d.user_id = $1 AND d.revoked_at IS NULL AND u.status = 'active' ORDER BY d.created_at, d.id",
         )
         .bind(user_id)
+        .fetch_all(&self.pool)
+        .await
+        .map(|rows| rows.into_iter().map(Into::into).collect())
+    }
+
+    /// Lists a stable, bounded administrator device page without returning account or credential IDs.
+    pub async fn list_admin_devices(
+        &self,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<AdminDeviceReadModel>, sqlx::Error> {
+        sqlx::query_as::<_, AdminDeviceReadModelRow>(
+            "SELECT d.device_type, d.device_display_name, \
+             CASE WHEN d.revoked_at IS NOT NULL THEN 'revoked' WHEN EXISTS (SELECT 1 FROM sessions s WHERE s.device_id = d.id AND s.revoked_at IS NULL AND s.access_expires_at > now()) THEN 'active' ELSE 'inactive' END AS status, \
+             to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, \
+             to_char(GREATEST(d.last_seen_at, (SELECT max(s.last_seen_at) FROM sessions s WHERE s.device_id = d.id)) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS last_seen_at \
+             FROM devices d ORDER BY d.created_at, d.device_display_name, d.id LIMIT $1 OFFSET $2",
+        )
+        .bind(limit)
+        .bind(offset)
         .fetch_all(&self.pool)
         .await
         .map(|rows| rows.into_iter().map(Into::into).collect())
@@ -1472,6 +1507,27 @@ struct BrowserDeviceRow {
     created_at: String,
     last_seen_at: Option<String>,
     session_status: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct AdminDeviceReadModelRow {
+    device_type: String,
+    device_display_name: String,
+    status: String,
+    created_at: String,
+    last_seen_at: Option<String>,
+}
+
+impl From<AdminDeviceReadModelRow> for AdminDeviceReadModel {
+    fn from(row: AdminDeviceReadModelRow) -> Self {
+        Self {
+            device_type: row.device_type,
+            device_display_name: row.device_display_name,
+            status: row.status,
+            created_at: row.created_at,
+            last_seen_at: row.last_seen_at,
+        }
+    }
 }
 
 #[derive(sqlx::FromRow)]

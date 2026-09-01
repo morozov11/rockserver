@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, browserAuthenticationOptions, browserRegistrationOptions, serializeAuthentication, serializeRegistration, type ApiError, type BrowserAccount, type BrowserDevice, type PairingPreview } from "./api";
+import { AdminApp } from "./admin";
 import "./style.css";
 
 type PairingState = "loading" | "anonymous" | "authenticated" | "approving" | "approved" | "terminal" | "unavailable";
@@ -30,8 +31,13 @@ const formatDate = (value: string) => new Intl.DateTimeFormat("ru-RU", { dateSty
 const isAuthenticationError = (error: unknown) => (error as ApiError)?.code === "authentication_required";
 const LEGACY_QUERY_SECRET_ROLLOUT_END = Date.parse("2026-09-29T00:00:00Z");
 
-/** Renders the account landing page or the secure, request-specific pairing screen. */
+/** Selects the same-origin administrator SPA without changing public browser routes. */
 export function App() {
+  return location.pathname === "/admin" ? <AdminApp /> : <PublicApp />;
+}
+
+/** Renders the account landing page or the secure, request-specific pairing screen. */
+function PublicApp() {
   const params = new URLSearchParams(location.search);
   const parsedCode = params.get("code")?.trim().toUpperCase() ?? "";
   const fragment = new URLSearchParams(location.hash.slice(1));

@@ -25,6 +25,9 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         "/v1/admin/auth/refresh",
         "/v1/admin/auth/logout",
         "/v1/admin/session",
+        "/v1/admin/devices",
+        "/v1/admin/audit",
+        "/v1/admin/stations",
         "/v1/auth/device-session",
         "/v1/auth/browser-logout",
         "/v1/browser/account",
@@ -128,6 +131,9 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         "/v1/admin/auth/refresh",
         "/v1/admin/auth/logout",
         "/v1/admin/session",
+        "/v1/admin/devices",
+        "/v1/admin/audit",
+        "/v1/admin/stations",
     ] {
         assert!(
             value_at(&document, "paths")

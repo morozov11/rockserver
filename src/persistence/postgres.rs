@@ -336,6 +336,30 @@ impl StationRepository for PostgresStationRepository {
             .into_iter().map(Station::try_from).collect::<Result<Vec<_>, _>>().map_err(|error| RepositoryError::new("public catalog row conversion", error))
     }
 
+    async fn list_admin(
+        &self,
+        query: Option<&str>,
+        after_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Station>, RepositoryError> {
+        sqlx::query_as::<_, PublicStationRow>(
+            "SELECT s.id, s.name, ss.stream_url, s.homepage_url, s.tags, s.language, s.country_code, ss.codec, ss.bitrate_kbps, ss.health \
+             FROM stations s JOIN station_streams ss ON ss.station_id = s.id AND ss.is_primary \
+             WHERE s.retired_at IS NULL AND ($1::text IS NULL OR lower(s.name) LIKE '%' || lower($1) || '%' OR EXISTS (SELECT 1 FROM unnest(s.tags) AS tag WHERE lower(tag) LIKE '%' || lower($1) || '%')) \
+             AND ($2::text IS NULL OR s.id > $2) ORDER BY s.id LIMIT $3",
+        )
+        .bind(query)
+        .bind(after_id)
+        .bind(i64::try_from(limit).unwrap_or(50))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| RepositoryError::new("administrator catalog listing", error))?
+        .into_iter()
+        .map(Station::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| RepositoryError::new("administrator catalog row conversion", error))
+    }
+
     async fn get_public(&self, id: &str) -> Result<Option<Station>, RepositoryError> {
         sqlx::query_as::<_, PublicStationRow>("SELECT s.id, s.name, ss.stream_url, s.homepage_url, s.tags, s.language, s.country_code, ss.codec, ss.bitrate_kbps, ss.health FROM stations s JOIN station_streams ss ON ss.station_id = s.id AND ss.is_primary WHERE s.id = $1")
             .bind(id).fetch_optional(&self.pool).await.map_err(|error| RepositoryError::new("public catalog get", error))?

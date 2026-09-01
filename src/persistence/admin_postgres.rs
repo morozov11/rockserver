@@ -6,10 +6,10 @@ use uuid::Uuid;
 
 use crate::{
     admin::{
-        AdminBootstrapOutcome, AdminLoginAttempt, AdminLoginCredential, AdminLoginOutcome,
-        AdminPasswordCredential, AdminPrincipal, AdminSecurityEvent, AdminSession, AdminStore,
-        AdminStoreError, AdminUsername, NewAdminBootstrap, NewAdminPasswordCredential,
-        NewAdminSession,
+        AdminAuditEntry, AdminAuditFilter, AdminBootstrapOutcome, AdminLoginAttempt,
+        AdminLoginCredential, AdminLoginOutcome, AdminPasswordCredential, AdminPrincipal,
+        AdminRequestRecord, AdminSecurityEvent, AdminSession, AdminStore, AdminStoreError,
+        AdminUsername, NewAdminBootstrap, NewAdminPasswordCredential, NewAdminSession,
     },
     auth::SecretHash,
 };
@@ -156,6 +156,43 @@ impl AdminStore for PostgresAdminStore {
             .bind(session_id).bind(replacement_session_id).execute(&self.pool).await.map_err(map_error)?.rows_affected() == 1)
     }
 
+    async fn rotate_session(
+        &self,
+        session_id: Uuid,
+        replacement: NewAdminSession,
+    ) -> Result<bool, AdminStoreError> {
+        // A single transaction prevents a refresh from ever leaving both bearer sessions usable.
+        let mut transaction = self.pool.begin().await.map_err(map_error)?;
+        let inserted = sqlx::query(
+            "INSERT INTO admin_sessions (id, principal_id, token_hash, expires_at) SELECT $1, s.principal_id, $2, now() + ($3 * interval '1 second') FROM admin_sessions s JOIN admin_principals p ON p.id = s.principal_id WHERE s.id = $4 AND s.revoked_at IS NULL AND s.expires_at > now() AND p.status = 'active'",
+        )
+        .bind(replacement.id)
+        .bind(replacement.token_hash.as_bytes())
+        .bind(replacement.ttl_seconds)
+        .bind(session_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_error)?;
+        if inserted.rows_affected() != 1 {
+            transaction.rollback().await.map_err(map_error)?;
+            return Ok(false);
+        }
+        let revoked = sqlx::query(
+            "UPDATE admin_sessions SET revoked_at = now(), replaced_by_id = $2 WHERE id = $1 AND revoked_at IS NULL",
+        )
+        .bind(session_id)
+        .bind(replacement.id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_error)?;
+        if revoked.rows_affected() != 1 {
+            transaction.rollback().await.map_err(map_error)?;
+            return Ok(false);
+        }
+        transaction.commit().await.map_err(map_error)?;
+        Ok(true)
+    }
+
     async fn record_login_attempt(
         &self,
         attempt: AdminLoginAttempt,
@@ -175,6 +212,55 @@ impl AdminStore for PostgresAdminStore {
             .execute(&self.pool).await.map_err(map_error)?;
         Ok(())
     }
+
+    async fn record_request(&self, request: AdminRequestRecord) -> Result<(), AdminStoreError> {
+        // Retention is enforced on the write path so request metadata remains bounded without a worker.
+        let mut transaction = self.pool.begin().await.map_err(map_error)?;
+        sqlx::query("INSERT INTO admin_request_records (id, request_id, principal_id, session_id, endpoint, outcome, duration_ms) VALUES ($1, $2, $3, $4, $5, $6, $7)")
+            .bind(request.id)
+            .bind(request.request_id)
+            .bind(request.principal_id)
+            .bind(request.session_id)
+            .bind(request.endpoint)
+            .bind(request.outcome.as_str())
+            .bind(i32::try_from(request.duration_ms).expect("u32 duration must fit PostgreSQL integer"))
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_error)?;
+        sqlx::query(
+            "DELETE FROM admin_request_records WHERE occurred_at < now() - interval '30 days'",
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_error)?;
+        transaction.commit().await.map_err(map_error)?;
+        Ok(())
+    }
+
+    async fn list_audit(
+        &self,
+        filter: AdminAuditFilter,
+    ) -> Result<Vec<AdminAuditEntry>, AdminStoreError> {
+        let rows = sqlx::query_as::<_, AdminAuditEntryRow>(
+            "SELECT to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS occurred_at, action, outcome FROM ( \
+             SELECT occurred_at, endpoint AS action, outcome FROM admin_request_records \
+             UNION ALL \
+             SELECT occurred_at, event_type, 'recorded' FROM admin_security_events \
+             ) audit WHERE ($1::timestamptz IS NULL OR occurred_at >= $1::timestamptz) AND ($2::timestamptz IS NULL OR occurred_at < $2::timestamptz) \
+             AND ($3::text IS NULL OR action = $3) AND ($4::text IS NULL OR outcome = $4) \
+             ORDER BY occurred_at DESC, action ASC LIMIT $5 OFFSET $6",
+        )
+        .bind(filter.from)
+        .bind(filter.until)
+        .bind(filter.action)
+        .bind(filter.outcome)
+        .bind(filter.limit)
+        .bind(filter.offset)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_error)?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -188,6 +274,23 @@ struct AdminPasswordCredentialRow {
 struct AdminSessionRow {
     id: Uuid,
     principal_id: Uuid,
+}
+
+#[derive(sqlx::FromRow)]
+struct AdminAuditEntryRow {
+    occurred_at: String,
+    action: String,
+    outcome: String,
+}
+
+impl From<AdminAuditEntryRow> for AdminAuditEntry {
+    fn from(row: AdminAuditEntryRow) -> Self {
+        Self {
+            occurred_at: row.occurred_at,
+            action: row.action,
+            outcome: row.outcome,
+        }
+    }
 }
 
 impl From<AdminSessionRow> for AdminSession {

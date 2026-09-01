@@ -12,7 +12,7 @@ pub use crate::account_cleanup::{
     CleanupAccount, CleanupActionResult, CleanupCounts, CleanupDependency, CleanupError,
     CleanupPreview,
 };
-pub use account_postgres::PostgresAccountStore;
+pub use account_postgres::{AdminDeviceReadModel, PostgresAccountStore};
 pub use admin_postgres::PostgresAdminStore;
 pub use embedding_postgres::PostgresEmbeddingStore;
 pub use import_postgres::{OwnedCatalogReplacement, PostgresImportStore};

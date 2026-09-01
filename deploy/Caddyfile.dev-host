@@ -1,0 +1,17 @@
+# Local host development: static SPA from /srv, API proxied to RockServer on the Docker host.
+# Used by run-rockserver-admin-local.ps1; not for production Compose.
+:{$ROCKSERVER_ADMIN_UI_PORT} {
+    encode gzip
+  @api path /v1/* /api/v1/* /health/*
+  handle @api {
+    reverse_proxy {$ROCKSERVER_BACKEND_UPSTREAM} {
+      header_up X-Forwarded-Proto https
+      header_up X-Rockserver-Proxy {$ROCKSERVER_TRUSTED_PROXY_TOKEN}
+    }
+  }
+  handle {
+    root * /srv
+    try_files {path} /index.html
+    file_server
+  }
+}

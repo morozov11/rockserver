@@ -58,7 +58,7 @@ try {
             throw 'Local Compose startup failed.'
         }
 
-        $port = 18080
+        $port = 80
         $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$port/health/ready" -TimeoutSec 15
         if ($response.StatusCode -ne 200) {
             throw "Local readiness returned HTTP $($response.StatusCode)."

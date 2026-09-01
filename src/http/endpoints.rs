@@ -22,6 +22,8 @@ use crate::{
 mod account;
 #[path = "admin_auth.rs"]
 mod admin_auth;
+#[path = "admin_console.rs"]
+mod admin_console;
 #[path = "auth.rs"]
 mod auth;
 #[path = "catalog.rs"]
@@ -49,6 +51,8 @@ pub const TEST_API_BEARER_TOKEN: &str = "rockserver-offline-test-token";
 
 /// Environment variable containing the secret Caddy injects into trusted browser requests.
 pub const TRUSTED_PROXY_TOKEN_ENV: &str = "ROCKSERVER_TRUSTED_PROXY_TOKEN";
+/// Optional loopback-only origin accepted by administrator routes for explicit local development.
+pub const LOCAL_ADMIN_ORIGIN_ENV: &str = "ROCKSERVER_LOCAL_ADMIN_ORIGIN";
 
 /// Maximum duration the voice-command transport waits for query interpretation and search.
 pub const DEFAULT_VOICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
@@ -136,6 +140,7 @@ pub fn router_with_speech_recognizers_and_bearer_token(
         account_store: None,
         admin_store: None,
         trusted_proxy_token: None,
+        local_admin_origin: local_admin_origin_from_env(),
         public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
     })
 }
@@ -175,6 +180,7 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
         account_store: Some(account_store),
         admin_store: None,
         trusted_proxy_token: Some(trusted_proxy_token.into()),
+        local_admin_origin: local_admin_origin_from_env(),
         public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
     })
 }
@@ -197,12 +203,27 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_and_proxy(
         account_store: Some(account_store),
         admin_store: Some(Arc::new(admin_store)),
         trusted_proxy_token: Some(trusted_proxy_token.into()),
+        local_admin_origin: local_admin_origin_from_env(),
         public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
     })
 }
 
+/// Reads only an explicit HTTP loopback origin; arbitrary local-network origins stay rejected.
+fn local_admin_origin_from_env() -> Option<String> {
+    let origin = env::var(LOCAL_ADMIN_ORIGIN_ENV).ok()?;
+    if matches!(origin.as_str(), "http://localhost" | "http://127.0.0.1") {
+        return Some(origin);
+    }
+    let port = origin
+        .strip_prefix("http://127.0.0.1:")
+        .or_else(|| origin.strip_prefix("http://localhost:"))?
+        .parse::<u16>()
+        .ok()?;
+    (port != 0).then_some(origin)
+}
+
 fn build_router(state: AppState) -> Router {
-    Router::new()
+    let admin_routes = Router::new()
         .route(
             "/v1/admin/auth/login",
             axum::routing::post(admin_auth::login),
@@ -216,7 +237,18 @@ fn build_router(state: AppState) -> Router {
             axum::routing::post(admin_auth::logout),
         )
         .route("/v1/admin/session", axum::routing::get(admin_auth::session))
-        .route("/admin", axum::routing::get(health::admin_console))
+        .route(
+            "/v1/admin/stations",
+            axum::routing::get(admin_console::stations),
+        )
+        .route(
+            "/v1/admin/devices",
+            axum::routing::get(admin_console::devices),
+        )
+        .route("/v1/admin/audit", axum::routing::get(admin_console::audit))
+        .route_layer(axum::middleware::from_fn(admin_console::security_headers));
+    Router::new()
+        .merge(admin_routes)
         .route("/health/live", axum::routing::get(health::live))
         .route("/health/ready", axum::routing::get(health::ready))
         .route(
@@ -322,17 +354,36 @@ fn build_router(state: AppState) -> Router {
 
 #[cfg(test)]
 mod tests {
+    use argon2::{
+        Argon2, PasswordHasher,
+        password_hash::{SaltString, rand_core::OsRng},
+    };
     use axum::{
         body::Body,
         http::{Request, StatusCode, header},
     };
     use http_body_util::BodyExt;
+    use sha2::{Digest, Sha256};
     use tower::ServiceExt;
+    use uuid::Uuid;
 
     use super::{
-        TEST_API_BEARER_TOKEN,
+        AppState, PublicLimitState, build_router,
         health::{HealthResponse, HealthStatus},
         router,
+    };
+    use crate::{
+        admin::{
+            AdminPasswordHash, AdminPrincipal, AdminPrincipalStatus, AdminStore, AdminUsername,
+            FakeAdminStore, NewAdminBootstrap, NewAdminSession,
+        },
+        auth::SecretHash,
+        search::{InMemoryStationRepository, SearchService},
+        voice::{SpeechRecognizers, UnavailableSpeechRecognizer},
+    };
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
     };
 
     #[tokio::test]
@@ -341,24 +392,225 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn admin_console_is_available_without_exposing_protected_data() {
+    async fn direct_server_does_not_serve_the_admin_spa() {
         let response = router()
             .oneshot(Request::get("/admin").body(Body::empty()).unwrap())
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::OK);
-        assert!(
-            response.headers()[header::CONTENT_TYPE]
-                .to_str()
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn protected_admin_station_read_model_requires_and_accepts_a_revocable_session() {
+        let token = "admin-test-token";
+        let store = Arc::new(FakeAdminStore::default());
+        let principal_id = Uuid::new_v4();
+        store
+            .create_principal(AdminPrincipal {
+                id: principal_id,
+                status: AdminPrincipalStatus::Active,
+            })
+            .await
+            .unwrap();
+        store
+            .create_session(NewAdminSession {
+                id: Uuid::new_v4(),
+                principal_id,
+                token_hash: SecretHash::new(Sha256::digest(token.as_bytes()).into()),
+                ttl_seconds: 60,
+            })
+            .await
+            .unwrap();
+        let app = build_router(AppState {
+            search_service: SearchService::new(Arc::new(
+                InMemoryStationRepository::with_builtin_catalog().unwrap(),
+            )),
+            speech_recognizers: SpeechRecognizers::same(Arc::new(UnavailableSpeechRecognizer)),
+            voice_command_timeout: Duration::from_secs(5),
+            api_bearer_token: "unrelated".to_owned(),
+            account_store: None,
+            admin_store: Some(store),
+            trusted_proxy_token: None,
+            local_admin_origin: None,
+            public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
+        });
+        let denied = app
+            .clone()
+            .oneshot(
+                Request::get("/v1/admin/stations")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+        let allowed = app
+            .oneshot(
+                Request::get("/v1/admin/stations?limit=1")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(allowed.status(), StatusCode::OK);
+        assert_eq!(allowed.headers()[header::CACHE_CONTROL], "no-store");
+        let body = allowed.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap()["items"]
+                .as_array()
                 .unwrap()
-                .starts_with("text/html")
+                .len(),
+            1
         );
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let page = std::str::from_utf8(&body).unwrap();
-        assert!(page.contains("Панель администратора"));
-        assert!(page.contains("ROCKSERVER_API_BEARER_TOKEN"));
-        assert!(!page.contains(TEST_API_BEARER_TOKEN));
+    }
+
+    #[tokio::test]
+    async fn admin_refresh_atomically_replaces_the_bearer_and_records_safe_request_metadata() {
+        let token = "admin-refresh-old-token";
+        let store = Arc::new(FakeAdminStore::default());
+        let records = Arc::clone(&store);
+        let principal_id = Uuid::new_v4();
+        store
+            .create_principal(AdminPrincipal {
+                id: principal_id,
+                status: AdminPrincipalStatus::Active,
+            })
+            .await
+            .unwrap();
+        store
+            .create_session(NewAdminSession {
+                id: Uuid::new_v4(),
+                principal_id,
+                token_hash: SecretHash::new(Sha256::digest(token.as_bytes()).into()),
+                ttl_seconds: 60,
+            })
+            .await
+            .unwrap();
+        let app = build_router(AppState {
+            search_service: SearchService::new(Arc::new(
+                InMemoryStationRepository::with_builtin_catalog().unwrap(),
+            )),
+            speech_recognizers: SpeechRecognizers::same(Arc::new(UnavailableSpeechRecognizer)),
+            voice_command_timeout: Duration::from_secs(5),
+            api_bearer_token: "unrelated".to_owned(),
+            account_store: None,
+            admin_store: Some(store),
+            trusted_proxy_token: None,
+            local_admin_origin: None,
+            public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
+        });
+        let refresh = Request::post("/v1/admin/auth/refresh")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header("origin", "https://alex.vault57.ru")
+            .header("x-forwarded-proto", "https")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(refresh).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let fresh_token = serde_json::from_slice::<serde_json::Value>(
+            &response.into_body().collect().await.unwrap().to_bytes(),
+        )
+        .unwrap()["access_token"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let old = app
+            .clone()
+            .oneshot(
+                Request::get("/v1/admin/session")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(old.status(), StatusCode::UNAUTHORIZED);
+        let current = app
+            .oneshot(
+                Request::get("/v1/admin/session")
+                    .header(header::AUTHORIZATION, format!("Bearer {fresh_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(current.status(), StatusCode::OK);
+        let request_records = records.request_records();
+        assert_eq!(request_records.len(), 2);
+        assert!(
+            request_records
+                .iter()
+                .all(|record| !record.request_id.contains(token))
+        );
+        assert!(request_records.iter().all(|record| matches!(
+            record.endpoint,
+            "/v1/admin/auth/refresh" | "/v1/admin/session"
+        )));
+    }
+
+    #[tokio::test]
+    async fn admin_login_accepts_valid_credentials_and_rejects_invalid_credentials() {
+        let store = Arc::new(FakeAdminStore::default());
+        let principal_id = Uuid::new_v4();
+        let hash = Argon2::default()
+            .hash_password(b"correct password", &SaltString::generate(&mut OsRng))
+            .unwrap()
+            .to_string();
+        store
+            .bootstrap_admin(NewAdminBootstrap {
+                principal_id,
+                credential_id: Uuid::new_v4(),
+                security_event_id: Uuid::new_v4(),
+                username: AdminUsername::parse("admin".to_owned()).unwrap(),
+                password_hash: AdminPasswordHash::parse(hash).unwrap(),
+            })
+            .await
+            .unwrap();
+        let app = build_router(AppState {
+            search_service: SearchService::new(Arc::new(
+                InMemoryStationRepository::with_builtin_catalog().unwrap(),
+            )),
+            speech_recognizers: SpeechRecognizers::same(Arc::new(UnavailableSpeechRecognizer)),
+            voice_command_timeout: Duration::from_secs(5),
+            api_bearer_token: "unrelated".to_owned(),
+            account_store: None,
+            admin_store: Some(store),
+            trusted_proxy_token: None,
+            local_admin_origin: Some("http://127.0.0.1:3000".to_owned()),
+            public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
+        });
+        let login = |password: &str| {
+            Request::post("/v1/admin/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("origin", "http://127.0.0.1:3000")
+                .body(Body::from(
+                    serde_json::json!({"username":"admin", "password":password}).to_string(),
+                ))
+                .unwrap()
+        };
+        assert_eq!(
+            app.clone()
+                .oneshot(login("incorrect"))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let response = app.oneshot(login("correct password")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        assert!(
+            serde_json::from_slice::<serde_json::Value>(
+                &response.into_body().collect().await.unwrap().to_bytes()
+            )
+            .unwrap()["access_token"]
+                .as_str()
+                .unwrap()
+                .len()
+                >= 32
+        );
     }
 
     #[tokio::test]

@@ -5,6 +5,10 @@ export type RegistrationOptions = { challenge_id: string; options: Omit<PublicKe
 export type AuthenticationOptions = { challenge_id: string; options: Omit<PublicKeyCredentialRequestOptions, "challenge" | "allowCredentials"> & { challenge: string; allowCredentials?: Array<PublicKeyCredentialDescriptor & { id: string }>; } };
 export type BrowserDevice = { device_id: string; device_display_name: string; device_type: string; connected_at: string; last_seen_at?: string; session_status: "active" | "inactive" };
 export type BrowserAccount = { account_display_name: string; device_limit: number; devices: BrowserDevice[] };
+export type AdminPage<T> = { items: T[]; limit: number; offset: number; has_more: boolean };
+export type AdminDevice = { product: "RockCast" | "RockMobile"; device_type: string; display_name: string; status: string; created_at: string; last_seen_at?: string };
+export type AdminAuditEntry = { occurred_at: string; action: string; outcome: string };
+export type AdminStation = { name: string; tags: string[]; language?: string; country_code?: string; health: string };
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, { ...init, credentials: "same-origin", headers: { "Content-Type": "application/json", ...init.headers } });
@@ -28,6 +32,19 @@ export const api = {
   approvePairing(requestId: string, approvalSecret: string, verificationPhrase: string, csrfToken: string) {
     return request<void>(`/v1/pairing-requests/${requestId}/approve`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ approval_secret: approvalSecret, verification_phrase: verificationPhrase }) });
   },
+};
+
+async function adminRequest<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
+  return request<T>(path, { ...init, headers: { Authorization: `Bearer ${token}`, ...init.headers } });
+}
+
+/** First-party admin calls accept a caller-owned in-memory bearer and never persist it. */
+export const adminApi = {
+  login(username: string, password: string) { return request<{ access_token: string }>("/v1/admin/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }); },
+  logout(token: string) { return adminRequest<void>("/v1/admin/auth/logout", token, { method: "POST", body: "{}" }); },
+  devices(token: string, offset: number) { return adminRequest<AdminPage<AdminDevice>>(`/v1/admin/devices?limit=25&offset=${offset}`, token); },
+  audit(token: string, offset: number, filters: { from?: string; until?: string; action?: string; outcome?: string }) { const params = new URLSearchParams({ limit: "25", offset: String(offset) }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); }); return adminRequest<AdminPage<AdminAuditEntry>>(`/v1/admin/audit?${params}`, token); },
+  stations(token: string, offset: number, query: string) { const params = new URLSearchParams({ limit: "25", offset: String(offset) }); if (query.trim()) params.set("q", query.trim()); return adminRequest<AdminPage<AdminStation>>(`/v1/admin/stations?${params}`, token); },
 };
 
 export const base64url = (bytes: ArrayBuffer | Uint8Array) => {

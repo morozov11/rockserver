@@ -2,6 +2,74 @@
 
 Last updated: 2026-09-01
 
+## RS-ADMIN-006 SPA administrator console (implemented locally, 2026-09-01)
+
+The former Axum server-rendered `/admin` shell is superseded: Caddy now serves the existing
+first-party Preact/Vite bundle at `/admin` in the same local and production topology, while
+`/v1/admin/*` remains reverse-proxied to RockServer before the SPA fallback. The administrator
+Bearer exists only in Preact state and is cleared on logout or `401`; reload requires login.
+The read-only tabs are Devices (safe paired-device projection), Audit (request records plus security
+events) and Stations (repository-side name/tag filtering, stable bounded pagination). No mutation,
+credential lifecycle, token persistence, or new frontend dependency was added. Local Compose now
+binds Caddy to loopback port 80 so the intended entry point is `http://localhost/admin`.
+
+Verified serially: web typecheck/lint/test/build, `cargo fmt --check`, strict Clippy and `cargo test`
+passed. A loopback-only disposable Docker Desktop PostgreSQL run passed the admin durable-query
+integration test, including the unified audit query; the container was removed. `docker compose
+config --quiet` accepted the merged local Caddy/RockServer topology. No Caddy image was locally
+available, so Caddyfile validation and a browser `http://localhost/admin` smoke were not run.
+
+## Local administrator launcher (2026-09-01)
+
+`run-rockserver-admin-local.ps1` starts host `cargo run` for RockServer and a disposable Caddy
+container that serves `web/dist` at `http://127.0.0.1:3080/admin` while proxying `/v1/*`,
+`/api/v1/*`, and `/health/*` to the host listener. It sets `ROCKSERVER_LOCAL_ADMIN_ORIGIN` to the
+Caddy loopback origin (default port `3080`, overridable with `-AdminUiPort`). It builds `web/dist`
+when missing. `run-rockserver-local.ps1` remains the API-only launcher without SPA hosting.
+
+## Local launcher alignment (2026-09-01)
+
+`run-rockserver-local.ps1` now creates a non-logged process-local trusted-proxy credential when
+the ignored local `.env` omits it, matching the production router's startup requirement. It enables
+admin login only from its exact `http://127.0.0.1:<port>` loopback origin; arbitrary LAN origins
+remain rejected and production keeps the approved HTTPS first-party proxy origin. Administrator
+bootstrap remains an explicit protected command.
+
+## RS-ADMIN-005 operational hardening (implemented locally, 2026-09-01)
+
+Administrator Bearer refresh is now an atomic PostgreSQL replacement: the new opaque-token hash is
+inserted and the prior session is revoked in one transaction, so an error leaves the existing
+session usable and never creates a second active session. Authenticated admin routes now write a
+bounded operational record containing only request ID, principal/session UUIDs, static endpoint,
+safe outcome, duration and timestamp. Request bodies, query/search text, transcripts, headers,
+passwords and Bearers are excluded. The write path removes records older than 30 days. The new
+operator runbook documents backup/restore, incident revocation and deployment acceptance; a restore
+must revoke admin sessions before reuse. RockCast product routes remain public and user identity
+uses pairing; no RockCast machine-credential lifecycle was added. Request-log UI/read models and a
+bulk revocation operator remain later explicitly scoped work.
+
+Verified locally: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`
+(113 library tests plus all non-ignored target/contract suites) passed serially, as did the
+OpenAPI contract suite and `git diff --check`. A disposable local Docker Desktop
+`pgvector/pgvector:pg17` database then passed
+`postgres_admin_auth_queries_are_durable_and_revocable`; it covered every new or changed
+administrator persistence query, including atomic rotation and request-record retention. The
+loopback-only disposable container was removed after the test.
+
+## RS-ADMIN-004 administrator console (implemented locally, 2026-09-01)
+
+`GET /admin` is now a first-party Axum server-rendered login shell with locally served CSS and
+JavaScript. Successful RS-ADMIN-003 login hands its opaque administrator Bearer token only to a
+JavaScript variable in the current page; the shell never serializes it and the helper does not use
+cookies, storage, URL state, DOM insertion, logs, or third-party code. Logout and any `401` clear
+the authenticated view and token. The protected, read-only `GET /v1/admin/stations` presentation
+model is bounded to 50 records and reuses the current catalog read service without new SQL.
+All `/admin` assets and `/v1/admin/*` responses carry `Cache-Control: no-store`, restrictive
+same-origin CSP, nosniff/referrer/permissions protections; existing login/refresh/logout Origin
+validation remains the state-change boundary. No import, credentials, logs, password changes, or
+other operator controls were added. Verification results are recorded in the current task log;
+the next scope is RS-ADMIN-005.
+
 ## RS-ADMIN-003 administrator sessions (implemented locally, 2026-09-01)
 
 `/v1/admin/auth/login`, `/refresh`, `/logout`, and the deliberately minimal protected
@@ -61,6 +129,10 @@ behaviour from the icon roadmap: the icon endpoint and public `faviconUrl` are
 not yet live. Future Codex tasks use the current master checkout by default,
 without creating a worktree. No Rust, API, migration, deployment, staging data
 or client behaviour changed.
+
+The RS-ADMIN-005 backlog does not include obsolete RockCast machine credentials:
+current RockCast product routes are public and user identity is handled through
+pairing.
 
 ## Documentation cleanup (2026-09-01)
 

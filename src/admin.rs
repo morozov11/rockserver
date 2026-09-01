@@ -117,6 +117,8 @@ pub enum AdminSecurityEventType {
     SessionRevoked,
     /// An administrator explicitly logged out.
     Logout,
+    /// An administrator session was replaced atomically by a fresh bearer session.
+    SessionRotated,
 }
 
 impl AdminSecurityEventType {
@@ -130,8 +132,77 @@ impl AdminSecurityEventType {
             Self::SessionCreated => "session_created",
             Self::SessionRevoked => "session_revoked",
             Self::Logout => "logout",
+            Self::SessionRotated => "session_rotated",
         }
     }
+}
+
+/// Safe outcome class for one authenticated administrator HTTP request.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AdminRequestOutcome {
+    /// The protected request completed successfully.
+    Succeeded,
+    /// The protected request was rejected after session authentication.
+    Rejected,
+    /// The protected request could not complete because a dependency was unavailable.
+    Failed,
+}
+
+impl AdminRequestOutcome {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::Rejected => "rejected",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// Bounded, secret-free operational record for one authenticated administrator request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminRequestRecord {
+    /// Record row identifier.
+    pub id: Uuid,
+    /// Caller-provided or server-generated correlation identifier.
+    pub request_id: String,
+    /// Authenticated administrator principal.
+    pub principal_id: Uuid,
+    /// Authenticated opaque session identifier.
+    pub session_id: Uuid,
+    /// Static route name, never a URL containing request-controlled values.
+    pub endpoint: &'static str,
+    /// Safe terminal result class.
+    pub outcome: AdminRequestOutcome,
+    /// Bounded handler duration measured locally in milliseconds.
+    pub duration_ms: u32,
+}
+
+/// Secret-free unified administrator audit entry for a read-only console timeline.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminAuditEntry {
+    /// Event time in RFC 3339 UTC form.
+    pub occurred_at: String,
+    /// Static event or route label, never a request URL.
+    pub action: String,
+    /// Safe terminal outcome class.
+    pub outcome: String,
+}
+
+/// Bounded filters for the administrator audit timeline.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminAuditFilter {
+    /// Inclusive RFC 3339 UTC lower time bound.
+    pub from: Option<String>,
+    /// Exclusive RFC 3339 UTC upper time bound.
+    pub until: Option<String>,
+    /// Optional exact static endpoint or event label.
+    pub action: Option<String>,
+    /// Optional exact safe result class.
+    pub outcome: Option<String>,
+    /// Zero-based bounded page offset.
+    pub offset: i64,
+    /// Bounded page size.
+    pub limit: i64,
 }
 
 /// Hashed material needed to persist one administrator password credential.
@@ -297,12 +368,25 @@ pub trait AdminStore: Send + Sync {
         session_id: Uuid,
         replacement_session_id: Option<Uuid>,
     ) -> Result<bool, AdminStoreError>;
+    /// Atomically replaces one active session, leaving no interval with two valid Bearers.
+    async fn rotate_session(
+        &self,
+        session_id: Uuid,
+        replacement: NewAdminSession,
+    ) -> Result<bool, AdminStoreError>;
     /// Records a durable, non-secret login-attempt result.
     async fn record_login_attempt(&self, attempt: AdminLoginAttempt)
     -> Result<(), AdminStoreError>;
     /// Records a durable, non-secret administrator security event.
     async fn record_security_event(&self, event: AdminSecurityEvent)
     -> Result<(), AdminStoreError>;
+    /// Persists a secret-free operational record and enforces its bounded retention window.
+    async fn record_request(&self, request: AdminRequestRecord) -> Result<(), AdminStoreError>;
+    /// Lists a bounded unified timeline without returning identifiers, hashes, or request content.
+    async fn list_audit(
+        &self,
+        filter: AdminAuditFilter,
+    ) -> Result<Vec<AdminAuditEntry>, AdminStoreError>;
 }
 
 /// Deterministic in-memory administrator store for unit tests.
@@ -319,6 +403,7 @@ struct FakeAdminState {
     sessions: BTreeMap<SecretHashKey, AdminSession>,
     login_attempts: Vec<AdminLoginAttempt>,
     security_events: Vec<AdminSecurityEvent>,
+    request_records: Vec<AdminRequestRecord>,
 }
 
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
@@ -348,6 +433,15 @@ impl FakeAdminStore {
             .lock()
             .expect("fake admin store lock poisoned")
             .security_events
+            .clone()
+    }
+
+    /// Returns a deterministic snapshot of bounded administrator request records.
+    pub fn request_records(&self) -> Vec<AdminRequestRecord> {
+        self.state
+            .lock()
+            .expect("fake admin store lock poisoned")
+            .request_records
             .clone()
     }
 }
@@ -534,6 +628,41 @@ impl AdminStore for FakeAdminStore {
         Ok(key.is_some_and(|key| state.sessions.remove(&key).is_some()))
     }
 
+    async fn rotate_session(
+        &self,
+        session_id: Uuid,
+        replacement: NewAdminSession,
+    ) -> Result<bool, AdminStoreError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| AdminStoreError::Unavailable)?;
+        let old_key = state
+            .sessions
+            .iter()
+            .find_map(|(key, session)| (session.id == session_id).then(|| key.clone()));
+        let replacement_key = SecretHashKey::from(&replacement.token_hash);
+        let old_session = old_key
+            .as_ref()
+            .and_then(|key| state.sessions.get(key))
+            .copied();
+        if old_session.is_none()
+            || old_session.is_some_and(|session| session.principal_id != replacement.principal_id)
+            || state.sessions.contains_key(&replacement_key)
+        {
+            return Ok(false);
+        }
+        state.sessions.remove(&old_key.expect("checked above"));
+        state.sessions.insert(
+            replacement_key,
+            AdminSession {
+                id: replacement.id,
+                principal_id: replacement.principal_id,
+            },
+        );
+        Ok(true)
+    }
+
     async fn record_login_attempt(
         &self,
         attempt: AdminLoginAttempt,
@@ -556,6 +685,49 @@ impl AdminStore for FakeAdminStore {
             .security_events
             .push(event);
         Ok(())
+    }
+
+    async fn record_request(&self, request: AdminRequestRecord) -> Result<(), AdminStoreError> {
+        self.state
+            .lock()
+            .map_err(|_| AdminStoreError::Unavailable)?
+            .request_records
+            .push(request);
+        Ok(())
+    }
+
+    async fn list_audit(
+        &self,
+        filter: AdminAuditFilter,
+    ) -> Result<Vec<AdminAuditEntry>, AdminStoreError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| AdminStoreError::Unavailable)?;
+        let mut entries = state
+            .request_records
+            .iter()
+            .map(|record| AdminAuditEntry {
+                occurred_at: String::new(),
+                action: record.endpoint.to_owned(),
+                outcome: record.outcome.as_str().to_owned(),
+            })
+            .collect::<Vec<_>>();
+        entries.retain(|entry| {
+            filter
+                .action
+                .as_ref()
+                .is_none_or(|action| action == &entry.action)
+                && filter
+                    .outcome
+                    .as_ref()
+                    .is_none_or(|outcome| outcome == &entry.outcome)
+        });
+        Ok(entries
+            .into_iter()
+            .skip(filter.offset as usize)
+            .take(filter.limit as usize)
+            .collect())
     }
 }
 
@@ -639,5 +811,74 @@ mod tests {
                 .await,
             Err(AdminStoreError::NotFound)
         );
+    }
+
+    #[tokio::test]
+    async fn fake_store_rotation_replaces_the_only_active_session_and_records_safe_metadata() {
+        let store = FakeAdminStore::default();
+        let principal_id = Uuid::new_v4();
+        store
+            .create_principal(AdminPrincipal {
+                id: principal_id,
+                status: AdminPrincipalStatus::Active,
+            })
+            .await
+            .unwrap();
+        let old_hash = SecretHash::new([7; 32]);
+        let old_session_id = Uuid::new_v4();
+        store
+            .create_session(NewAdminSession {
+                id: old_session_id,
+                principal_id,
+                token_hash: old_hash.clone(),
+                ttl_seconds: 60,
+            })
+            .await
+            .unwrap();
+        let new_hash = SecretHash::new([8; 32]);
+        let replacement_id = Uuid::new_v4();
+        assert!(
+            store
+                .rotate_session(
+                    old_session_id,
+                    NewAdminSession {
+                        id: replacement_id,
+                        principal_id,
+                        token_hash: new_hash.clone(),
+                        ttl_seconds: 60,
+                    },
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .find_active_session(&old_hash)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            store
+                .find_active_session(&new_hash)
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            replacement_id
+        );
+        store
+            .record_request(AdminRequestRecord {
+                id: Uuid::new_v4(),
+                request_id: "request_123".to_owned(),
+                principal_id,
+                session_id: replacement_id,
+                endpoint: "/v1/admin/stations",
+                outcome: AdminRequestOutcome::Succeeded,
+                duration_ms: 12,
+            })
+            .await
+            .unwrap();
+        assert_eq!(store.request_records().len(), 1);
     }
 }

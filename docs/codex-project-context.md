@@ -208,7 +208,7 @@ Each task begins by re-validating its status and dependencies.
 | RS-ADMIN-002 | Planned | Bootstrap admin from protected terminal/deployment env; Argon2id hash, one-time creation, ignored `.env` on staging, no secret logs or password reset on restart. |
 | RS-ADMIN-003 | Planned | Login/logout/refresh, opaque revocable Bearer sessions, middleware/API gate, role enforcement, durable throttling, generic failures and audit events. Add OpenAPI security/error cases. |
 | RS-ADMIN-004 | Planned | Minimal protected Axum+HTMX console: login, in-memory bearer hand-off, stations/read models, strict CSP/no-store/Origin protection; no token persistence. |
-| RS-ADMIN-005 | Planned | Operational hardening: credential rotation/revocation, request records with retention decision, RockCast credential lifecycle, backup/incident runbooks and security acceptance review. |
+| RS-ADMIN-005 | Complete (local, uncommitted) | Atomic administrator-session rotation, bounded request records with a 30-day retention decision, backup/incident runbook and security acceptance review. RockCast machine credentials are explicitly out of scope: current RockCast product routes are public and its user identity uses pairing. |
 
 ### RS-ICON
 

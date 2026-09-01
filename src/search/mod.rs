@@ -167,6 +167,22 @@ pub trait StationRepository {
         ))
     }
 
+    /// Lists a bounded administrator catalog page in stable identifier order.
+    ///
+    /// The optional query matches a station name or a tag in the repository, so callers never
+    /// need to load the catalog to filter it in a browser.
+    async fn list_admin(
+        &self,
+        _query: Option<&str>,
+        _after_id: Option<&str>,
+        _limit: usize,
+    ) -> Result<Vec<Station>, RepositoryError> {
+        Err(RepositoryError::new(
+            "administrator catalog listing",
+            io::Error::other("administrator catalog listing is unavailable"),
+        ))
+    }
+
     /// Resolves one active playable station by its stable public identifier.
     async fn get_public(&self, id: &str) -> Result<Option<Station>, RepositoryError> {
         Ok(self
@@ -387,6 +403,31 @@ impl StationRepository for InMemoryStationRepository {
             .collect())
     }
 
+    async fn list_admin(
+        &self,
+        query: Option<&str>,
+        after_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Station>, RepositoryError> {
+        let query = query.map(str::to_lowercase);
+        Ok(self
+            .stations
+            .iter()
+            .filter(|station| {
+                query.as_ref().is_none_or(|needle| {
+                    station.name.to_lowercase().contains(needle)
+                        || station
+                            .tags
+                            .iter()
+                            .any(|tag| tag.to_lowercase().contains(needle))
+                })
+            })
+            .filter(|station| after_id.is_none_or(|after| station.id.as_str() > after))
+            .take(limit)
+            .cloned()
+            .collect())
+    }
+
     async fn get_public(&self, id: &str) -> Result<Option<Station>, RepositoryError> {
         Ok(self
             .stations
@@ -504,6 +545,16 @@ impl SearchService {
         limit: usize,
     ) -> Result<Vec<Station>, RepositoryError> {
         self.repository.list_public(after_id, limit).await
+    }
+
+    /// Returns a server-filtered administrator catalog page without exposing repository internals.
+    pub async fn admin_catalog(
+        &self,
+        query: Option<&str>,
+        after_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Station>, RepositoryError> {
+        self.repository.list_admin(query, after_id, limit).await
     }
 
     /// Returns one active public catalog station by stable identifier.

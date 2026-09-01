@@ -8,9 +8,10 @@ use http_body_util::BodyExt;
 use rockserver::{
     account_cleanup::CleanupError,
     admin::{
-        AdminLoginAttempt, AdminLoginOutcome, AdminPasswordHash, AdminPrincipal,
-        AdminPrincipalStatus, AdminSecurityEvent, AdminSecurityEventType, AdminStore,
-        AdminUsername, NewAdminPasswordCredential, NewAdminSession,
+        AdminAuditFilter, AdminLoginAttempt, AdminLoginOutcome, AdminPasswordHash, AdminPrincipal,
+        AdminPrincipalStatus, AdminRequestOutcome, AdminRequestRecord, AdminSecurityEvent,
+        AdminSecurityEventType, AdminStore, AdminUsername, NewAdminPasswordCredential,
+        NewAdminSession,
     },
     admin_bootstrap::{AdminBootstrapConfig, bootstrap_admin},
     auth::{
@@ -140,7 +141,7 @@ async fn postgres_admin_bootstrap_is_atomic_and_idempotent() {
         .expect("admin migrations must succeed");
     let pool = PgPool::connect(&database_url).await.unwrap();
     sqlx::query(
-        "TRUNCATE admin_security_events, admin_password_credentials, admin_sessions, admin_login_attempts, admin_principals",
+        "TRUNCATE admin_request_records, admin_security_events, admin_password_credentials, admin_sessions, admin_login_attempts, admin_principals",
     )
     .execute(&pool)
     .await
@@ -200,6 +201,19 @@ async fn postgres_admin_bootstrap_is_atomic_and_idempotent() {
         .unwrap(),
         1
     );
+    let audit = store
+        .list_audit(AdminAuditFilter {
+            from: None,
+            until: None,
+            action: Some("/v1/admin/auth/refresh".to_owned()),
+            outcome: Some("succeeded".to_owned()),
+            offset: 0,
+            limit: 10,
+        })
+        .await
+        .unwrap();
+    assert_eq!(audit.len(), 1);
+    assert_eq!(audit[0].action, "/v1/admin/auth/refresh");
     pool.close().await;
 }
 
@@ -211,7 +225,7 @@ async fn postgres_admin_auth_queries_are_durable_and_revocable() {
         .expect("set TEST_DATABASE_URL to an isolated PostgreSQL database");
     let store = PostgresAdminStore::connect(&database_url).await.unwrap();
     let pool = PgPool::connect(&database_url).await.unwrap();
-    sqlx::query("TRUNCATE admin_security_events, admin_password_credentials, admin_sessions, admin_login_attempts, admin_principals")
+    sqlx::query("TRUNCATE admin_request_records, admin_security_events, admin_password_credentials, admin_sessions, admin_login_attempts, admin_principals")
         .execute(&pool).await.unwrap();
     let config = AdminBootstrapConfig::from_values(
         Some("auth-admin".to_owned()),
@@ -258,13 +272,56 @@ async fn postgres_admin_auth_queries_are_durable_and_revocable() {
         })
         .await
         .unwrap();
-    assert!(store.revoke_session(session_id, None).await.unwrap());
+    let replacement_hash = SecretHash::new([64; 32]);
+    let replacement_id = Uuid::new_v4();
+    assert!(
+        store
+            .rotate_session(
+                session_id,
+                NewAdminSession {
+                    id: replacement_id,
+                    principal_id: credential.credential.principal_id,
+                    token_hash: replacement_hash.clone(),
+                    ttl_seconds: 60,
+                },
+            )
+            .await
+            .unwrap()
+    );
     assert!(
         store
             .find_active_session(&token_hash)
             .await
             .unwrap()
             .is_none()
+    );
+    assert_eq!(
+        store
+            .find_active_session(&replacement_hash)
+            .await
+            .unwrap()
+            .unwrap()
+            .id,
+        replacement_id
+    );
+    store
+        .record_request(AdminRequestRecord {
+            id: Uuid::new_v4(),
+            request_id: "admin-integration-request".to_owned(),
+            principal_id: credential.credential.principal_id,
+            session_id: replacement_id,
+            endpoint: "/v1/admin/auth/refresh",
+            outcome: AdminRequestOutcome::Succeeded,
+            duration_ms: 1,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM admin_request_records")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        1
     );
     pool.close().await;
 }

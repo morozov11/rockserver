@@ -12,7 +12,7 @@ info:
     the same schemas when embeddings are absent or unavailable.
 servers:
   - url: https://alex.vault57.ru
-  - url: http://127.0.0.1:3000
+  - url: http://localhost
 paths:
   /v1/admin/auth/login:
     post:
@@ -56,6 +56,64 @@ paths:
       responses:
         "200": { description: Admin role confirmation without credential material. }
         "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
+  /v1/admin/stations:
+    get:
+      operationId: listAdminStations
+      summary: List the bounded station read model for the first-party administrator console
+      description: >-
+        This read-only same-origin console endpoint requires the short-lived AdminBearer token.
+        It never returns bearer or session material and responses are not cacheable.
+      security: [{ AdminBearer: [] }]
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 25 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, maximum: 10000, default: 0 }
+      responses:
+        "200": { description: Server-filtered, paginated station presentation page without stream URLs or persistence identifiers. }
+        "400": { description: Invalid query or pagination. }
+        "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
+        "503": { description: Catalog or administrator session persistence is unavailable. }
+  /v1/admin/devices:
+    get:
+      operationId: listAdminDevices
+      summary: List a paginated safe device inventory for the administrator console
+      security: [{ AdminBearer: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 25 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 10000, default: 0 }
+      responses:
+        "200": { description: Safe product, display-name, lifecycle and activity fields only; no identifiers or credentials. }
+        "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
+        "503": { description: Account or administrator persistence is unavailable. }
+  /v1/admin/audit:
+    get:
+      operationId: listAdminAudit
+      summary: List a paginated unified administrator audit timeline
+      security: [{ AdminBearer: [] }]
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: until, in: query, schema: { type: string, format: date-time } }
+        - { name: action, in: query, schema: { type: string, maxLength: 96 } }
+        - { name: outcome, in: query, schema: { type: string, maxLength: 16 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 25 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, maximum: 10000, default: 0 } }
+      responses:
+        "200": { description: Secret-free event time, action and outcome page. }
+        "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
+        "503": { description: Administrator persistence is unavailable. }
   /v1/auth/passkeys/registration/options:
     post:
       operationId: startPasskeyRegistration
@@ -401,12 +459,11 @@ paths:
         "503": { description: Account persistence is unavailable. }
   /admin:
     get:
-      operationId: getAdminConsolePreview
-      summary: Serve the local administration-console preview
+      operationId: getAdminConsoleSpa
+      summary: Serve the first-party administrator SPA through Caddy
       description: >-
-        Serves a browser page that asks for the configured application Bearer token and retains it
-        only in the tab's memory. The preview exposes service readiness and read-only station search;
-        it does not yet provide administrator accounts, sessions, or state-changing operations.
+        Caddy serves the existing same-origin Preact/Vite bundle. The administrator bearer is kept
+        only in current-page JavaScript memory and a reload requires a new login.
       responses:
         "200":
           description: The administration-console preview page.

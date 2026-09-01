@@ -43,6 +43,7 @@ pub(super) struct AppState {
     pub(super) account_store: Option<PostgresAccountStore>,
     pub(super) admin_store: Option<Arc<dyn AdminStore>>,
     pub(super) trusted_proxy_token: Option<String>,
+    pub(super) local_admin_origin: Option<String>,
     pub(super) public_limits: Arc<Mutex<PublicLimitState>>,
 }
 

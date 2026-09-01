@@ -9,22 +9,17 @@ access token in memory and attaches it to HTMX requests; the first delivery
 does not persist an administrator token in `localStorage`. This avoids
 cookie-driven CSRF, while reducing the impact of a future XSS defect.
 
-RockCast is a separate machine client. An administrator creates a revocable
-client credential for each RockCast installation. Credentials are random,
-shown once at creation, and stored only as hashes. They never grant access to
-the administration console.
+RockCast product routes are currently public and its user identity uses pairing.
+RockCast machine-credential lifecycle is explicitly outside this administrator roadmap.
 
 ## Security boundaries
 
-- Application endpoints under `/v1` and `/api/v1` require a valid Bearer
-  credential. This includes search and voice endpoints before a WebSocket
-  upgrade.
+- Product endpoints under `/v1` remain public; legacy `/api/v1` compatibility
+  routes retain their separately configured deployment Bearer boundary.
 - Liveness remains suitable for local process supervision. Readiness and
   administrative access are deployment-controlled and must not expose secrets.
 - Admin Bearer tokens have the `admin` role, a short lifetime, server-side
   revocation, and rotation on login/refresh.
-- RockCast client credentials have the `client` role, an independently
-  configurable expiry, last-use metadata, and revocation.
 - Passwords use Argon2id. Tokens and session identifiers are compared and
   persisted as hashes only. Authorization, passwords, and tokens are always
   redacted from logs.
@@ -36,6 +31,13 @@ the administration console.
   The admin UI requires a restrictive CSP, escaped HTML, no third-party
   scripts, `Cache-Control: no-store`, and no sensitive token persistence by
   default.
+- Session refresh is an atomic replace-and-revoke persistence operation: a
+  failure leaves the old session active and does not mint a usable replacement.
+- Authenticated administrator request records contain only request ID,
+  principal/session IDs, a static route name, outcome, duration, and timestamp.
+  They exclude request bodies, query text, transcripts, headers, credentials and
+  token material. The implemented retention period is 30 days, enforced when a
+  new record is written.
 
 ## Delivery sequence
 
@@ -64,17 +66,16 @@ the administration console.
    outcome, duration, and timestamp.
 2. Decide and document a retention period before recording search text or voice
    transcripts; credentials and raw sensitive headers are never recorded.
-3. Provide filtered, paginated read models for stations and request logs.
+3. Provide filtered, paginated read models for stations and request logs in a
+   later explicitly scoped task; RS-ADMIN-005 records metadata only.
 
 ### D. HTMX administration console
 
-1. Serve a minimal HTML shell and HTMX fragments for login, stations, request
-   logs, RockCast clients, and security events.
+1. Serve a minimal HTML shell and HTMX fragments for login and stations; request
+   logs and security-event pages require later scoped work.
 2. Keep presentation DTOs separate from search DTOs and persistence rows.
 3. Attach the in-memory Bearer access token to HTMX requests and clear it on
    `401` or logout.
-4. Create and rotate RockCast credentials through an admin-only operation;
-   display a newly minted secret exactly once.
 
 ### E. Deployment hardening and acceptance
 
@@ -87,12 +88,11 @@ the administration console.
 
 ## Definition of done
 
-The API is inaccessible without a valid revocable credential; administrative
-operations require an admin role; a disabled RockCast client loses access
-without affecting other clients; failed logins are throttled; the admin can
-list stations and filtered request records; security-sensitive values never
-appear in response bodies, trace logs, or persisted audit records. Every
-public HTTP change is represented in `api/openapi.yaml`.
+Administrator operations are inaccessible without a valid revocable credential;
+failed logins are throttled; the admin can list stations; and security-sensitive
+values never appear in response bodies, trace logs, request records, or persisted
+audit records. Product routes remain public and pairing remains the user-identity
+boundary. Every public HTTP change is represented in `api/openapi.yaml`.
 
 ## RM-011-G6 operator boundary
 
