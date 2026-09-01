@@ -1,5 +1,19 @@
 # Task log
 
+## RS-ADMIN-003 — 2026-09-01 — administrator login, revocable sessions, and admin boundary
+
+- Goal: implement only the administrator authentication boundary on the RS-ADMIN-001/002 foundation.
+- Result: versioned admin login, refresh, logout, and an admin-role verification route use Argon2id
+  verification, random opaque 256-bit Bearer values with persisted hashes only, fifteen-minute TTL,
+  server-side revoke/rotation, durable login attempt throttle, and redacted security events.
+  State-changing requests require the established trusted-origin/proxy validation. Product,
+  passkey/browser, legacy compatibility, UI, station, and password-change behavior is unchanged.
+- Checks: `cargo fmt --check`, strict Clippy, `cargo test`, OpenAPI contract checks and
+  `git diff --check` passed. A disposable `pgvector/pg17` database passed the new admin durable
+  query/revocation test and bootstrap concurrency test when each was run serially. The existing
+  all-ignored suite has unrelated shared-database collisions and is not a valid parallel run.
+- Status: **implemented locally; RS-ADMIN-004 is next.**
+
 ## RS-ADMIN-002 — 2026-09-01 — protected one-time administrator bootstrap
 
 - Goal: bootstrap exactly one administrator principal from a protected terminal/deployment
@@ -194,7 +208,7 @@
   passed; web typecheck/regression/build passed; RockCast fmt/check/tests passed with one unrelated
   Clippy finding; RockMobile unit tests/assemble passed with three unrelated lint findings. Six
   disposable PostgreSQL tests, live credential/provider tests, physical Android, Windows GUI and
-  staging smoke remain unrun. Details: `docs/rm-011-g7-e2e-verification.md`.
+  staging smoke remain unrun. Details: `docs/archive/2026-08/rm-011-g7-e2e-verification.md`.
 - Status: **verification documented; RM-011-G remains open pending F-1/F-2, registration-policy
   decision, disposable-DB coverage, and authorized staging/real-device smoke.**
 
@@ -409,7 +423,7 @@
   `PlaybackHistoryEntry` model; deterministic dedupe/order/retention; RM-004 ID/lifecycle handling;
   local-first migration/rollback; verified client field mapping; privacy boundary; and human
   approval decisions.
-- Result: [`rm-007-a-local-personal-data-contract.md`](rm-007-a-local-personal-data-contract.md)
+- Result: [`archive/2026-08/rm-007-a-local-personal-data-contract.md`](archive/2026-08/rm-007-a-local-personal-data-contract.md)
   distinguishes verified current client behavior from proposed RM-007 design. It preserves IDs for
   URL/primary-stream/rename changes, follows only merged tombstones, and quarantines split, removed,
   missing, and unmapped legacy references. The present RockMobile unavailable-voice migration and
@@ -1494,3 +1508,40 @@
   Yandex LLM, one SpeechKit, and one ONNX live test remain intentionally ignored. `git diff
   --check` passed.
 - Status: **complete locally; no deploy, push, staging, or real account/device operation.**
+
+## DOCS-CODEX-CONTEXT — 2026-09-01 — canonical cross-project task context
+
+- Goal: create one durable, fact-checked starting context for future Codex tasks
+  spanning RockServer, RockCast and RockMobile.
+- Scope: document repository paths and boundaries, actual implementation state,
+  approved admin authentication and station-icon decisions, delivery rules, and
+  ordered `RS-ADMIN-*` / `RS-ICON-*` backlog entries.
+- Result: added `docs/codex-project-context.md`. It preserves the existing
+  `admin-security-plan.md` Bearer-in-memory decision and `roadmap/station-icons.md`
+  contract; it marks planned icon work as planned rather than claiming it live.
+  The context explicitly requires every ready stored and served v1 icon to be
+  WebP; source bytes are not retained or served. It also serializes all
+  Codex-started compilation/build/compiling-test/dependency-install work across
+  the three projects and their worktrees. Every new or modified PostgreSQL query
+  must additionally be covered by a disposable-database integration test via
+  `TEST_DATABASE_URL`; fakes are not a substitute. Future Codex tasks default
+  to the current `C:\repos\rockserver` master checkout rather than a worktree,
+  while preserving unrelated changes.
+- Checks: targeted inspection of the three repositories, RockServer status/tasks,
+  architecture, OpenAPI, admin-security plan, station-icon roadmap and client
+  icon implementations; Markdown content review. No build was needed because
+  this change is documentation-only.
+- Status: **complete; no API, source, migration, deployment, staging, or client
+  behaviour changed.**
+
+## DOCS-CLEANUP — 2026-09-01 — active documentation cleanup
+
+- Goal: remove superseded documentation from the active RockServer docs root
+  while preserving useful historical evidence.
+- Result: deleted obsolete MVP/RM-004/shared-roadmap proposal, schema and example
+  artifacts; moved historical RM-004/RM-007/RM-011 reports, diagnostics and
+  explanatory diagrams to `docs/archive/2026-08/`; added the archive README and
+  repaired active-document links.
+- Checks: targeted reference scan for every removed filename and `git diff --check`.
+- Status: **complete; no code, API, migration, deployment, staging, or client
+  behaviour changed.**

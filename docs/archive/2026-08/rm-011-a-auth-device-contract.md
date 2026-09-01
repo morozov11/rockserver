@@ -4,8 +4,8 @@
 runtime-поведения. Перечисленные ниже варианты recovery/retention и operational policy остаются
 явными implementation decisions; approval не подменяет их невыбранным вариантом.
 
-Связанный машиночитаемый черновик: `rm-011-a-openapi.proposed.yaml`. Действующий
-`api/openapi.yaml` и HTTP runtime намеренно не изменены: сегодня они не предоставляют
+The associated machine-readable proposal was removed during the 2026-09-01 documentation cleanup.
+At the time of this record, the active `api/openapi.yaml` and HTTP runtime intentionally did not provide
 регистрацию, login, account или device API.
 
 ## Выбранный пользовательский путь
@@ -139,7 +139,7 @@ contract requirements.
 
 ## HTTP contract and safe errors
 
-`docs/rm-011-a-openapi.proposed.yaml` is the approval-only JSON/API surface; it separately marks
+The removed approval-only JSON/API proposal separately marked
 the first-party browser session. The minimal families are:
 
 | Route | Auth | Semantics |

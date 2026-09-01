@@ -2,6 +2,21 @@
 
 Last updated: 2026-09-01
 
+## RS-ADMIN-003 administrator sessions (implemented locally, 2026-09-01)
+
+`/v1/admin/auth/login`, `/refresh`, `/logout`, and the deliberately minimal protected
+`GET /v1/admin/session` now form a separate administrator boundary. Login validates the existing
+Argon2id PHC password, issues a 15-minute opaque Bearer value whose SHA-256 hash alone is stored,
+and records safe durable attempt/audit classes. Refresh replaces and revokes the prior session;
+logout revokes it immediately. Login uses the durable username+trusted-source-IP correlation key
+and locks after five failed attempts in fifteen minutes. State-changing admin requests require the
+existing trusted first-party Origin/proxy boundary; forwarded identity is ignored without that proof.
+Public `/v1/*`, legacy `/api/v1/*`, passkey/browser-session, and local `/admin` preview behavior
+are unchanged. The disposable `pgvector/pg17` run passed the RS-ADMIN-003 durable-query test and
+the RS-ADMIN-002 bootstrap concurrency test when each used the disposable database serially.
+The pre-existing all-ignored suite is not safe to run concurrently against one database: four
+unrelated tests collide on shared cleanup/fixtures. The next scope is RS-ADMIN-004.
+
 ## RS-ADMIN-002 protected administrator bootstrap (implemented locally, 2026-09-01)
 
 The new `bootstrap_admin` one-shot binary accepts `ROCKSERVER_ADMIN_BOOTSTRAP_USERNAME` and
@@ -36,6 +51,25 @@ available through local Docker; `postgres_admin_identity_foundation_rejects_inva
 passed against it, exercising every new administrator persistence query and its password/token hash
 constraints. No staging, deployment, or external-network test ran. The next implementation task is
 RS-ADMIN-002.
+## Codex cross-project context (documentation, 2026-09-01)
+
+`docs/codex-project-context.md` is the canonical persistent starting context for
+future bounded Codex work across RockServer, RockCast and RockMobile. It records
+the actual current boundaries, the approved admin Bearer-session decision, and
+the station-icon delivery order. It explicitly distinguishes implemented
+behaviour from the icon roadmap: the icon endpoint and public `faviconUrl` are
+not yet live. Future Codex tasks use the current master checkout by default,
+without creating a worktree. No Rust, API, migration, deployment, staging data
+or client behaviour changed.
+
+## Documentation cleanup (2026-09-01)
+
+The active `docs/` root now contains only current context, architecture, active
+roadmaps/runbooks, release documentation and the historical status/task logs.
+Superseded MVP/RM-004/shared-roadmap proposal artifacts were removed; historical
+reports, diagnostics and explanatory diagrams were moved to
+`docs/archive/2026-08/` with an archive README. Remaining links were updated.
+No code, API, migration, deployment, staging data or client behaviour changed.
 
 ## RM-011 durable device-secret sessions (implemented locally, 2026-08-30)
 
@@ -489,8 +523,8 @@ remains pending that explicitly provided database; B2 has its own disposable Pos
 
 ## RM-011-A — account/device contract and threat model (2026-08-26)
 
-Approval-only design is recorded in `docs/rm-011-a-auth-device-contract.md` with the separate
-`docs/rm-011-a-openapi.proposed.yaml`. It defines passkey/WebAuthn mobile-browser approval of a
+The approval-only design record is archived at
+`docs/archive/2026-08/rm-011-a-auth-device-contract.md`. It defined passkey/WebAuthn mobile-browser approval of a
 desktop QR/short-code pairing request, opaque short-lived access bearer and rotating refresh-token
 families, account deletion, and owner-scoped device list/revoke. Email, password, SMS and required
 RockMobile installation are deliberately absent.
@@ -512,8 +546,8 @@ without changing user/device/session ownership; none of those methods is current
 
 ## MVP-001-A — public API contract and abuse model (2026-08-26)
 
-Added approval-only `docs/mvp-001-a-public-api-contract.md` and a separate proposed OpenAPI
-contract. They specify the exact five-endpoint anonymous `/v1` allowlist for bounded catalog,
+The original approval-only MVP-001 proposal documents were removed from active documentation
+during the 2026-09-01 cleanup. They specified the exact five-endpoint anonymous `/v1` allowlist for bounded catalog,
 search and voice flows; account, device, sync, admin, operations, health and legacy routes remain
 protected or infrastructure-only. The proposal explicitly bans shared Bearer tokens and client
 secrets for public users, and fixes draft rate/audio/session/concurrency limits, error semantics,
@@ -565,8 +599,8 @@ No VPS, DNS, registry, credential, ONNX download, or public readiness operation 
 
 ### RM-007-A common model and station-ID migration (2026-08-25)
 
-The proposed cross-client contract is recorded in
-[`rm-007-a-local-personal-data-contract.md`](rm-007-a-local-personal-data-contract.md). It defines
+The proposed cross-client contract is archived in
+[`archive/2026-08/rm-007-a-local-personal-data-contract.md`](archive/2026-08/rm-007-a-local-personal-data-contract.md). It defines
 versioned local `LocalProfile`, `Favourite`, and `PlaybackHistoryEntry` shapes; local-only privacy,
 dedupe/order/retention, safe rollback, and RM-004-compatible identity lifecycle rules. It specifies
 automatic resolution only for verified canonical IDs, reviewed legacy mappings, and `merged`
@@ -900,7 +934,7 @@ second recognizer behind the existing trait.
 
 ## Shared internet-beta roadmap
 
-Planning-only product roadmap added in `docs/shared-product-roadmap.md`. It places RM-007, RM-011,
+The retired planning-only product roadmap placed RM-007, RM-011,
 and RM-012 ahead of unrelated roadmap work to prepare a hosted RockServer beta with users,
 registration, device linking, synchronization, and remote control across RockMobile and RockCast.
 The ESP32 client is intentionally deferred until hardware is available. The documented proposed
@@ -910,8 +944,8 @@ deployment, credential, or infrastructure change was made by this documentation 
 
 ## Executable internet-beta plan
 
-The shared roadmap is now decomposed into concrete, sequential Codex tasks in
-`docs/shared-product-execution-plan.md`: GATE-001; RM-007-A through D; OPS-001-A through D;
+The retired shared roadmap was decomposed into concrete, sequential Codex tasks:
+GATE-001; RM-007-A through D; OPS-001-A through D;
 RM-011-A through F; RM-012-A through F; then ESP-001 and ESP-002 when hardware exists. Every
 task has repository boundaries, dependency, recommended model/reasoning effort, scope and
 acceptance gate. The plan itself is not an approval to implement any task.
@@ -919,7 +953,7 @@ acceptance gate. The plan itself is not an approval to implement any task.
 ## RM-007-D cross-client review (historical evidence, 2026-08-25)
 
 At the time of this evidence-based review, RM-007-D was **not passed**. The review in
-`docs/rm-007-d-cross-client-review.md` confirmed the shared baseline release and the clients'
+`docs/archive/2026-08/rm-007-d-cross-client-review.md` confirmed the shared baseline release and the clients'
 offline local-catalog paths, but found four unresolved High issues: RockMobile's persisted JSON is
 not the portable RM-007-A profile shape; its read/init path can replace corrupt or unsupported data
 with an empty profile and has no migration backup/rollback; its lifecycle resolver is not wired to
@@ -1061,7 +1095,7 @@ unauthenticated; production startup policy is unchanged.
 
 ## RM-011-C — unified web shell and auth runtime (current snapshot)
 
-Итоговый отчёт текущего прогона: [`docs/rm-011-c-report.md`](rm-011-c-report.md). RM-011-C
+Итоговый отчёт текущего прогона: [`docs/archive/2026-08/rm-011-c-report.md`](archive/2026-08/rm-011-c-report.md). RM-011-C
 имеет статус **RM-011-C server/browser implementation verified**. Full real-client staging E2E
 явно перенесён в RM-011-D/E и не является prerequisite этой серверной задачи.
 
