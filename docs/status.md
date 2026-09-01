@@ -2,6 +2,21 @@
 
 Last updated: 2026-08-30
 
+## RS-ADMIN-001 durable administrator identity foundation (implemented locally, 2026-09-01)
+
+Migration `0018` adds administrator-only principals, Argon2id password-hash credentials, opaque
+token-hash sessions, hashed account/source-IP login attempts, and safe security events. The tables
+are separate from `users`, passkeys, devices, browser/native sessions, and future RockCast
+machine-client credentials. The new domain/persistence boundary accepts no raw password or token
+material; it includes an in-memory deterministic fake and a PostgreSQL implementation. No routes,
+middleware, bootstrap command, UI, OpenAPI behavior, staging data, or deployment were changed.
+Verified locally: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`
+passed. The full ordinary suite includes 106 library tests. A disposable PostgreSQL 17 database was
+available through local Docker; `postgres_admin_identity_foundation_rejects_invalid_hash_state`
+passed against it, exercising every new administrator persistence query and its password/token hash
+constraints. No staging, deployment, or external-network test ran. The next implementation task is
+RS-ADMIN-002.
+
 ## RM-011 durable device-secret sessions (implemented locally, 2026-08-30)
 
 Native pairing is now a durable device binding rather than a refresh-token family. Pairing returns

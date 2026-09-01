@@ -7,6 +7,11 @@ use axum::{body::Body, http::Request};
 use http_body_util::BodyExt;
 use rockserver::{
     account_cleanup::CleanupError,
+    admin::{
+        AdminLoginAttempt, AdminLoginOutcome, AdminPasswordHash, AdminPrincipal,
+        AdminPrincipalStatus, AdminSecurityEvent, AdminSecurityEventType, AdminStore,
+        NewAdminPasswordCredential, NewAdminSession,
+    },
     auth::{
         NewBrowserSession, NewPairingRequest, NewPairingSession, NewSession, NewWebAuthnChallenge,
         OwnedDevice, PairingCompletionOutcome, SecretHash, WebAuthnCeremony,
@@ -17,8 +22,8 @@ use rockserver::{
     },
     http::{HealthResponse, HealthStatus, router_with_repository, router_with_search_service},
     persistence::{
-        OwnedCatalogReplacement, PostgresAccountStore, PostgresEmbeddingStore, PostgresImportStore,
-        PostgresStationRepository,
+        OwnedCatalogReplacement, PostgresAccountStore, PostgresAdminStore, PostgresEmbeddingStore,
+        PostgresImportStore, PostgresStationRepository,
     },
     providers::radio_browser::SOURCE,
     search::{
@@ -32,6 +37,96 @@ use sha2::Digest;
 use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
+
+/// Covers administrator-only migrations and hashed credential/session persistence against PostgreSQL.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL pointing to a disposable PostgreSQL database"]
+async fn postgres_admin_identity_foundation_rejects_invalid_hash_state() {
+    let database_url = env::var("TEST_DATABASE_URL")
+        .expect("set TEST_DATABASE_URL to an isolated PostgreSQL database");
+    let store = PostgresAdminStore::connect(&database_url)
+        .await
+        .expect("admin migrations must succeed");
+    let principal_id = Uuid::new_v4();
+    store
+        .create_principal(AdminPrincipal {
+            id: principal_id,
+            status: AdminPrincipalStatus::Active,
+        })
+        .await
+        .unwrap();
+    store
+        .create_password_credential(NewAdminPasswordCredential {
+            id: Uuid::new_v4(),
+            principal_id,
+            password_hash: AdminPasswordHash::parse(
+                "$argon2id$v=19$m=65536,t=3,p=4$salt$hash".to_owned(),
+            )
+            .unwrap(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        store
+            .active_password_credential(principal_id)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let mut token_hash_bytes = [0_u8; 32];
+    token_hash_bytes[..16].copy_from_slice(principal_id.as_bytes());
+    token_hash_bytes[16..].copy_from_slice(principal_id.as_bytes());
+    let token_hash = SecretHash::new(token_hash_bytes);
+    store
+        .create_session(NewAdminSession {
+            id: Uuid::new_v4(),
+            principal_id,
+            token_hash: token_hash.clone(),
+            expires_at_rfc3339: "2035-01-01T00:00:00Z".to_owned(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        store
+            .find_active_session(&token_hash)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    store
+        .record_login_attempt(AdminLoginAttempt {
+            id: Uuid::new_v4(),
+            principal_id: Some(principal_id),
+            account_key_hash: SecretHash::new([51; 32]),
+            source_ip_hash: SecretHash::new([52; 32]),
+            outcome: AdminLoginOutcome::Succeeded,
+        })
+        .await
+        .unwrap();
+    store
+        .record_security_event(AdminSecurityEvent {
+            id: Uuid::new_v4(),
+            principal_id: Some(principal_id),
+            session_id: store
+                .find_active_session(&token_hash)
+                .await
+                .unwrap()
+                .map(|session| session.id),
+            source_ip_hash: Some(SecretHash::new([52; 32])),
+            event_type: AdminSecurityEventType::SessionCreated,
+        })
+        .await
+        .unwrap();
+
+    let pool = PgPool::connect(&database_url).await.unwrap();
+    assert!(sqlx::query("INSERT INTO admin_password_credentials (id, principal_id, password_hash) VALUES ($1, $2, $3)")
+        .bind(Uuid::new_v4()).bind(principal_id).bind("not-a-hash")
+        .execute(&pool).await.is_err());
+    assert!(sqlx::query("INSERT INTO admin_sessions (id, principal_id, token_hash, expires_at) VALUES ($1, $2, $3, $4::timestamptz)")
+        .bind(Uuid::new_v4()).bind(principal_id).bind(vec![1_u8; 31]).bind("2035-01-01T00:00:00Z")
+        .execute(&pool).await.is_err());
+    pool.close().await;
+}
 
 /// Covers the approved passkey-only account persistence invariants against PostgreSQL.
 #[tokio::test]

@@ -1,5 +1,24 @@
 # Task log
 
+## RS-ADMIN-001 — 2026-09-01 — durable administrator identity foundation
+
+- Goal: add durable administrator principal, credential/session, login-attempt, and security-event
+  foundations without beginning bootstrap, login routes, middleware, UI, or deployment work.
+- Scope: migration `0018`, a separate `admin` domain/persistence contract, PostgreSQL store, and
+  deterministic in-memory fake. Administrator state has no foreign keys to Rock accounts, devices,
+  passkeys, or browser/native sessions; password and opaque token inputs are hash-only.
+- Result: database constraints restrict password records to Argon2id PHC representations, fixed-size
+  token/account/source hashes, safe lifecycle states, safe event/outcome vocabulary, and active-record
+  indexes for verification and future throttling. No public API or existing account semantics changed.
+- Checks: `cargo fmt --check`, strict all-target/all-feature Clippy, `cargo test`, and `git diff
+  --check` passed. `cargo test` passed 106 library tests and all regular integration tests. The
+  deterministic fake tests cover non-Argon2id rejection, redacted hash diagnostics,
+  missing-principal credentials, and disabled-principal sessions. The PostgreSQL migration/constraint
+  regression passed against a disposable PostgreSQL 17 Docker database through `TEST_DATABASE_URL`;
+  it exercises every new administrator persistence query plus invalid password-hash and token-hash
+  constraints. No staging, deployment, or external-network test ran.
+- Status: **complete locally.** RS-ADMIN-002 remains the next scope.
+
 ## RM-011 — 2026-08-30 — durable device-secret server sessions
 
 - Goal: replace fragile rotating refresh tokens with a persistent revocable device credential.

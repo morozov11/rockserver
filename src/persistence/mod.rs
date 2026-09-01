@@ -1,6 +1,7 @@
 //! Persistent catalog implementations and environment-driven backend selection.
 
 mod account_postgres;
+mod admin_postgres;
 mod embedding_postgres;
 mod import_postgres;
 mod postgres;
@@ -12,6 +13,7 @@ pub use crate::account_cleanup::{
     CleanupPreview,
 };
 pub use account_postgres::PostgresAccountStore;
+pub use admin_postgres::PostgresAdminStore;
 pub use embedding_postgres::PostgresEmbeddingStore;
 pub use import_postgres::{OwnedCatalogReplacement, PostgresImportStore};
 pub use postgres::PostgresStationRepository;

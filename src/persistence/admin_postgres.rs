@@ -1,0 +1,156 @@
+//! PostgreSQL implementation of the administrator-only persistence boundary.
+
+use async_trait::async_trait;
+use sqlx::{PgPool, postgres::PgPoolOptions};
+use uuid::Uuid;
+
+use crate::{
+    admin::{
+        AdminLoginAttempt, AdminLoginOutcome, AdminPasswordCredential, AdminPrincipal,
+        AdminSecurityEvent, AdminSession, AdminStore, AdminStoreError, NewAdminPasswordCredential,
+        NewAdminSession,
+    },
+    auth::SecretHash,
+};
+
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
+
+/// PostgreSQL store for administrator authentication state only.
+#[derive(Clone, Debug)]
+pub struct PostgresAdminStore {
+    pool: PgPool,
+}
+
+impl PostgresAdminStore {
+    /// Connects to PostgreSQL and applies the shared versioned migration sequence.
+    pub async fn connect(database_url: &str) -> Result<Self, sqlx::Error> {
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect(database_url)
+            .await?;
+        if let Err(error) = MIGRATOR.run(&pool).await {
+            pool.close().await;
+            return Err(error.into());
+        }
+        Ok(Self { pool })
+    }
+
+    /// Reuses a caller-managed migrated pool, primarily for integration tests and application wiring.
+    pub fn from_pool(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl AdminStore for PostgresAdminStore {
+    async fn create_principal(&self, principal: AdminPrincipal) -> Result<(), AdminStoreError> {
+        sqlx::query("INSERT INTO admin_principals (id, status) VALUES ($1, $2)")
+            .bind(principal.id)
+            .bind(match principal.status {
+                crate::admin::AdminPrincipalStatus::Active => "active",
+                crate::admin::AdminPrincipalStatus::Disabled => "disabled",
+            })
+            .execute(&self.pool)
+            .await
+            .map_err(map_error)?;
+        Ok(())
+    }
+
+    async fn create_password_credential(
+        &self,
+        credential: NewAdminPasswordCredential,
+    ) -> Result<(), AdminStoreError> {
+        let result = sqlx::query("INSERT INTO admin_password_credentials (id, principal_id, password_hash) SELECT $1, id, $3 FROM admin_principals WHERE id = $2 AND status = 'active'")
+            .bind(credential.id).bind(credential.principal_id).bind(credential.password_hash.as_str())
+            .execute(&self.pool).await.map_err(map_error)?;
+        if result.rows_affected() == 0 {
+            return Err(AdminStoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    async fn active_password_credential(
+        &self,
+        principal_id: Uuid,
+    ) -> Result<Option<AdminPasswordCredential>, AdminStoreError> {
+        let row = sqlx::query_as::<_, AdminPasswordCredentialRow>("SELECT c.id, c.principal_id, c.password_hash FROM admin_password_credentials c JOIN admin_principals p ON p.id = c.principal_id WHERE c.principal_id = $1 AND c.revoked_at IS NULL AND p.status = 'active'")
+            .bind(principal_id).fetch_optional(&self.pool).await.map_err(map_error)?;
+        row.map(|row| {
+            Ok(AdminPasswordCredential {
+                id: row.id,
+                principal_id: row.principal_id,
+                password_hash: crate::admin::AdminPasswordHash::parse(row.password_hash)
+                    .map_err(|_| AdminStoreError::Unavailable)?,
+            })
+        })
+        .transpose()
+    }
+
+    async fn create_session(&self, session: NewAdminSession) -> Result<(), AdminStoreError> {
+        let result = sqlx::query("INSERT INTO admin_sessions (id, principal_id, token_hash, expires_at) SELECT $1, id, $3, $4::timestamptz FROM admin_principals WHERE id = $2 AND status = 'active'")
+            .bind(session.id).bind(session.principal_id).bind(session.token_hash.as_bytes()).bind(session.expires_at_rfc3339)
+            .execute(&self.pool).await.map_err(map_error)?;
+        if result.rows_affected() == 0 {
+            return Err(AdminStoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    async fn find_active_session(
+        &self,
+        token_hash: &SecretHash,
+    ) -> Result<Option<AdminSession>, AdminStoreError> {
+        sqlx::query_as::<_, AdminSessionRow>("SELECT s.id, s.principal_id FROM admin_sessions s JOIN admin_principals p ON p.id = s.principal_id WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND p.status = 'active'")
+            .bind(token_hash.as_bytes()).fetch_optional(&self.pool).await.map_err(map_error).map(|row| row.map(Into::into))
+    }
+
+    async fn record_login_attempt(
+        &self,
+        attempt: AdminLoginAttempt,
+    ) -> Result<(), AdminStoreError> {
+        sqlx::query("INSERT INTO admin_login_attempts (id, principal_id, account_key_hash, source_ip_hash, outcome) VALUES ($1, $2, $3, $4, $5)")
+            .bind(attempt.id).bind(attempt.principal_id).bind(attempt.account_key_hash.as_bytes()).bind(attempt.source_ip_hash.as_bytes()).bind(match attempt.outcome { AdminLoginOutcome::Succeeded => "succeeded", AdminLoginOutcome::Failed => "failed", AdminLoginOutcome::Locked => "locked" })
+            .execute(&self.pool).await.map_err(map_error)?;
+        Ok(())
+    }
+
+    async fn record_security_event(
+        &self,
+        event: AdminSecurityEvent,
+    ) -> Result<(), AdminStoreError> {
+        sqlx::query("INSERT INTO admin_security_events (id, principal_id, session_id, source_ip_hash, event_type) VALUES ($1, $2, $3, $4, $5)")
+            .bind(event.id).bind(event.principal_id).bind(event.session_id).bind(event.source_ip_hash.as_ref().map(SecretHash::as_bytes)).bind(event.event_type.as_str())
+            .execute(&self.pool).await.map_err(map_error)?;
+        Ok(())
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct AdminPasswordCredentialRow {
+    id: Uuid,
+    principal_id: Uuid,
+    password_hash: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct AdminSessionRow {
+    id: Uuid,
+    principal_id: Uuid,
+}
+
+impl From<AdminSessionRow> for AdminSession {
+    fn from(row: AdminSessionRow) -> Self {
+        Self {
+            id: row.id,
+            principal_id: row.principal_id,
+        }
+    }
+}
+
+fn map_error(error: sqlx::Error) -> AdminStoreError {
+    if matches!(&error, sqlx::Error::Database(database) if database.is_unique_violation()) {
+        AdminStoreError::Conflict
+    } else {
+        AdminStoreError::Unavailable
+    }
+}
