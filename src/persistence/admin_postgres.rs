@@ -6,9 +6,10 @@ use uuid::Uuid;
 
 use crate::{
     admin::{
-        AdminBootstrapOutcome, AdminLoginAttempt, AdminLoginOutcome, AdminPasswordCredential,
-        AdminPrincipal, AdminSecurityEvent, AdminSession, AdminStore, AdminStoreError,
-        NewAdminBootstrap, NewAdminPasswordCredential, NewAdminSession,
+        AdminBootstrapOutcome, AdminLoginAttempt, AdminLoginCredential, AdminLoginOutcome,
+        AdminPasswordCredential, AdminPrincipal, AdminSecurityEvent, AdminSession, AdminStore,
+        AdminStoreError, AdminUsername, NewAdminBootstrap, NewAdminPasswordCredential,
+        NewAdminSession,
     },
     auth::SecretHash,
 };
@@ -109,9 +110,18 @@ impl AdminStore for PostgresAdminStore {
         .transpose()
     }
 
+    async fn login_credential(
+        &self,
+        username: &AdminUsername,
+    ) -> Result<Option<AdminLoginCredential>, AdminStoreError> {
+        sqlx::query_as::<_, AdminPasswordCredentialRow>("SELECT c.id, c.principal_id, c.password_hash FROM admin_password_credentials c JOIN admin_principals p ON p.id = c.principal_id WHERE p.username = $1 AND c.revoked_at IS NULL AND p.status = 'active'")
+            .bind(username.as_str()).fetch_optional(&self.pool).await.map_err(map_error)?
+            .map(|row| Ok(AdminLoginCredential { credential: AdminPasswordCredential { id: row.id, principal_id: row.principal_id, password_hash: crate::admin::AdminPasswordHash::parse(row.password_hash).map_err(|_| AdminStoreError::Unavailable)? } })).transpose()
+    }
+
     async fn create_session(&self, session: NewAdminSession) -> Result<(), AdminStoreError> {
-        let result = sqlx::query("INSERT INTO admin_sessions (id, principal_id, token_hash, expires_at) SELECT $1, id, $3, $4::timestamptz FROM admin_principals WHERE id = $2 AND status = 'active'")
-            .bind(session.id).bind(session.principal_id).bind(session.token_hash.as_bytes()).bind(session.expires_at_rfc3339)
+        let result = sqlx::query("INSERT INTO admin_sessions (id, principal_id, token_hash, expires_at) SELECT $1, id, $3, now() + ($4 * interval '1 second') FROM admin_principals WHERE id = $2 AND status = 'active'")
+            .bind(session.id).bind(session.principal_id).bind(session.token_hash.as_bytes()).bind(session.ttl_seconds)
             .execute(&self.pool).await.map_err(map_error)?;
         if result.rows_affected() == 0 {
             return Err(AdminStoreError::NotFound);
@@ -125,6 +135,25 @@ impl AdminStore for PostgresAdminStore {
     ) -> Result<Option<AdminSession>, AdminStoreError> {
         sqlx::query_as::<_, AdminSessionRow>("SELECT s.id, s.principal_id FROM admin_sessions s JOIN admin_principals p ON p.id = s.principal_id WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND p.status = 'active'")
             .bind(token_hash.as_bytes()).fetch_optional(&self.pool).await.map_err(map_error).map(|row| row.map(Into::into))
+    }
+
+    async fn recent_failed_login_count(
+        &self,
+        account_key_hash: &SecretHash,
+        source_ip_hash: &SecretHash,
+    ) -> Result<u64, AdminStoreError> {
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM admin_login_attempts WHERE account_key_hash = $1 AND source_ip_hash = $2 AND outcome = 'failed' AND occurred_at > now() - interval '15 minutes'")
+            .bind(account_key_hash.as_bytes()).bind(source_ip_hash.as_bytes()).fetch_one(&self.pool).await.map_err(map_error)?;
+        Ok(count as u64)
+    }
+
+    async fn revoke_session(
+        &self,
+        session_id: Uuid,
+        replacement_session_id: Option<Uuid>,
+    ) -> Result<bool, AdminStoreError> {
+        Ok(sqlx::query("UPDATE admin_sessions SET revoked_at = now(), replaced_by_id = $2 WHERE id = $1 AND revoked_at IS NULL")
+            .bind(session_id).bind(replacement_session_id).execute(&self.pool).await.map_err(map_error)?.rows_affected() == 1)
     }
 
     async fn record_login_attempt(

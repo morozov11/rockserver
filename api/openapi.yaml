@@ -14,6 +14,48 @@ servers:
   - url: https://alex.vault57.ru
   - url: http://127.0.0.1:3000
 paths:
+  /v1/admin/auth/login:
+    post:
+      operationId: adminLogin
+      summary: Authenticate the bootstrapped administrator and issue one short-lived opaque Bearer session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminLoginRequest" }
+      responses:
+        "200": { description: One opaque Bearer token, returned only to the authenticated caller. }
+        "401": { description: Generic invalid-credentials response. }
+        "403": { description: Request did not originate through the trusted first-party boundary. }
+        "429": { description: Durable account-and-source-IP throttle temporarily locked login. }
+        "503": { description: Administrator authentication persistence is unavailable. }
+  /v1/admin/auth/refresh:
+    post:
+      operationId: refreshAdminSession
+      summary: Rotate an active administrator Bearer session
+      security: [{ AdminBearer: [] }]
+      responses:
+        "200": { description: Replacement opaque Bearer token; the old token is revoked. }
+        "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
+        "403": { description: Request origin is not allowed. }
+        "503": { description: Administrator authentication persistence is unavailable. }
+  /v1/admin/auth/logout:
+    post:
+      operationId: logoutAdminSession
+      summary: Revoke the current administrator Bearer session immediately
+      security: [{ AdminBearer: [] }]
+      responses:
+        "204": { description: Session revoked. }
+        "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
+        "403": { description: Request origin is not allowed. }
+  /v1/admin/session:
+    get:
+      operationId: getAdminSession
+      summary: Verify an active administrator Bearer session at the admin authorization boundary
+      security: [{ AdminBearer: [] }]
+      responses:
+        "200": { description: Admin role confirmation without credential material. }
+        "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
   /v1/auth/passkeys/registration/options:
     post:
       operationId: startPasskeyRegistration
@@ -825,6 +867,11 @@ components:
       scheme: bearer
       bearerFormat: opaque
       description: Short-lived opaque native session access token issued by pairing.
+    AdminBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Short-lived, server-revocable administrator session token. It is separate from native and browser account credentials.
   responses:
     AuthenticationRequired:
       description: A required Bearer credential was absent, malformed, or invalid.
@@ -843,6 +890,13 @@ components:
             request_id: req_01AUTH401
             details: {}
   schemas:
+    AdminLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 64, pattern: "^[A-Za-z0-9._-]+$" }
+        password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
     RenameDeviceRequest:
       type: object
       additionalProperties: false

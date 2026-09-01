@@ -109,7 +109,7 @@
         <article class="card current"><span class="badge current">CURRENT</span><h3>CatalogImporter</h3><p>Ограниченный Radio Browser client + import store; отдельный CLI, не request path и не HTTP startup.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>Mobile catalog exporter</h3><p>Отдельный PostgreSQL→SQLite CLI. Выпускает только полный active/playable каталог после строгой проверки; health, embeddings и import runs не экспортирует.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>RM-011-G6 cleanup operator</h3><p>Preview-first one-shot CLI: показывает только безопасные IDs, статусы, counts и причины; apply требует один UUID и точную фразу, отзывает зависимости транзакционно и сохраняет audit/tombstone.</p></article>
-        <article class="card next"><span class="badge next">NEXT</span><h3>Admin / client identity</h3><p>Persisted revocable RockCast clients, Bearer admin sessions, login throttling, audit records and HTMX console.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>Administrator identity</h3><p>Separate persisted administrator, Argon2id login, short-lived revocable Bearer sessions, durable source/IP throttle and redacted audit records. HTMX console and RockCast clients remain next.</p></article>
         <article class="card future"><span class="badge future">FUTURE</span><h3>StreamHealthChecker</h3><p>Фоновая проверка потоков, не в request path.</p></article>
       </div>
     </section>

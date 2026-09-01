@@ -10,7 +10,7 @@ use rockserver::{
     admin::{
         AdminLoginAttempt, AdminLoginOutcome, AdminPasswordHash, AdminPrincipal,
         AdminPrincipalStatus, AdminSecurityEvent, AdminSecurityEventType, AdminStore,
-        NewAdminPasswordCredential, NewAdminSession,
+        AdminUsername, NewAdminPasswordCredential, NewAdminSession,
     },
     admin_bootstrap::{AdminBootstrapConfig, bootstrap_admin},
     auth::{
@@ -83,7 +83,7 @@ async fn postgres_admin_identity_foundation_rejects_invalid_hash_state() {
             id: Uuid::new_v4(),
             principal_id,
             token_hash: token_hash.clone(),
-            expires_at_rfc3339: "2035-01-01T00:00:00Z".to_owned(),
+            ttl_seconds: 60,
         })
         .await
         .unwrap();
@@ -199,6 +199,72 @@ async fn postgres_admin_bootstrap_is_atomic_and_idempotent() {
         .await
         .unwrap(),
         1
+    );
+    pool.close().await;
+}
+
+/// Exercises administrator login lookup, durable throttle count, and immediate session revocation.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL pointing to a disposable PostgreSQL database"]
+async fn postgres_admin_auth_queries_are_durable_and_revocable() {
+    let database_url = env::var("TEST_DATABASE_URL")
+        .expect("set TEST_DATABASE_URL to an isolated PostgreSQL database");
+    let store = PostgresAdminStore::connect(&database_url).await.unwrap();
+    let pool = PgPool::connect(&database_url).await.unwrap();
+    sqlx::query("TRUNCATE admin_security_events, admin_password_credentials, admin_sessions, admin_login_attempts, admin_principals")
+        .execute(&pool).await.unwrap();
+    let config = AdminBootstrapConfig::from_values(
+        Some("auth-admin".to_owned()),
+        Some("a-deterministic-test-password".to_owned()),
+    )
+    .unwrap();
+    assert!(matches!(
+        bootstrap_admin(&store, config).await,
+        Ok(rockserver::admin::AdminBootstrapOutcome::Created)
+    ));
+    let username = AdminUsername::parse("auth-admin".to_owned()).unwrap();
+    let credential = store
+        .login_credential(&username)
+        .await
+        .unwrap()
+        .expect("active bootstrap credential");
+    let account_hash = SecretHash::new([61; 32]);
+    let source_hash = SecretHash::new([62; 32]);
+    store
+        .record_login_attempt(AdminLoginAttempt {
+            id: Uuid::new_v4(),
+            principal_id: Some(credential.credential.principal_id),
+            account_key_hash: account_hash.clone(),
+            source_ip_hash: source_hash.clone(),
+            outcome: AdminLoginOutcome::Failed,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .recent_failed_login_count(&account_hash, &source_hash)
+            .await
+            .unwrap(),
+        1
+    );
+    let token_hash = SecretHash::new([63; 32]);
+    let session_id = Uuid::new_v4();
+    store
+        .create_session(NewAdminSession {
+            id: session_id,
+            principal_id: credential.credential.principal_id,
+            token_hash: token_hash.clone(),
+            ttl_seconds: 60,
+        })
+        .await
+        .unwrap();
+    assert!(store.revoke_session(session_id, None).await.unwrap());
+    assert!(
+        store
+            .find_active_session(&token_hash)
+            .await
+            .unwrap()
+            .is_none()
     );
     pool.close().await;
 }

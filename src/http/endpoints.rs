@@ -11,7 +11,7 @@ use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, Tr
 use tracing::Level;
 
 use crate::{
-    persistence::PostgresAccountStore,
+    persistence::{PostgresAccountStore, PostgresAdminStore},
     search::{
         InMemoryStationRepository, SearchService, StationRepository, UnavailableStationRepository,
     },
@@ -20,6 +20,8 @@ use crate::{
 
 #[path = "account.rs"]
 mod account;
+#[path = "admin_auth.rs"]
+mod admin_auth;
 #[path = "auth.rs"]
 mod auth;
 #[path = "catalog.rs"]
@@ -132,6 +134,7 @@ pub fn router_with_speech_recognizers_and_bearer_token(
         voice_command_timeout,
         api_bearer_token: api_bearer_token.into(),
         account_store: None,
+        admin_store: None,
         trusted_proxy_token: None,
         public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
     })
@@ -170,6 +173,29 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
         voice_command_timeout,
         api_bearer_token: api_bearer_token.into(),
         account_store: Some(account_store),
+        admin_store: None,
+        trusted_proxy_token: Some(trusted_proxy_token.into()),
+        public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
+    })
+}
+
+/// Creates the production router with the separate durable administrator-authentication store.
+pub fn router_with_speech_recognizers_bearer_account_admin_store_and_proxy(
+    search_service: SearchService,
+    speech_recognizers: SpeechRecognizers,
+    voice_command_timeout: Duration,
+    api_bearer_token: impl Into<String>,
+    account_store: PostgresAccountStore,
+    admin_store: PostgresAdminStore,
+    trusted_proxy_token: impl Into<String>,
+) -> Router {
+    build_router(AppState {
+        search_service,
+        speech_recognizers,
+        voice_command_timeout,
+        api_bearer_token: api_bearer_token.into(),
+        account_store: Some(account_store),
+        admin_store: Some(Arc::new(admin_store)),
         trusted_proxy_token: Some(trusted_proxy_token.into()),
         public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
     })
@@ -177,6 +203,19 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
 
 fn build_router(state: AppState) -> Router {
     Router::new()
+        .route(
+            "/v1/admin/auth/login",
+            axum::routing::post(admin_auth::login),
+        )
+        .route(
+            "/v1/admin/auth/refresh",
+            axum::routing::post(admin_auth::refresh),
+        )
+        .route(
+            "/v1/admin/auth/logout",
+            axum::routing::post(admin_auth::logout),
+        )
+        .route("/v1/admin/session", axum::routing::get(admin_auth::session))
         .route("/admin", axum::routing::get(health::admin_console))
         .route("/health/live", axum::routing::get(health::live))
         .route("/health/ready", axum::routing::get(health::ready))

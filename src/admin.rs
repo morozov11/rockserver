@@ -80,6 +80,13 @@ pub struct AdminSession {
     pub principal_id: Uuid,
 }
 
+/// Password credential resolved from a login identifier without exposing principal metadata.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminLoginCredential {
+    /// Active password credential for the resolved administrator.
+    pub credential: AdminPasswordCredential,
+}
+
 /// Durable outcome class for one administrator login attempt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AdminLoginOutcome {
@@ -201,8 +208,8 @@ pub struct NewAdminSession {
     pub principal_id: Uuid,
     /// Fixed-size hash of the random opaque session token.
     pub token_hash: SecretHash,
-    /// Session expiry in PostgreSQL-validated RFC 3339 UTC form.
-    pub expires_at_rfc3339: String,
+    /// Short server-side lifetime in seconds, calculated by PostgreSQL's clock.
+    pub ttl_seconds: i64,
 }
 
 /// One login result with hashed account and source-IP correlation keys.
@@ -266,6 +273,11 @@ pub trait AdminStore: Send + Sync {
         &self,
         principal_id: Uuid,
     ) -> Result<Option<AdminPasswordCredential>, AdminStoreError>;
+    /// Resolves the active password credential for a login identifier.
+    async fn login_credential(
+        &self,
+        username: &AdminUsername,
+    ) -> Result<Option<AdminLoginCredential>, AdminStoreError>;
     /// Persists an opaque administrator session using only its token hash.
     async fn create_session(&self, session: NewAdminSession) -> Result<(), AdminStoreError>;
     /// Resolves an active opaque session from its token hash without accepting raw tokens.
@@ -273,6 +285,18 @@ pub trait AdminStore: Send + Sync {
         &self,
         token_hash: &SecretHash,
     ) -> Result<Option<AdminSession>, AdminStoreError>;
+    /// Counts recent failed attempts for the durable account-and-source-IP throttle key.
+    async fn recent_failed_login_count(
+        &self,
+        account_key_hash: &SecretHash,
+        source_ip_hash: &SecretHash,
+    ) -> Result<u64, AdminStoreError>;
+    /// Revokes a live session, optionally recording its replacement.
+    async fn revoke_session(
+        &self,
+        session_id: Uuid,
+        replacement_session_id: Option<Uuid>,
+    ) -> Result<bool, AdminStoreError>;
     /// Records a durable, non-secret login-attempt result.
     async fn record_login_attempt(&self, attempt: AdminLoginAttempt)
     -> Result<(), AdminStoreError>;
@@ -290,6 +314,7 @@ pub struct FakeAdminStore {
 #[derive(Default)]
 struct FakeAdminState {
     principals: BTreeMap<Uuid, AdminPrincipal>,
+    usernames: BTreeMap<String, Uuid>,
     credentials: BTreeMap<Uuid, AdminPasswordCredential>,
     sessions: BTreeMap<SecretHashKey, AdminSession>,
     login_attempts: Vec<AdminLoginAttempt>,
@@ -347,6 +372,9 @@ impl AdminStore for FakeAdminStore {
                 status: AdminPrincipalStatus::Active,
             },
         );
+        state
+            .usernames
+            .insert(bootstrap.username.0, bootstrap.principal_id);
         state.credentials.insert(
             bootstrap.principal_id,
             AdminPasswordCredential {
@@ -414,6 +442,22 @@ impl AdminStore for FakeAdminStore {
             .cloned())
     }
 
+    async fn login_credential(
+        &self,
+        username: &AdminUsername,
+    ) -> Result<Option<AdminLoginCredential>, AdminStoreError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| AdminStoreError::Unavailable)?;
+        Ok(state
+            .usernames
+            .get(&username.0)
+            .and_then(|id| state.credentials.get(id))
+            .cloned()
+            .map(|credential| AdminLoginCredential { credential }))
+    }
+
     async fn create_session(&self, session: NewAdminSession) -> Result<(), AdminStoreError> {
         let mut state = self
             .state
@@ -453,6 +497,41 @@ impl AdminStore for FakeAdminStore {
             .sessions
             .get(&SecretHashKey::from(token_hash))
             .copied())
+    }
+
+    async fn recent_failed_login_count(
+        &self,
+        account_key_hash: &SecretHash,
+        source_ip_hash: &SecretHash,
+    ) -> Result<u64, AdminStoreError> {
+        Ok(self
+            .state
+            .lock()
+            .map_err(|_| AdminStoreError::Unavailable)?
+            .login_attempts
+            .iter()
+            .filter(|attempt| {
+                attempt.outcome == AdminLoginOutcome::Failed
+                    && &attempt.account_key_hash == account_key_hash
+                    && &attempt.source_ip_hash == source_ip_hash
+            })
+            .count() as u64)
+    }
+
+    async fn revoke_session(
+        &self,
+        session_id: Uuid,
+        _replacement_session_id: Option<Uuid>,
+    ) -> Result<bool, AdminStoreError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| AdminStoreError::Unavailable)?;
+        let key = state
+            .sessions
+            .iter()
+            .find_map(|(key, session)| (session.id == session_id).then(|| key.clone()));
+        Ok(key.is_some_and(|key| state.sessions.remove(&key).is_some()))
     }
 
     async fn record_login_attempt(
@@ -525,7 +604,7 @@ mod tests {
                 id: Uuid::new_v4(),
                 principal_id,
                 token_hash: token_hash.clone(),
-                expires_at_rfc3339: "2035-01-01T00:00:00Z".to_owned(),
+                ttl_seconds: 60,
             })
             .await
             .unwrap();
@@ -555,7 +634,7 @@ mod tests {
                     id: Uuid::new_v4(),
                     principal_id,
                     token_hash: SecretHash::new([5; 32]),
-                    expires_at_rfc3339: "2035-01-01T00:00:00Z".to_owned(),
+                    ttl_seconds: 60,
                 })
                 .await,
             Err(AdminStoreError::NotFound)

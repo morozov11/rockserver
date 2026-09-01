@@ -12,7 +12,10 @@ use axum::{
 };
 use serde_json::json;
 
-use crate::{persistence::PostgresAccountStore, search::SearchService, voice::SpeechRecognizers};
+use crate::{
+    admin::AdminStore, persistence::PostgresAccountStore, search::SearchService,
+    voice::SpeechRecognizers,
+};
 
 use super::{
     transport::{constant_time_eq, error_response, retry_after},
@@ -38,6 +41,7 @@ pub(super) struct AppState {
     pub(super) voice_command_timeout: Duration,
     pub(super) api_bearer_token: String,
     pub(super) account_store: Option<PostgresAccountStore>,
+    pub(super) admin_store: Option<Arc<dyn AdminStore>>,
     pub(super) trusted_proxy_token: Option<String>,
     pub(super) public_limits: Arc<Mutex<PublicLimitState>>,
 }

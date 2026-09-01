@@ -21,6 +21,10 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
     for path in [
         "/health/live",
         "/health/ready",
+        "/v1/admin/auth/login",
+        "/v1/admin/auth/refresh",
+        "/v1/admin/auth/logout",
+        "/v1/admin/session",
         "/v1/auth/device-session",
         "/v1/auth/browser-logout",
         "/v1/browser/account",
@@ -120,6 +124,21 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         value_at(&document, "components/securitySchemes/RockCastBearer").is_some(),
         "the RockCast Bearer scheme must be declared"
     );
+    for path in [
+        "/v1/admin/auth/refresh",
+        "/v1/admin/auth/logout",
+        "/v1/admin/session",
+    ] {
+        assert!(
+            value_at(&document, "paths")
+                .and_then(|paths| paths.get(path))
+                .and_then(Value::as_mapping)
+                .and_then(|operations| operations.values().next())
+                .and_then(|operation| operation.get("security"))
+                .is_some(),
+            "{path} must retain the separate admin Bearer boundary"
+        );
+    }
     assert_eq!(
         value_at(&document, "paths")
             .and_then(|paths| paths.get("/v1/voice/command"))
