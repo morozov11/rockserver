@@ -1,6 +1,13 @@
 # Project status
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
+
+## Codex workflow policy (2026-09-02)
+
+RockServer Codex tasks must use only the primary checkout `C:\repos\rockserver` on
+branch `master`. Separate Git worktrees for this repository are no longer allowed by
+policy. The rule is recorded in `.cursor/rules/master-workflow.mdc` and
+`docs/codex-project-context.md`.
 
 ## RS-ADMIN-006 SPA administrator console (implemented locally, 2026-09-01)
 
@@ -133,6 +140,14 @@ or client behaviour changed.
 The RS-ADMIN-005 backlog does not include obsolete RockCast machine credentials:
 current RockCast product routes are public and user identity is handled through
 pairing.
+
+## Station icons (deferred, 2026-09-01)
+
+The approved future design remains in `docs/roadmap/station-icons.md` and the
+ordered `RS-ICON-*` backlog in `docs/codex-project-context.md`. The owner has
+deferred implementation; no icon task may begin until a new explicit request.
+No icon endpoint, server-owned `faviconUrl`, storage, downloader or sync job is
+implemented by this decision.
 
 ## Documentation cleanup (2026-09-01)
 
@@ -1237,3 +1252,25 @@ PostgreSQL, LLM, SpeechKit, and ONNX cases remain ignored behind their explicit 
 
 Local Cargo concurrency is capped at two jobs via `.cargo/config.toml` to reduce CPU and memory
 pressure during builds; acceptance checks in this run used explicit `--jobs 1` sequentially.
+
+## Future device-control roadmap (planned, 2026-09-02)
+
+The planned architecture and ordered backlog are stored in
+`docs/roadmap/device-control-rockcast-esp32.md` and
+`docs/roadmap/device-control-tasks.md`. They now cover synchronous and asynchronous
+speech output, durable server-side operations, timers, a read-only weather provider,
+TTS/audio delivery, and allowlisted device actions in addition to RockCast, ESP32
+sensors/displays/voice, and Home Assistant. This is planning documentation only: no
+device-control endpoint, scheduler, weather provider, TTS path, or asynchronous delivery
+is implemented by this change.
+
+The roadmap reuses the implemented account-owned `devices`, pairing requests, durable
+device secret, native access-session renewal, `GET /v1/devices`, and device revocation.
+It does not introduce a second device table, pairing flow, or RockCast machine credential;
+new control-plane persistence is linked to the existing `devices.id`.
+
+Verification for this documentation update: embedded roadmap JSON examples and the
+continuous DC-000 through DC-038 task sequence were validated; `cargo fmt --check`,
+strict all-target/all-feature Clippy, and `cargo test` passed. The regular suite
+included 113 library tests and the listed binary/integration suites; external
+PostgreSQL, Yandex, SpeechKit, and asset-dependent tests remained ignored.

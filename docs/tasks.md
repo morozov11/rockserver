@@ -1,5 +1,14 @@
 # Task log
 
+## Codex master-only workflow — 2026-09-02
+
+- Goal: require Codex to work only in the primary RockServer checkout on `master`.
+- Result: `.cursor/rules/master-workflow.mdc` and `docs/codex-project-context.md` now
+  forbid creating or using separate Git worktrees for RockServer and require switching
+  to `C:\repos\rockserver` on `master` before any edit.
+- Checks: documentation-only change; no code or deploy checks run.
+- Status: **documented.**
+
 ## Local administrator launcher — 2026-09-01
 
 - Goal: provide a simple host-based launcher for RockServer plus local administrator SPA hosting
@@ -1626,3 +1635,47 @@
 - Checks: targeted reference scan for every removed filename and `git diff --check`.
 - Status: **complete; no code, API, migration, deployment, staging, or client
   behaviour changed.**
+
+## RS-ICON — 2026-09-01 — direction deferred
+
+- Decision: retain the approved station-icon architecture in
+  `docs/roadmap/station-icons.md` and the ordered `RS-ICON-*` backlog in
+  `docs/codex-project-context.md`, but defer every implementation task.
+- Scope: no migration, storage, downloader, sync job, endpoint, public
+  `faviconUrl`, client change, deployment or staging data operation.
+- Status: **deferred until a new explicit owner request.**
+
+## DOC-DEVICE-ROADMAP-001 — 2026-09-02 — asynchronous speech and server operations
+
+- Goal: extend the future device-control plan so a remote/control surface can play
+  both immediate and asynchronous RockServer speech, including timer completion.
+- Result: expanded the architecture with `speech_output`, durable operations and
+  scheduler triggers, an allowlisted server executor registry, timer and weather
+  use cases, provider-neutral TTS, temporary audio assets, a delivery outbox,
+  playback acknowledgements, destination/fallback/expiry policy, and composed
+  speech/display/device actions. Expanded the executable backlog through DC-038.
+- Scope: documentation only; no API, source, migration, provider, deployment,
+  firmware, client, timer, weather, TTS, or runtime behaviour changed.
+- Checks: reviewed roadmap dependency order and lifecycle separation; validated
+  all four embedded JSON examples and sequential DC-000 through DC-038 numbering.
+  `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`
+  passed; external PostgreSQL, Yandex, SpeechKit, and asset-dependent tests
+  remained ignored.
+- Status: **complete.**
+
+## DOC-DEVICE-ROADMAP-002 — 2026-09-02 — reuse existing account-device identity
+
+- Goal: align the future device-control roadmap with the account, pairing, device
+  session, inventory and revocation flows already implemented in RockServer.
+- Result: removed the proposed `device_pairings` persistence and every task that
+  would recreate pairing. The plan now uses the existing `devices.id`, durable
+  device secret, `/v1/auth/device-session`, `/v1/devices` and revoke semantics;
+  only capabilities, presence, entities, surfaces, state and routing are additive.
+- Scope: documentation only; no API, source, migration, account/device row,
+  credential, session, pairing request, client or runtime behaviour changed.
+- Checks: targeted comparison with migrations 0012, 0013 and 0017, the current
+  OpenAPI account/device endpoints, and the updated roadmap/task references;
+  all four embedded JSON examples and DC-000 through DC-038 numbering validated;
+  `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`
+  passed. External PostgreSQL and credential/provider tests remained ignored.
+- Status: **complete.**

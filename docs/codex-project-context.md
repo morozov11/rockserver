@@ -6,7 +6,7 @@
 > описывает актуальные решения и намерения, а не заменяет код, миграции, OpenAPI
 > или `AGENTS.md`.
 >
-> **Актуальность:** 2026-09-01. Если код или утверждённые документы ниже им
+> **Актуальность:** 2026-09-02. Если код или утверждённые документы ниже им
 > противоречат, приоритет имеют: (1) безопасность и `AGENTS.md`, (2) фактический
 > код и действующий OpenAPI, (3) этот контекст, (4) старые отчёты и обсуждения.
 
@@ -184,16 +184,16 @@ Bearer access token held only in browser memory**, not `localStorage`.
   build/test/dependency install while another Codex-started build is running.
 - **Никогда не запускать компиляцию проектов параллельно.** Перед `cargo`, Gradle,
   npm/pnpm, Docker image build или любой проверкой, которая компилирует код,
-  дождаться и проверить результат предыдущей Codex-задачи такого типа — в том
-  числе если она работает в другом RockServer/RockCast/RockMobile worktree.
+  дождаться и проверить результат предыдущей Codex-задачи такого типа.
 - Before editing, inspect dirty state; preserve unrelated user changes. Do not
   deploy, mutate staging data, run an irreversible cleanup or expose a secret
   unless the user explicitly authorizes that action.
-- **Новые Codex-задачи по умолчанию выполняются непосредственно в текущем
-  `C:\repos\rockserver` checkout на `master`, без создания отдельного worktree.**
-  Перед началом обязательно проверить `git status`, сохранить чужие изменения и
-  не менять ветку/не создавать commit без явного требования задачи. Worktree
-  допустим только по отдельной явной просьбе владельца.
+- **Все Codex-задачи по RockServer выполняются только в основном checkout
+  `C:\repos\rockserver` на ветке `master`.** Отдельные Git worktree для этого
+  репозитория не создавать и не использовать. Перед началом проверить
+  `git status` и `git branch --show-current`; если активный каталог или ветка не
+  совпадают с этим правилом, перейти в основной checkout на `master` до любых
+  правок. Не менять ветку и не создавать commit без явного требования задачи.
 
 ## Ordered execution backlog
 
@@ -212,6 +212,11 @@ Each task begins by re-validating its status and dependencies.
 
 ### RS-ICON
 
+> **Статус направления:** отложено владельцем 2026-09-01. План ниже сохраняется
+> как утверждённое будущее направление, но ни одну `RS-ICON-*` задачу нельзя
+> начинать без нового явного запроса владельца. Текущие client-side favicon
+> fallback-механизмы остаются переходным поведением.
+
 | ID | Status | Scope and acceptance boundary |
 |---|---|---|
 | RS-ICON-001 | Complete (documentation) | Contract is recorded in `docs/roadmap/station-icons.md` step 0. Re-check it against OpenAPI/DTOs before code; it is not live behaviour. |
@@ -227,10 +232,10 @@ Each task begins by re-validating its status and dependencies.
 | RS-ICON-011 | Planned; depends on RS-ADMIN-003/004 | Expose protected admin import/sync controls and durable job progress/history. A UI action starts a background bounded job and polls persisted state; it must never execute the full import inside one HTTP request. |
 | RS-ICON-012 | Deferred | Manual per-station override/upload/refresh/remove. It must never be overwritten by automatic source sync; define upload validation, audit and deletion semantics first. |
 
-Recommended sequencing: complete RS-ADMIN-001..004 before any state-changing
-admin UI. RS-ICON-002..010 may be developed as bounded server/CLI work in their
-listed order; RS-ICON-011 follows both tracks. Do not start RS-ICON-012 without
-an explicit product/security decision.
+Recommended sequencing after the owner reactivates the icon direction:
+RS-ICON-002..010 proceed as bounded server/CLI work in listed order;
+RS-ICON-011 follows the admin and icon foundations. Do not start RS-ICON-012
+without an explicit product/security decision.
 
 ## Start prompt for a future Codex task
 
@@ -243,7 +248,7 @@ task's linked roadmap/design document, and inspect the actual implementation.
 
 Treat the code and current OpenAPI as the source of truth for what is already
 implemented. Do not duplicate completed work. Keep the change limited to the
-task, preserve unrelated worktree changes, and do not deploy or mutate staging.
+task, preserve unrelated working-tree changes, and do not deploy or mutate staging.
 
 Do not run compilation, build, compiling test, or dependency-install commands
 in parallel with another Codex-started command of that type in any project.
@@ -254,9 +259,10 @@ test against a disposable database using TEST_DATABASE_URL. Unit tests, mocks
 and in-memory fakes do not replace that check. State availability and result of
 the disposable-database test in the final report.
 
-Work directly in the current C:\repos\rockserver master checkout. Do not create
-or use a separate worktree unless the owner explicitly asks for one; inspect and
-preserve unrelated working-tree changes before editing.
+Work only in the primary C:\repos\rockserver checkout on branch master. Do not
+create or use a separate Git worktree for RockServer; if you are elsewhere,
+switch to that checkout before editing. Inspect and preserve unrelated
+working-tree changes before editing.
 
 Implement the smallest correct slice, update the required documentation and
 contract/tests, run the required checks, then report: decision made, files

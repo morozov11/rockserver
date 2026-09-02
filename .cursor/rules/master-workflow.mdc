@@ -1,10 +1,10 @@
 ---
-description: Keep RockServer changes on the master branch
+description: Keep RockServer changes on the master branch in the primary checkout
 alwaysApply: true
 ---
 
 # Master branch workflow
 
-- Perform all RockServer implementation, test, documentation, and configuration changes directly on `master`.
-- Do not create or use feature branches or detached-HEAD commits for this repository unless the user explicitly overrides this rule.
-- Before editing, verify that the active worktree is on `master`; if it is not, move the work to the primary `master` worktree before making changes.
+- Perform all RockServer implementation, test, documentation, and configuration changes only in the primary checkout `C:\repos\rockserver` on branch `master`.
+- Do not create, attach, or use separate Git worktrees for this repository. If the active directory is not the primary checkout or not on `master`, stop and switch there before editing.
+- Do not create or use feature branches or detached-HEAD commits for this repository unless the user explicitly overrides this rule in the current task.
