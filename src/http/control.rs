@@ -10,6 +10,7 @@ use axum::{
     http::HeaderMap,
     response::Response,
 };
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use uuid::Uuid;
@@ -27,6 +28,111 @@ use super::{
 
 const MAX_FRAME_BYTES: usize = 65_536;
 const MAX_PAYLOAD_BYTES: usize = 61_440;
+
+/// Typed client envelope shared by the v1 messages accepted in this lifecycle stage.
+#[derive(Deserialize)]
+struct ClientEnvelope<T> {
+    protocol_version: u8,
+    message_id: Uuid,
+    #[serde(rename = "type")]
+    kind: String,
+    sent_at: String,
+    payload: T,
+}
+
+/// Typed server envelope shared by v1 replies emitted in this lifecycle stage.
+#[derive(Serialize)]
+struct ServerEnvelope<'a, T> {
+    protocol_version: u8,
+    message_id: Uuid,
+    #[serde(rename = "type")]
+    kind: &'a str,
+    sent_at: String,
+    payload: T,
+}
+
+/// Client-supported major protocol versions.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct HelloPayload {
+    supported_protocol_versions: Vec<u8>,
+}
+
+/// Bounded registration metadata; manifest semantics are intentionally deferred to DC-008.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RegisterPayload {
+    device_type: String,
+    app_version: String,
+    manifest: serde_json::Map<String, Value>,
+}
+
+/// Server-owned control-plane limits sent after version negotiation.
+#[derive(Serialize)]
+struct DeviceControlLimits {
+    max_json_frame_bytes: u32,
+    max_payload_bytes: u32,
+    max_capabilities: u8,
+    max_entities: u16,
+    max_surfaces: u8,
+    max_directory_devices: u8,
+    heartbeat_interval_seconds: u8,
+    offline_ttl_seconds: u8,
+    max_in_flight_per_connection: u8,
+    max_in_flight_per_target_device: u8,
+    default_command_timeout_seconds: u8,
+    max_command_timeout_seconds: u8,
+    command_idempotency_window_seconds: u32,
+    max_stream_redirects: u8,
+}
+
+/// Version-negotiation reply.
+#[derive(Serialize)]
+struct WelcomePayload {
+    selected_protocol_version: u8,
+    connection_id: Uuid,
+    registration_deadline_seconds: u8,
+    limits: DeviceControlLimits,
+}
+
+/// Registration acknowledgement with only server-derived identity fields.
+#[derive(Serialize)]
+struct RegisteredPayload {
+    connection_id: Uuid,
+    authenticated_user_id: Uuid,
+    authenticated_device_id: Uuid,
+    granted_scopes: [&'static str; 2],
+    heartbeat_interval_seconds: u8,
+    offline_ttl_seconds: u8,
+    require_full_state: bool,
+}
+
+/// Client heartbeat payload.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct HeartbeatPayload {
+    sequence: u64,
+}
+
+/// Server heartbeat acknowledgement.
+#[derive(Serialize)]
+struct HeartbeatAckPayload {
+    sequence: u64,
+    server_time: String,
+}
+
+/// Safe protocol error body.
+#[derive(Serialize)]
+struct ProtocolErrorPayload<'a> {
+    error: ProtocolError<'a>,
+}
+
+/// Safe fixed error details that never include credentials or raw parser errors.
+#[derive(Serialize)]
+struct ProtocolError<'a> {
+    code: &'a str,
+    message: &'a str,
+}
 
 /// Authenticates then upgrades the canonical device-control WebSocket endpoint.
 pub(super) async fn connect(
@@ -82,8 +188,14 @@ async fn run(
     timing: super::state::ControlTiming,
 ) {
     let connection_id = Uuid::new_v4();
-    match receive_envelope(&mut socket, timing.registration_deadline).await {
-        Ok(envelope) if hello_supports_v1(&envelope) => {}
+    match receive_message::<HelloPayload>(
+        &mut socket,
+        timing.registration_deadline,
+        "protocol.hello",
+    )
+    .await
+    {
+        Ok(envelope) if valid_hello(&envelope.payload) => {}
         Ok(_) => {
             let _ = protocol_close(&mut socket, "unsupported_protocol_version", 1002).await;
             return;
@@ -97,9 +209,29 @@ async fn run(
             return;
         }
     }
-    if send_envelope(&mut socket, "protocol.welcome", json!({"selected_protocol_version":1,"connection_id":connection_id,"registration_deadline_seconds":10,"limits":limits()})).await.is_err() { return; }
-    let register = match receive_envelope(&mut socket, timing.registration_deadline).await {
-        Ok(envelope) if is_registration(&envelope) => envelope,
+    if send_envelope(
+        &mut socket,
+        "protocol.welcome",
+        WelcomePayload {
+            selected_protocol_version: 1,
+            connection_id,
+            registration_deadline_seconds: 10,
+            limits: limits(),
+        },
+    )
+    .await
+    .is_err()
+    {
+        return;
+    }
+    let register = match receive_message::<RegisterPayload>(
+        &mut socket,
+        timing.registration_deadline,
+        "device.register",
+    )
+    .await
+    {
+        Ok(envelope) => envelope,
         Err(ProtocolParseError::TooLarge) => {
             let _ = protocol_close(&mut socket, "frame_too_large", 1009).await;
             return;
@@ -109,7 +241,7 @@ async fn run(
             return;
         }
     };
-    if !valid_registration(&register) {
+    if !valid_registration(&register.payload) {
         let _ = protocol_close(&mut socket, "invalid_message", 1007).await;
         return;
     }
@@ -121,8 +253,29 @@ async fn run(
         replacement,
         std::time::Instant::now(),
     );
-    if send_envelope(&mut socket, "device.registered", json!({"connection_id":connection_id,"authenticated_user_id":principal.user_id,"authenticated_device_id":principal.device_id,"granted_scopes":["device.directory.read","media.control"],"heartbeat_interval_seconds":20,"offline_ttl_seconds":60,"require_full_state":true})).await.is_err() {
-        registry.disconnect(principal.device_id, connection_id, DisconnectReason::TransportLost, std::time::Instant::now()); return;
+    if send_envelope(
+        &mut socket,
+        "device.registered",
+        RegisteredPayload {
+            connection_id,
+            authenticated_user_id: principal.user_id,
+            authenticated_device_id: principal.device_id,
+            granted_scopes: ["device.directory.read", "media.control"],
+            heartbeat_interval_seconds: 20,
+            offline_ttl_seconds: 60,
+            require_full_state: true,
+        },
+    )
+    .await
+    .is_err()
+    {
+        registry.disconnect(
+            principal.device_id,
+            connection_id,
+            DisconnectReason::TransportLost,
+            std::time::Instant::now(),
+        );
+        return;
     }
     let mut reason = DisconnectReason::TransportLost;
     let mut last_seen = tokio::time::Instant::now();
@@ -133,16 +286,15 @@ async fn run(
             _ = tokio::time::sleep_until(last_seen + timing.offline_ttl) => { reason = DisconnectReason::HeartbeatExpired; let _ = protocol_close(&mut socket, "heartbeat_expired", 1008).await; break; }
             replacement_reason = replaced.recv() => { reason = replacement_reason.unwrap_or(DisconnectReason::TransportLost); let _ = socket.send(Message::Close(Some(CloseFrame { code: 4001, reason: "replaced".into() }))).await; break; }
             message = socket.recv() => match message {
-                Some(Ok(Message::Text(text))) => match parse_envelope(&text) {
-                    Ok(envelope) if envelope["type"] == "device.heartbeat" => {
-                        let Some(sequence) = envelope["payload"]["sequence"].as_u64() else { let _ = protocol_close(&mut socket, "invalid_message", 1007).await; break; };
+                Some(Ok(Message::Text(text))) => match parse_message::<HeartbeatPayload>(&text, "device.heartbeat") {
+                    Ok(envelope) => {
+                        let sequence = envelope.payload.sequence;
                         last_seen = tokio::time::Instant::now();
                         if !registry.heartbeat(principal.device_id, connection_id, std::time::Instant::now()) { reason = DisconnectReason::Replaced; break; }
-                        if send_envelope(&mut socket, "device.heartbeat_ack", json!({"sequence":sequence,"server_time":now()})).await.is_err() { break; }
+                        if send_envelope(&mut socket, "device.heartbeat_ack", HeartbeatAckPayload { sequence, server_time: now() }).await.is_err() { break; }
                     }
                     Err(ProtocolParseError::TooLarge) => { let _ = protocol_close(&mut socket, "frame_too_large", 1009).await; break; }
                     Err(ProtocolParseError::Invalid) => { let _ = protocol_close(&mut socket, "invalid_message", 1007).await; break; }
-                    _ => { let _ = protocol_close(&mut socket, "unexpected_message", 1008).await; break; }
                 },
                 Some(Ok(Message::Close(_))) => { reason = DisconnectReason::GracefulDisconnect; break; }
                 Some(Ok(Message::Binary(_))) => { let _ = protocol_close(&mut socket, "invalid_message", 1003).await; break; }
@@ -164,81 +316,111 @@ enum ProtocolParseError {
     TooLarge,
 }
 
-async fn receive_envelope(
+async fn receive_message<T>(
     socket: &mut WebSocket,
     timeout: Duration,
-) -> Result<Value, ProtocolParseError> {
+    expected_kind: &str,
+) -> Result<ClientEnvelope<T>, ProtocolParseError>
+where
+    T: DeserializeOwned + Serialize,
+{
     match tokio::time::timeout(timeout, socket.recv()).await {
-        Ok(Some(Ok(Message::Text(text)))) => parse_envelope(&text),
+        Ok(Some(Ok(Message::Text(text)))) => parse_message(&text, expected_kind),
         _ => Err(ProtocolParseError::Invalid),
     }
 }
 
-fn parse_envelope(text: &str) -> Result<Value, ProtocolParseError> {
+fn parse_message<T>(
+    text: &str,
+    expected_kind: &str,
+) -> Result<ClientEnvelope<T>, ProtocolParseError>
+where
+    T: DeserializeOwned + Serialize,
+{
     if text.len() > MAX_FRAME_BYTES {
         return Err(ProtocolParseError::TooLarge);
     }
-    let value: Value = serde_json::from_str(text).map_err(|_| ProtocolParseError::Invalid)?;
-    if value.get("protocol_version").and_then(Value::as_u64) != Some(1)
-        || value
-            .get("message_id")
-            .and_then(Value::as_str)
-            .and_then(|id| Uuid::parse_str(id).ok())
-            .is_none()
-        || value.get("type").and_then(Value::as_str).is_none()
-        || value.get("sent_at").and_then(Value::as_str).is_none()
-        || value
-            .get("payload")
-            .map(|payload| payload.to_string().len() <= MAX_PAYLOAD_BYTES)
-            != Some(true)
+    let message: ClientEnvelope<T> =
+        serde_json::from_str(text).map_err(|_| ProtocolParseError::Invalid)?;
+    if message.protocol_version != 1
+        || message.kind != expected_kind
+        || OffsetDateTime::parse(&message.sent_at, &Rfc3339).is_err()
+        || serde_json::to_vec(&message.payload)
+            .map_err(|_| ProtocolParseError::Invalid)?
+            .len()
+            > MAX_PAYLOAD_BYTES
     {
         return Err(ProtocolParseError::Invalid);
     }
-    Ok(value)
+    let _ = message.message_id;
+    Ok(message)
 }
 
-fn hello_supports_v1(value: &Value) -> bool {
-    value["type"] == "protocol.hello"
-        && value["payload"]["supported_protocol_versions"]
-            .as_array()
-            .is_some_and(|versions| {
-                versions.len() <= 4 && versions.iter().any(|version| version.as_u64() == Some(1))
-            })
+fn valid_hello(payload: &HelloPayload) -> bool {
+    (1..=4).contains(&payload.supported_protocol_versions.len())
+        && payload.supported_protocol_versions.contains(&1)
 }
-fn is_registration(value: &Value) -> bool {
-    value["type"] == "device.register"
-}
-fn valid_registration(value: &Value) -> bool {
-    let payload = &value["payload"];
-    payload.as_object().is_some_and(|payload| {
-        payload.len() == 3
-            && payload
-                .get("device_type")
-                .and_then(Value::as_str)
-                .is_some_and(|value| !value.is_empty() && value.len() <= 64)
-            && payload
-                .get("app_version")
-                .and_then(Value::as_str)
-                .is_some_and(|value| !value.is_empty() && value.len() <= 64)
-            && payload.get("manifest").is_some_and(Value::is_object)
-    })
+
+fn valid_registration(payload: &RegisterPayload) -> bool {
+    !payload.device_type.is_empty()
+        && payload.device_type.len() <= 64
+        && !payload.app_version.is_empty()
+        && payload.app_version.len() <= 64
 }
 fn now() -> String {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .expect("RFC3339 formatter is valid")
 }
-fn limits() -> Value {
-    json!({"max_json_frame_bytes":65536,"max_payload_bytes":61440,"max_capabilities":32,"max_entities":256,"max_surfaces":16,"max_directory_devices":50,"heartbeat_interval_seconds":20,"offline_ttl_seconds":60,"max_in_flight_per_connection":16,"max_in_flight_per_target_device":8,"default_command_timeout_seconds":10,"max_command_timeout_seconds":30,"command_idempotency_window_seconds":86400,"max_stream_redirects":5})
+fn limits() -> DeviceControlLimits {
+    DeviceControlLimits {
+        max_json_frame_bytes: 65_536,
+        max_payload_bytes: 61_440,
+        max_capabilities: 32,
+        max_entities: 256,
+        max_surfaces: 16,
+        max_directory_devices: 50,
+        heartbeat_interval_seconds: 20,
+        offline_ttl_seconds: 60,
+        max_in_flight_per_connection: 16,
+        max_in_flight_per_target_device: 8,
+        default_command_timeout_seconds: 10,
+        max_command_timeout_seconds: 30,
+        command_idempotency_window_seconds: 86_400,
+        max_stream_redirects: 5,
+    }
 }
-async fn send_envelope(socket: &mut WebSocket, kind: &str, payload: Value) -> Result<(), ()> {
-    socket.send(Message::Text(json!({"protocol_version":1,"message_id":Uuid::new_v4(),"type":kind,"sent_at":now(),"payload":payload}).to_string().into())).await.map_err(|_| ())
+async fn send_envelope<T: Serialize>(
+    socket: &mut WebSocket,
+    kind: &str,
+    payload: T,
+) -> Result<(), ()> {
+    let message = ServerEnvelope {
+        protocol_version: 1,
+        message_id: Uuid::new_v4(),
+        kind,
+        sent_at: now(),
+        payload,
+    };
+    socket
+        .send(Message::Text(
+            serde_json::to_string(&message)
+                .expect("device-control server DTO serializes")
+                .into(),
+        ))
+        .await
+        .map_err(|_| ())
 }
 async fn protocol_close(socket: &mut WebSocket, code: &str, close_code: u16) -> Result<(), ()> {
     let _ = send_envelope(
         socket,
         "protocol.error",
-        json!({"error":{"code":code,"message":"Device-control protocol error."}}),
+        ProtocolErrorPayload {
+            error: ProtocolError {
+                code,
+                message: "Device-control protocol error.",
+            },
+        },
     )
     .await;
     socket

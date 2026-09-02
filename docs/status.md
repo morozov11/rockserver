@@ -1416,6 +1416,8 @@ bounded owner-scoped presence history and snapshots. Registration makes a device
 heartbeats update server-observed activity and a 60-second TTL produces one offline transition.
 Each reconnect has a fresh connection ID. Registering a newer connection atomically replaces the
 old generation; stale cleanup is guarded by connection ID and cannot remove the new connection.
+The transport uses typed envelope and payload DTOs for hello, register, heartbeat and every server
+reply; the register manifest stays only a bounded opaque object until DC-008 defines its semantics.
 
 The router's graceful-shutdown path broadcasts a controlled close to live control sockets; their
 registry cleanup remains generation-guarded. Existing owner-authorized device revoke paths also

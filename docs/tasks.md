@@ -1867,6 +1867,9 @@
   generation. Heartbeats refresh server time and TTL expiry removes the active generation.
   Existing owner-authorized revoke paths notify the active registry entry after durable revoke;
   graceful process shutdown broadcasts a controlled close to active control sockets.
+- Follow-up: replaced manual `serde_json::Value` field access in the control lifecycle with typed
+  envelope/payload DTOs. Only the structurally validated, intentionally unprocessed register
+  manifest remains opaque pending DC-008.
 - Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
   `cargo test`, and `git diff --check` passed. Local WebSocket tests cover native 401/503 before
   upgrade, hello/welcome/register, server-derived identity, reconnect replacement/stale cleanup,
