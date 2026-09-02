@@ -1,5 +1,15 @@
 # Task log
 
+## Graphify agent policy cleanup — 2026-09-02
+
+- Goal: remove Graphify from agent instructions after deleting the global skill.
+- Scope: delete `.cursor/rules/graphify-usage.mdc` and the Graphify section in `AGENTS.md`;
+  update status/task docs. No application code changed.
+- Result: Cursor no longer loads a RockServer Graphify usage rule; contributor instructions no
+  longer prescribe Graphify workflow.
+- Checks: documentation-only change; no code checks run.
+- Status: **complete.**
+
 ## DC-004 — 2026-09-02 — device-control transport-independent domain model
 
 - Goal: implement protocol-v1 domain values and deterministic validation without beginning transport or persistence work.
@@ -1843,3 +1853,23 @@
   passed). PostgreSQL/live-provider/ONNX tests remained explicitly ignored because no disposable
   `TEST_DATABASE_URL` was configured.
 - Status: **complete; DC-007 owns the WebSocket lifecycle and presence implementation.**
+
+## DC-007 — 2026-09-02 — connection registry and presence
+
+- Goal: add the native-authenticated device-control connection lifecycle without creating a new
+  device/session store or implementing DC-008 state hub and DC-010 directory APIs.
+- Result: `/api/v1/devices/connect` now upgrades only after the DC-006 native Bearer guard passes;
+  malformed/invalid credentials receive 401 and lookup unavailability receives 503 before upgrade.
+  The WebSocket requires hello, emits welcome, accepts a structurally bounded register frame, and
+  emits server-derived registered identity. The process-local registry uses bounded replacement
+  channels and owner-scoped bounded event history. A new registration atomically replaces the old
+  generation; connection-ID guarded cleanup emits at most one offline transition for the active
+  generation. Heartbeats refresh server time and TTL expiry removes the active generation.
+  Existing owner-authorized revoke paths notify the active registry entry after durable revoke;
+  graceful process shutdown broadcasts a controlled close to active control sockets.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
+  `cargo test`, and `git diff --check` passed. Local WebSocket tests cover native 401/503 before
+  upgrade, hello/welcome/register, server-derived identity, reconnect replacement/stale cleanup,
+  graceful and transport-loss cleanup, heartbeat/TTL, invalid/binary/timeout frames and shutdown;
+  registry tests cover owner isolation and revocation.
+- Status: **complete.**

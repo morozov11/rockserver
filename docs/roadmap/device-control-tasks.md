@@ -135,7 +135,7 @@ renewal остаётся исключительно `POST /api/v1/auth/device-se
 controlled `401`/`503`, однако самого WebSocket upgrade, register, registry, heartbeat, TTL и
 presence нет: это точная граница DC-007.
 
-### DC-007 — реализовать connection registry и presence
+### DC-007 — реализовать connection registry и presence — выполнено (2026-09-02)
 
 **Репозиторий:** RockServer.  
 **Зависимости:** DC-006.
@@ -144,7 +144,15 @@ presence нет: это точная граница DC-007.
 - Связать stable `device_id` с единственным active connection policy либо явно определить multi-connection behavior.
 - Реализовать server-controlled TTL, offline event и reconnect с новым `connection_id`.
 
-**Приёмка:** fake device корректно проходит connect/reconnect; потеря heartbeat переводит его offline ровно один раз; чужой controller не видит событие.
+**Приёмка (выполнено):** runtime `GET /api/v1/devices/connect` выполняет native Bearer auth до
+upgrade (401 invalid/revoked, 503 unavailable), v1 hello/welcome/register handshake и bounded
+text-frame validation. Успешная регистрация создаёт server-issued `connection_id` и online presence;
+register не принимает identity fields. Per-user process-local registry имеет bounded replacement
+channel/history, atomic single-active policy и connection-ID guard против stale cleanup. Heartbeat
+обновляет только server-observed `last_seen`; TTL, graceful close, transport loss, revoke и server
+shutdown производят ровно один offline transition active generation. Transport tests покрывают
+handshake/auth, reconnect, heartbeat/TTL, invalid/binary/timeout frames, identity injection,
+owner isolation и shutdown cleanup. DC-008/DC-010 по-прежнему не реализованы.
 
 ### DC-008 — реализовать manifests и state hub
 

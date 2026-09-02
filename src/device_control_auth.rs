@@ -28,7 +28,7 @@ pub enum DeviceControlAuthenticationError {
 /// administrator Bearers cannot resolve because the supplied resolver searches native sessions only.
 pub async fn authenticate_device_control(
     authorization: Option<&str>,
-    resolver: &impl NativeSessionResolver,
+    resolver: &(impl NativeSessionResolver + ?Sized),
 ) -> Result<DeviceControlPrincipal, DeviceControlAuthenticationError> {
     let Some(token) = authorization
         .and_then(|value| value.strip_prefix("Bearer "))

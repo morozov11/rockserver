@@ -14,6 +14,8 @@ pub mod config;
 pub mod device_control;
 /// Authentication foundation for future device-control ingress.
 pub mod device_control_auth;
+/// Process-local live connection registry and owner-scoped presence transitions.
+pub mod device_control_presence;
 /// HTTP routes and transport types.
 pub mod http;
 /// Deterministic prebuilt SQLite export for RockMobile's extended offline catalog.
@@ -49,7 +51,10 @@ pub async fn serve(
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown)
+        .with_graceful_shutdown(async move {
+            shutdown.await;
+            crate::device_control_presence::signal_control_shutdown();
+        })
         .await
 }
 

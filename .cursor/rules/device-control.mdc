@@ -1,0 +1,23 @@
+---
+description: RockServer device-control milestones and execution constraints
+alwaysApply: true
+---
+
+# RockServer Device Control
+
+- For device-control work, start from `docs/roadmap/device-control-tasks.md`;
+  treat `api/openapi.yaml` as the protocol contract and
+  `docs/roadmap/device-control-rockcast-esp32.md` as architecture context.
+- Reuse existing account pairing, `devices.id`, device secret and native session.
+  Derive device-control identity server-side; never create a second device,
+  pairing, secret or native-session flow.
+- Keep `capabilities`, runtime `state` and `commands` distinct. Roles and
+  capabilities describe availability, not authorization. Enforce user ownership
+  and explicit scopes; Home Assistant credentials stay separate.
+- Do not implement later DC milestones incidentally. Keep WebSocket transport,
+  state, commands and public directory APIs within their assigned tasks.
+- Default workflow is the saved `master` checkout: no worktree, branch, commit
+  or staging unless the user explicitly asks. Preserve unrelated changes.
+- Before completion run relevant `cargo fmt --check`, clippy, tests, OpenAPI
+  checks and `git diff --check`; report any skipped verification. Update roadmap,
+  status and task logs only for acceptance criteria actually completed.

@@ -507,15 +507,15 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
 }
 
 #[test]
-fn device_control_v1_is_planned_bounded_and_fully_linked() {
+fn device_control_v1_is_bounded_and_fully_linked() {
     let document: Value = serde_yaml::from_str(OPENAPI).expect("OpenAPI YAML must parse");
     let paths = document
         .get("paths")
         .expect("OpenAPI paths must be declared");
 
-    for path in [
-        "/api/v1/device-control/directory",
-        "/api/v1/devices/connect",
+    for (path, status) in [
+        ("/api/v1/device-control/directory", "planned"),
+        ("/api/v1/devices/connect", "implemented"),
     ] {
         let operation = paths
             .get(path)
@@ -523,13 +523,13 @@ fn device_control_v1_is_planned_bounded_and_fully_linked() {
             .unwrap_or_else(|| panic!("{path} must define GET"));
         assert_eq!(
             operation.get("x-rockserver-status").and_then(Value::as_str),
-            Some("planned"),
-            "{path} must be machine-marked as planned"
+            Some(status),
+            "{path} must have the expected implementation status"
         );
         let security = operation
             .get("security")
             .and_then(Value::as_sequence)
-            .expect("planned device-control operations must declare security");
+            .expect("device-control operations must declare security");
         assert_eq!(security.len(), 1, "{path} must have one auth alternative");
         let schemes = security[0]
             .as_mapping()

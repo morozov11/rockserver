@@ -13,8 +13,8 @@ use axum::{
 use serde_json::json;
 
 use crate::{
-    admin::AdminStore, persistence::PostgresAccountStore, search::SearchService,
-    voice::SpeechRecognizers,
+    admin::AdminStore, auth::NativeSessionResolver, device_control_presence::ConnectionRegistry,
+    persistence::PostgresAccountStore, search::SearchService, voice::SpeechRecognizers,
 };
 
 use super::{
@@ -26,6 +26,22 @@ const GLOBAL_VOICE_SESSIONS: usize = 100;
 const RATE_WINDOW: Duration = Duration::from_secs(60);
 const RETRY_AFTER_SECONDS: u64 = 60;
 const VOICE_CAPACITY_RETRY_AFTER_SECONDS: u64 = 30;
+
+#[derive(Clone, Copy)]
+/// Server-owned timing policy for a device-control socket.
+pub(super) struct ControlTiming {
+    pub(super) registration_deadline: Duration,
+    pub(super) offline_ttl: Duration,
+}
+
+impl Default for ControlTiming {
+    fn default() -> Self {
+        Self {
+            registration_deadline: Duration::from_secs(10),
+            offline_ttl: Duration::from_secs(60),
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 /// Per-endpoint anonymous request and burst limits.
@@ -45,6 +61,10 @@ pub(super) struct AppState {
     pub(super) trusted_proxy_token: Option<String>,
     pub(super) local_admin_origin: Option<String>,
     pub(super) public_limits: Arc<Mutex<PublicLimitState>>,
+    pub(super) control_registry: ConnectionRegistry,
+    /// Resolver used only by the native device-control ingress before WebSocket upgrade.
+    pub(super) control_session_resolver: Option<Arc<dyn NativeSessionResolver>>,
+    pub(super) control_timing: ControlTiming,
 }
 
 #[derive(Default)]

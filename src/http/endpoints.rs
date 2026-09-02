@@ -28,6 +28,8 @@ mod admin_console;
 mod auth;
 #[path = "catalog.rs"]
 mod catalog;
+#[path = "control.rs"]
+mod control;
 #[path = "control_auth.rs"]
 mod control_auth;
 pub use control_auth::authenticate_control_ingress;
@@ -145,6 +147,9 @@ pub fn router_with_speech_recognizers_and_bearer_token(
         trusted_proxy_token: None,
         local_admin_origin: local_admin_origin_from_env(),
         public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
+        control_registry: Default::default(),
+        control_session_resolver: None,
+        control_timing: Default::default(),
     })
 }
 
@@ -175,6 +180,8 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
     account_store: PostgresAccountStore,
     trusted_proxy_token: impl Into<String>,
 ) -> Router {
+    let control_session_resolver: Arc<dyn crate::auth::NativeSessionResolver> =
+        Arc::new(account_store.clone());
     build_router(AppState {
         search_service,
         speech_recognizers,
@@ -185,6 +192,9 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
         trusted_proxy_token: Some(trusted_proxy_token.into()),
         local_admin_origin: local_admin_origin_from_env(),
         public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
+        control_registry: Default::default(),
+        control_session_resolver: Some(control_session_resolver),
+        control_timing: Default::default(),
     })
 }
 
@@ -198,6 +208,8 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_and_proxy(
     admin_store: PostgresAdminStore,
     trusted_proxy_token: impl Into<String>,
 ) -> Router {
+    let control_session_resolver: Arc<dyn crate::auth::NativeSessionResolver> =
+        Arc::new(account_store.clone());
     build_router(AppState {
         search_service,
         speech_recognizers,
@@ -208,6 +220,9 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_and_proxy(
         trusted_proxy_token: Some(trusted_proxy_token.into()),
         local_admin_origin: local_admin_origin_from_env(),
         public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
+        control_registry: Default::default(),
+        control_session_resolver: Some(control_session_resolver),
+        control_timing: Default::default(),
     })
 }
 
@@ -276,6 +291,10 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/voice/stream",
             axum::routing::get(voice::voice_stream),
+        )
+        .route(
+            "/api/v1/devices/connect",
+            axum::routing::get(control::connect),
         )
         .route(
             "/api/v1/pairing-requests",
@@ -434,6 +453,9 @@ mod tests {
             trusted_proxy_token: None,
             local_admin_origin: None,
             public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
+            control_registry: Default::default(),
+            control_session_resolver: None,
+            control_timing: Default::default(),
         });
         let denied = app
             .clone()
@@ -500,6 +522,9 @@ mod tests {
             trusted_proxy_token: None,
             local_admin_origin: None,
             public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
+            control_registry: Default::default(),
+            control_session_resolver: None,
+            control_timing: Default::default(),
         });
         let refresh = Request::post("/api/v1/admin/auth/refresh")
             .header(header::AUTHORIZATION, format!("Bearer {token}"))
@@ -580,6 +605,9 @@ mod tests {
             trusted_proxy_token: None,
             local_admin_origin: Some("http://127.0.0.1:3000".to_owned()),
             public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
+            control_registry: Default::default(),
+            control_session_resolver: None,
+            control_timing: Default::default(),
         });
         let login = |password: &str| {
             Request::post("/api/v1/admin/auth/login")

@@ -333,7 +333,12 @@ pub(super) async fn revoke_browser_device(
         );
     };
     match store.revoke_owned_device(user_id, device_id).await {
-        Ok(true) => with_request_id(StatusCode::NO_CONTENT.into_response(), &request_id),
+        Ok(true) => {
+            state
+                .control_registry
+                .revoke(user_id, device_id, std::time::Instant::now());
+            with_request_id(StatusCode::NO_CONTENT.into_response(), &request_id)
+        }
         Ok(false) => error_response(
             StatusCode::NOT_FOUND,
             "device_not_found",
@@ -585,7 +590,12 @@ pub(super) async fn revoke_device(
         return unauthorized_response(&request_id);
     };
     match store.revoke_owned_device(session.user_id, device_id).await {
-        Ok(true) => with_request_id(StatusCode::NO_CONTENT.into_response(), &request_id),
+        Ok(true) => {
+            state
+                .control_registry
+                .revoke(session.user_id, device_id, std::time::Instant::now());
+            with_request_id(StatusCode::NO_CONTENT.into_response(), &request_id)
+        }
         Ok(false) => error_response(
             StatusCode::NOT_FOUND,
             "device_not_found",

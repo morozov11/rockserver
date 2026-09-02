@@ -15,7 +15,7 @@ use crate::{
 /// 503 before a WebSocket upgrade. This does not implement that upgrade or connection lifecycle.
 pub async fn authenticate_control_ingress(
     headers: &HeaderMap,
-    resolver: &impl NativeSessionResolver,
+    resolver: &(impl NativeSessionResolver + ?Sized),
 ) -> Result<DeviceControlPrincipal, DeviceControlAuthenticationError> {
     authenticate_device_control(
         headers

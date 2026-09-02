@@ -330,9 +330,9 @@ paths:
     get:
       operationId: connectDeviceControl
       summary: Connect an account-owned native device to device-control protocol v1
-      x-rockserver-status: planned
+      x-rockserver-status: implemented
       description: >-
-        Planned WebSocket upgrade; it is not registered by the current runtime. Use TLS/WSS outside
+        WebSocket upgrade. Use TLS/WSS outside
         localhost. The request requires the short-lived RockserverBearer issued by the existing
         native-session flow. RockServer derives authenticated `user_id` and `device_id` from that
         session; registration cannot claim or replace either identity. Pairing proofs, durable
@@ -354,10 +354,15 @@ paths:
       responses:
         "101":
           description: >-
-            Planned Switching Protocols. Text frames conform to the schemas referenced by
+            Switching Protocols. Text frames conform to the schemas referenced by
             `x-websocket-client-messages` and `x-websocket-server-messages`.
         "400": { description: The HTTP request is not a valid WebSocket upgrade request. }
         "401": { $ref: "#/components/responses/AuthenticationRequired" }
+        "503":
+          description: Native-session authentication storage is temporarily unavailable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
         "403":
           description: The authenticated native device is revoked or forbidden without disclosing another target.
           content:

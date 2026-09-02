@@ -2,6 +2,13 @@
 
 Last updated: 2026-09-02
 
+## Graphify agent policy removed (2026-09-02)
+
+The Cursor rule `.cursor/rules/graphify-usage.mdc` was deleted, and the matching Graphify
+section was removed from `AGENTS.md`. The global Graphify agent skill under
+`~/.claude/skills/graphify` was also removed earlier in the same cleanup. Historical mentions
+in older status/task entries are unchanged archival text.
+
 ## DC-004 — device-control domain model (complete, planned runtime, 2026-09-02)
 
 `src/device_control.rs` now exposes the transport-independent protocol-v1 domain layer: separate
@@ -1400,6 +1407,25 @@ pressure during builds; acceptance checks in this run used explicit `--jobs 1` s
 
 ## Future device-control roadmap (planned, 2026-09-02)
 
+## DC-007 — device-control connection registry and presence (complete, 2026-09-02)
+
+`GET /api/v1/devices/connect` now authenticates only the existing native Bearer session before
+WebSocket upgrade. It runs the bounded v1 hello/welcome/register handshake and derives all account
+and device identity from `DeviceControlPrincipal`. A process-local, per-user registry publishes
+bounded owner-scoped presence history and snapshots. Registration makes a device online; server
+heartbeats update server-observed activity and a 60-second TTL produces one offline transition.
+Each reconnect has a fresh connection ID. Registering a newer connection atomically replaces the
+old generation; stale cleanup is guarded by connection ID and cannot remove the new connection.
+
+The router's graceful-shutdown path broadcasts a controlled close to live control sockets; their
+registry cleanup remains generation-guarded. Existing owner-authorized device revoke paths also
+remove the active connection with reason `revoked` after durable revocation succeeds.
+
+This is deliberately not DC-008 or DC-010: manifests/state/telemetry/commands are neither stored
+nor forwarded, and no public controller directory or subscription endpoint exists. Local WebSocket
+transport tests cover native 401/503 before upgrade, handshake, identity injection, reconnect,
+heartbeat/TTL, malformed/binary/timeout handling, transport/graceful cleanup and shutdown.
+
 ## DC-006 — control-plane native authentication foundation (complete, 2026-09-02)
 
 `device_control_auth` reuses the existing native-session lookup rather than creating a control
@@ -1410,12 +1436,10 @@ expired, unknown, revoked, malformed, legacy, administrator, and browser credent
 produce a principal. Lookup failure is distinct and retryable (`Unavailable`), without revoking a
 device or altering its durable secret/binding.
 
-`http::authenticate_control_ingress` is the reusable header extractor for the future
-`/api/v1/devices/connect` upgrade; its caller will map invalid credentials to a generic 401 and
-storage failures to a retryable 503. The endpoint itself, WebSocket upgrade, device registration,
-connection registry, heartbeat, TTL/reconnect and presence remain unimplemented and belong to
-DC-007. `POST /api/v1/auth/device-session` remains the sole access-token renewal flow, and the
-future Home Assistant integration remains a separate credential type.
+`http::authenticate_control_ingress` is the reusable header extractor used by DC-007. It maps
+invalid credentials to a generic 401 and storage failures to a retryable 503 before upgrade.
+`POST /api/v1/auth/device-session` remains the sole access-token renewal flow, and the future Home
+Assistant integration remains a separate credential type.
 
 Verification: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and
 `cargo test` passed (120 library tests, all regular suites). The four OpenAPI contract tests passed
