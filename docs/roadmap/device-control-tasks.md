@@ -94,7 +94,7 @@ capabilities сохраняют extra fields; unknown commands остаются 
 fixed-time freshness, revision replay/conflict/gap и terminal result invariants. HTTP/WebSocket,
 persistence, pairing и provider code не добавлены.
 
-### DC-005 — добавить persistence foundation
+### DC-005 — добавить persistence foundation — выполнено (2026-09-02)
 
 **Репозиторий:** RockServer.  
 **Зависимости:** DC-004.
@@ -104,7 +104,15 @@ persistence, pairing и provider code не добавлены.
 - Хранить provider-native IDs отдельно от публичных IDs; обеспечить tombstone/revocation semantics.
 - Не добавлять бесконечную историю sensor telemetry в MVP.
 
-**Приёмка:** migration проходит на пустой и заполненной БД; repository integration tests подтверждают ownership, revisions, upsert, removal и retention.
+**Приёмка (выполнено):** migration `0021` добавляет только device-owned control projections
+с FK на существующий `devices.id`: current manifest/capabilities/entities/surfaces, latest-only
+device/entity state и bounded command idempotency. PostgreSQL store фильтрует active user и
+non-revoked device внутри read/write transactions; полный manifest tombstones omitted entries,
+а revival разрешён только для идентичной прежней public projection. Revisions возвращают
+accepted/replay/stale/conflict/resync, command fingerprints защищают 24-hour replay window,
+terminal result записывается один раз, а pruning batch-limited и не трогает in-flight records.
+Disposable PostgreSQL integration covers an empty migration chain, populated account/device
+baseline, owner isolation, revocation, manifest/state/command outcomes, constraints and retention.
 
 ## Milestone B — RockServer control plane
 

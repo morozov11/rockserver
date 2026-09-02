@@ -2,6 +2,7 @@
 
 mod account_postgres;
 mod admin_postgres;
+mod device_control_postgres;
 mod embedding_postgres;
 mod import_postgres;
 mod postgres;
@@ -14,6 +15,7 @@ pub use crate::account_cleanup::{
 };
 pub use account_postgres::{AdminDeviceReadModel, PostgresAccountStore};
 pub use admin_postgres::PostgresAdminStore;
+pub use device_control_postgres::PostgresDeviceControlStore;
 pub use embedding_postgres::PostgresEmbeddingStore;
 pub use import_postgres::{OwnedCatalogReplacement, PostgresImportStore};
 pub use postgres::PostgresStationRepository;

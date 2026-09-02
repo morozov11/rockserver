@@ -1804,3 +1804,19 @@
   `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`
   passed. External PostgreSQL and credential/provider tests remained ignored.
 - Status: **complete.**
+
+## DC-005 — 2026-09-02 — device-control persistence foundation (in progress)
+
+- Goal: add the smallest durable PostgreSQL foundation for the DC-004 device-control domain.
+- Result: added migration `0021_add_device_control_persistence.sql`, a domain-facing
+  `DeviceControlStore` boundary, and `PostgresDeviceControlStore`. It uses existing
+  `users`/`devices` ownership and revocation joins, current-only snapshots, manifest tombstones,
+  and a 24-hour terminal-command retention query. No route, authentication wiring, provider
+  identity, device/session model, sensor-history table, or command execution was added.
+- Checks: `cargo check`, `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D
+  warnings`, and `cargo test` passed (117 library tests; opt-in PostgreSQL tests stay ignored by
+  default). With a separately named local Compose project and loopback-only disposable
+  `TEST_DATABASE_URL`, `cargo test --test postgres_integration -- --ignored --exact
+  postgres_device_control_manifest_is_owner_scoped_and_tombstoned --nocapture` passed (1 test).
+  Its container, network, and named volume were removed immediately afterwards.
+- Status: **complete.**

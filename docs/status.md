@@ -1400,6 +1400,24 @@ pressure during builds; acceptance checks in this run used explicit `--jobs 1` s
 
 ## Future device-control roadmap (planned, 2026-09-02)
 
+## DC-005 — device-control persistence foundation (complete, 2026-09-02)
+
+Migration `0021_add_device_control_persistence.sql` adds owner-linked manifest, current
+capability/entity/surface, latest device/entity state, and bounded command-idempotency tables.
+All rows refer to the existing `devices.id`; no HTTP/auth/runtime wiring, provider identity,
+telemetry history, pairing, or device-secret model was added. Manifest replacement tombstones
+omitted projections and command pruning retains terminal records for at least 24 hours.
+
+The `DeviceControlStore` and `PostgresDeviceControlStore` preserve current-only state (no sensor
+history), revision outcomes, active-owner/revocation filtering, safe tombstone revival, and the
+24-hour command idempotency/retention boundary. The contract remains transport-only: no route,
+authentication wiring, presence registry, provider adapter or command execution was introduced.
+
+Verification: a separately named local Compose project supplied a loopback-only disposable
+`TEST_DATABASE_URL`; the focused ignored PostgreSQL case covered migration, populated account/device
+ownership, manifest replacement/revival, latest snapshots, command duplicate/result/pruning,
+constraints and revocation. The container, network and named volume were removed afterwards.
+
 The planned architecture and ordered backlog are stored in
 `docs/roadmap/device-control-rockcast-esp32.md` and
 `docs/roadmap/device-control-tasks.md`. They now cover synchronous and asynchronous
