@@ -9,10 +9,10 @@ const preview = JSON.stringify({ request_id: "00000000-0000-0000-0000-0000000000
 
 /** Serves built UI assets with deterministic, credential-free pairing API responses for browser QA. */
 createServer(async (request, response) => {
-  if (request.url?.startsWith("/v1/pairing-requests/lookup")) {
+  if (request.url?.startsWith("/api/v1/pairing-requests/lookup")) {
     response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }); return response.end(preview);
   }
-  if (request.url === "/v1/auth/browser-session") {
+  if (request.url === "/api/v1/auth/browser-session") {
     if (!authenticated) { response.writeHead(401, { "content-type": "application/json" }); return response.end('{"code":"authentication_required","message":"","request_id":"","details":{}}'); }
     response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }); return response.end('{"account_display_name":"Алексей","csrf_token":"test-csrf"}');
   }

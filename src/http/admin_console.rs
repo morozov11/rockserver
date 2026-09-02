@@ -224,14 +224,20 @@ pub(super) async fn stations(
                 &state,
                 &session,
                 &request_id,
-                "/v1/admin/stations",
+                "/api/v1/admin/stations",
                 AdminRequestOutcome::Succeeded,
                 started,
             )
             .await;
             response
         }
-        Err(_) => unavailable(&state, &session, &request_id, "/v1/admin/stations", started),
+        Err(_) => unavailable(
+            &state,
+            &session,
+            &request_id,
+            "/api/v1/admin/stations",
+            started,
+        ),
     }
 }
 /// Lists a protected device inventory without owner, credential, or device identifiers.
@@ -251,7 +257,13 @@ pub(super) async fn devices(
         Err(response) => return *response,
     };
     let Some(store) = &state.account_store else {
-        return unavailable(&state, &session, &request_id, "/v1/admin/devices", started);
+        return unavailable(
+            &state,
+            &session,
+            &request_id,
+            "/api/v1/admin/devices",
+            started,
+        );
     };
     match store
         .list_admin_devices(i64::from(offset), i64::from(limit) + 1)
@@ -274,14 +286,20 @@ pub(super) async fn devices(
                 &state,
                 &session,
                 &request_id,
-                "/v1/admin/devices",
+                "/api/v1/admin/devices",
                 AdminRequestOutcome::Succeeded,
                 started,
             )
             .await;
             response
         }
-        Err(_) => unavailable(&state, &session, &request_id, "/v1/admin/devices", started),
+        Err(_) => unavailable(
+            &state,
+            &session,
+            &request_id,
+            "/api/v1/admin/devices",
+            started,
+        ),
     }
 }
 /// Lists the safe, unified administrator request and security-event timeline.
@@ -307,7 +325,13 @@ pub(super) async fn audit(
         Err(response) => return *response,
     };
     let Some(store) = &state.admin_store else {
-        return unavailable(&state, &session, &request_id, "/v1/admin/audit", started);
+        return unavailable(
+            &state,
+            &session,
+            &request_id,
+            "/api/v1/admin/audit",
+            started,
+        );
     };
     let filter = AdminAuditFilter {
         from: query.from,
@@ -342,14 +366,20 @@ pub(super) async fn audit(
                 &state,
                 &session,
                 &request_id,
-                "/v1/admin/audit",
+                "/api/v1/admin/audit",
                 AdminRequestOutcome::Succeeded,
                 started,
             )
             .await;
             response
         }
-        Err(_) => unavailable(&state, &session, &request_id, "/v1/admin/audit", started),
+        Err(_) => unavailable(
+            &state,
+            &session,
+            &request_id,
+            "/api/v1/admin/audit",
+            started,
+        ),
     }
 }
 fn unavailable(

@@ -2,7 +2,7 @@
 # Used by run-rockserver-admin-local.ps1; not for production Compose.
 :{$ROCKSERVER_ADMIN_UI_PORT} {
     encode gzip
-  @api path /v1/* /api/v1/* /health/*
+  @api path /api/v1/* /health/*
   handle @api {
     reverse_proxy {$ROCKSERVER_BACKEND_UPSTREAM} {
       header_up X-Forwarded-Proto https

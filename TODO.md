@@ -8,7 +8,7 @@
    - Acceptance met: readiness and liveness endpoints return documented responses; shutdown is graceful; router tests require no network service; all required checks pass.
 
 3. Search API contract — complete
-   - Added `api/openapi.yaml` with `POST /v1/search`, request/response schemas, examples, and the standard error shape.
+   - Added `api/openapi.yaml` with `POST /api/v1/search`, request/response schemas, examples, and the standard error shape.
    - Acceptance met: the contract defines validation and status codes, includes `code`, `message`, `request_id`, and `details` for errors, and is covered by a contract validation check.
 
 4. Deterministic in-memory search — complete
@@ -29,6 +29,6 @@
    - Acceptance met: providers never receive the full catalog; failures and missing/incompatible embeddings preserve metadata fallback; hard filters/exclusions precede final limit; station ID is the last tie-break; in-memory mode and public HTTP schemas remain compatible; real pgvector integration is covered.
 
 8. Windows RockCast production path — in progress
-   - RockCast text search uses `POST /v1/search` with the local catalog retained as fallback. Its Voice control captures bounded PCM16 mono from the default microphone and uses the protected canonical WebSocket endpoint.
+   - RockCast text search uses `POST /api/v1/search` with the local catalog retained as fallback. Its Voice control captures bounded PCM16 mono from the default microphone and uses the protected canonical WebSocket endpoint.
    - RockServer exposes both Yandex SpeechKit adapters when `YANDEX_AI_API_KEY` is configured: `buffered_v1` remains the default compatibility mode; `streaming_v3` sends bounded chunks upstream and returns partial transcripts. Input-device selection, deterministic end-to-end coverage, richer cancellation/error states, provider retries/circuit breaking, and production hardening remain.
    - ESP32 is outside the current delivery plan and remains a future client of the stabilized RockServer API.

@@ -873,7 +873,7 @@ mod tests {
                 request_id: "request_123".to_owned(),
                 principal_id,
                 session_id: replacement_id,
-                endpoint: "/v1/admin/stations",
+                endpoint: "/api/v1/admin/stations",
                 outcome: AdminRequestOutcome::Succeeded,
                 duration_ms: 12,
             })

@@ -186,7 +186,7 @@ pub(super) async fn session(State(state): State<AppState>, headers: HeaderMap) -
                 &state,
                 &session,
                 &request_id,
-                "/v1/admin/session",
+                "/api/v1/admin/session",
                 AdminRequestOutcome::Succeeded,
                 started,
             )
@@ -261,7 +261,7 @@ async fn rotate(state: AppState, headers: HeaderMap, logout: bool) -> Response {
             &state,
             &session,
             &request_id,
-            "/v1/admin/auth/logout",
+            "/api/v1/admin/auth/logout",
             AdminRequestOutcome::Succeeded,
             started,
         )
@@ -303,7 +303,7 @@ async fn rotate(state: AppState, headers: HeaderMap, logout: bool) -> Response {
         &state,
         &session,
         &request_id,
-        "/v1/admin/auth/refresh",
+        "/api/v1/admin/auth/refresh",
         AdminRequestOutcome::Succeeded,
         started,
     )

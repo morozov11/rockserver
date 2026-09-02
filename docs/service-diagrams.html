@@ -85,20 +85,20 @@
       <h2>2. Поток текстового AI-поиска</h2>
       <div class="flow">
         <article class="node future"><h3>Ввод текста</h3><span class="badge future">NEXT: RockCast remote-search UI</span></article>
-        <article class="node current"><h3><code>POST /v1/search</code></h3><span class="badge current">CURRENT: anonymous + rate-limited</span></article>
+        <article class="node current"><h3><code>POST /api/v1/search</code></h3><span class="badge current">CURRENT: anonymous + rate-limited</span></article>
         <article class="node current"><h3>Валидация</h3><span class="badge current">CURRENT: 400 / 422 + request_id</span></article>
         <article class="node current"><h3>QueryParser</h3><span class="badge current">CURRENT: deterministic fallback</span></article>
         <article class="node current"><h3>filters / hybrid query</h3><span class="badge current">CURRENT</span></article>
         <article class="node current"><h3>ranking</h3><span class="badge current">CURRENT: 0.70 metadata + 0.30 semantic</span></article>
         <article class="node future"><h3>Результаты → выбор → playback</h3><span class="badge future">FUTURE</span></article>
       </div>
-      <p><strong>Сейчас:</strong> Axum обрабатывает публичные health routes, анонимные и rate-limited <code>POST /v1/search</code> и <code>/v1/voice/*</code>; legacy <code>/api/v1/*</code> voice/search routes сохраняют deployment Bearer boundary. QueryParser получает только данные запроса; optional <code>LlmQueryParser</code> использует Yandex AI Studio только при явной env-конфигурации и всегда имеет deterministic fallback. В provider передаются только command и locale, не каталог. EmbeddingProvider получает только query text. PostgreSQL применяет hard filters и exclusions до exact pgvector hybrid ranking; in-memory и provider failures используют metadata fallback.</p>
+      <p><strong>Сейчас:</strong> Axum обрабатывает публичные health routes, анонимные и rate-limited <code>POST /api/v1/search</code> и <code>/api/v1/voice/*</code>; legacy <code>/api/v1/*</code> voice/search routes сохраняют deployment Bearer boundary. QueryParser получает только данные запроса; optional <code>LlmQueryParser</code> использует Yandex AI Studio только при явной env-конфигурации и всегда имеет deterministic fallback. В provider передаются только command и locale, не каталог. EmbeddingProvider получает только query text. PostgreSQL применяет hard filters и exclusions до exact pgvector hybrid ranking; in-memory и provider failures используют metadata fallback.</p>
     </section>
 
     <section id="inside">
       <h2>3. Внутренняя схема RockServer</h2>
       <div class="grid">
-        <article class="card current"><span class="badge current">CURRENT</span><h3>Axum API</h3><p>Public <code>GET /health/live</code>, DB-aware <code>GET /health/ready</code>, anonymous <code>/v1/search</code> and <code>/v1/voice/*</code>; legacy <code>/api/v1/*</code> search/voice routes retain the Bearer boundary.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>Axum API</h3><p>Public <code>GET /health/live</code>, DB-aware <code>GET /health/ready</code>, anonymous <code>/api/v1/search</code> and <code>/api/v1/voice/*</code>; legacy <code>/api/v1/*</code> search/voice routes retain the Bearer boundary.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>API access gate</h3><p>The deployment Bearer credential protects only legacy <code>/api/v1/*</code> compatibility routes. Account/device pairing uses passkey, browser cookie, CSRF, and a durable device secret that issues short-lived native sessions; no credential is logged.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>tracing / config</h3><p>JSON tracing, HTTP и import config, run/page/count logs, graceful shutdown.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>DTO / validation</h3><p>Transport DTO, request_id и contract-compliant ошибки.</p></article>
@@ -109,7 +109,7 @@
         <article class="card current"><span class="badge current">CURRENT</span><h3>CatalogImporter</h3><p>Ограниченный Radio Browser client + import store; отдельный CLI, не request path и не HTTP startup.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>Mobile catalog exporter</h3><p>Отдельный PostgreSQL→SQLite CLI. Выпускает только полный active/playable каталог после строгой проверки; health, embeddings и import runs не экспортирует.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>RM-011-G6 cleanup operator</h3><p>Preview-first one-shot CLI: показывает только безопасные IDs, статусы, counts и причины; apply требует один UUID и точную фразу, отзывает зависимости транзакционно и сохраняет audit/tombstone.</p></article>
-<article class="card current"><span class="badge current">CURRENT</span><h3>Administrator SPA</h3><p>Caddy serves the existing first-party Preact/Vite `/admin` route and proxies `/v1/admin/*` first. Separate persisted administrator identity has Argon2id login and short-lived revocable Bearer sessions; the SPA keeps that Bearer only in current-page memory. Read-only Devices, Audit and Stations pages return safe paginated projections. RockCast product routes remain public; user identity uses pairing.</p></article>
+<article class="card current"><span class="badge current">CURRENT</span><h3>Administrator SPA</h3><p>Caddy serves the existing first-party Preact/Vite `/admin` route and proxies `/api/v1/admin/*` first. Separate persisted administrator identity has Argon2id login and short-lived revocable Bearer sessions; the SPA keeps that Bearer only in current-page memory. Read-only Devices, Audit and Stations pages return safe paginated projections. RockCast product routes remain public; user identity uses pairing.</p></article>
         <article class="card future"><span class="badge future">FUTURE</span><h3>StreamHealthChecker</h3><p>Фоновая проверка потоков, не в request path.</p></article>
       </div>
     </section>
@@ -140,7 +140,7 @@
     </section>
 
     <section id="contract">
-      <p><strong>CURRENT:</strong> Anonymous <code>/v1/voice/*</code> routes are rate-limited; legacy <code>/api/v1/voice/*</code> routes retain a Bearer boundary. The WebSocket <code>GET /api/v1/voice/stream</code> adds bounded PCM16 mono chunks, partial/final transcript events, provider-neutral STT sessions, and final <code>SearchService</code> resolution. RockCast supplies its configured legacy token only for that compatibility boundary and chooses <code>buffered_v1</code> (default, recognition after commit) or <code>streaming_v3</code> (SpeechKit chunks during recording) in the start event. The process reports <code>speech_provider_unavailable</code> until a provider key is configured.</p>
+      <p><strong>CURRENT:</strong> Anonymous <code>/api/v1/voice/*</code> routes are rate-limited; legacy <code>/api/v1/voice/*</code> routes retain a Bearer boundary. The WebSocket <code>GET /api/v1/voice/stream</code> adds bounded PCM16 mono chunks, partial/final transcript events, provider-neutral STT sessions, and final <code>SearchService</code> resolution. RockCast supplies its configured legacy token only for that compatibility boundary and chooses <code>buffered_v1</code> (default, recognition after commit) or <code>streaming_v3</code> (SpeechKit chunks during recording) in the start event. The process reports <code>speech_provider_unavailable</code> until a provider key is configured.</p>
       <h2>5. Контракт и ошибки</h2>
       <div class="flow">
         <article class="node current"><h3>SearchRequest</h3><p><code>query</code>, <code>locale</code>, <code>limit</code>, <code>exclude_station_ids</code>.</p></article>

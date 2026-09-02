@@ -20,7 +20,6 @@ use tokio::time::sleep;
 use tower::ServiceExt;
 
 const CANONICAL_PATH: &str = "/api/v1/voice/command";
-const COMPATIBILITY_PATH: &str = "/v1/voice/command";
 const API_TOKEN: &str = rockserver::http::TEST_API_BEARER_TOKEN;
 
 #[tokio::test]
@@ -53,12 +52,11 @@ async fn canonical_voice_command_echoes_request_id_and_selects_first_station() {
 }
 
 #[tokio::test]
-async fn compatibility_voice_command_alias_has_the_same_contract() {
+async fn anonymous_voice_command_uses_the_canonical_path() {
     let response = rockserver::http::router()
         .oneshot(
-            Request::post(COMPATIBILITY_PATH)
+            Request::post(CANONICAL_PATH)
                 .header(header::CONTENT_TYPE, "application/json")
-                .header(header::AUTHORIZATION, format!("Bearer {API_TOKEN}"))
                 .body(Body::from(r#"{"transcript":"baroque opera"}"#))
                 .unwrap(),
         )

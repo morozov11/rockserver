@@ -26,6 +26,7 @@ use crate::{
 };
 
 use super::{
+    account,
     search::{SearchRequestDto, ValidatedSearchRequest},
     state::{AppState, PublicLimit, PublicLimitState},
     transport::{
@@ -227,14 +228,21 @@ impl TryFrom<VoiceCommandRequestDto> for ValidatedVoiceCommandRequest {
     }
 }
 
-/// Upgrades an authenticated request to the streaming voice WebSocket.
+/// Upgrades an anonymous or authenticated request to the streaming voice WebSocket.
 pub(super) async fn voice_stream(
     State(state): State<AppState>,
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Response {
+    if !headers.contains_key(axum::http::header::AUTHORIZATION) {
+        return public_voice_stream(State(state), headers, upgrade).await;
+    }
     let request_id = request_id(&headers);
-    if !state.is_authorized(&headers) {
+    if !state.is_authorized(&headers)
+        && account::match_native_session(&state, &headers, &request_id)
+            .await
+            .is_none()
+    {
         return unauthorized_response(&request_id);
     }
     voice_stream_impl(state, headers, upgrade, request_id, None).await
@@ -505,8 +513,15 @@ pub(super) async fn voice_command(
     headers: HeaderMap,
     body: Body,
 ) -> Response {
+    if !headers.contains_key(axum::http::header::AUTHORIZATION) {
+        return public_voice_command(State(state), headers, body).await;
+    }
     let request_id = request_id(&headers);
-    if !state.is_authorized(&headers) {
+    if !state.is_authorized(&headers)
+        && account::match_native_session(&state, &headers, &request_id)
+            .await
+            .is_none()
+    {
         return unauthorized_response(&request_id);
     }
     voice_command_impl(state, headers, body, request_id, 50).await

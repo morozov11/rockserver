@@ -8,7 +8,7 @@ RockServer is licensed under the [GNU General Public License, version 3 or later
 
 ## Current status
 
-The repository contains a Rust edition 2024 Axum service. `POST /v1/search` uses provider-neutral query interpretation, optional embeddings, and a replaceable repository boundary. Canonical `POST /api/v1/voice/command` accepts an already-recognized text transcript. Canonical WebSocket `GET /api/v1/voice/stream` accepts bounded PCM16 mono chunks and resolves the final transcript through the same search path. With `YANDEX_AI_API_KEY`, clients may select `buffered_v1` (the compatible commit-time SpeechKit v1 request, and default) or `streaming_v3` (SpeechKit v3 bidirectional chunks with partial transcripts) in the start frame. Without the key, either mode terminates with `speech_provider_unavailable`. Deprecated `/v1/voice/*` aliases remain for compatibility. PostgreSQL provides exact pgvector-backed hybrid ranking when compatible query and station embeddings exist; otherwise deterministic metadata ranking remains authoritative.
+The repository contains a Rust edition 2024 Axum service. `POST /api/v1/search` uses provider-neutral query interpretation, optional embeddings, and a replaceable repository boundary. `POST /api/v1/voice/command` accepts an already-recognized text transcript and `GET /api/v1/voice/stream` accepts bounded PCM16 mono chunks, resolving the final transcript through the same search path. Both voice routes work anonymously without an `Authorization` header and use paired native-session tokens when one is supplied. With `YANDEX_AI_API_KEY`, clients may select `buffered_v1` (the compatible commit-time SpeechKit v1 request, and default) or `streaming_v3` (SpeechKit v3 bidirectional chunks with partial transcripts) in the start frame. Without the key, either mode terminates with `speech_provider_unavailable`. PostgreSQL provides exact pgvector-backed hybrid ranking when compatible query and station embeddings exist; otherwise deterministic metadata ranking remains authoritative.
 
 ## Intended architecture
 
@@ -30,7 +30,7 @@ See [docs/architecture.md](docs/architecture.md) for boundaries and the planned 
 
 1. Repository hygiene and contributor documentation.
 2. Axum HTTP skeleton with health endpoints, tracing, graceful shutdown, and router tests.
-3. OpenAPI contract for `POST /v1/search`.
+3. OpenAPI contract for `POST /api/v1/search`.
 4. Deterministic in-memory search with domain/DTO separation — complete.
 5. PostgreSQL persistence, migrations, development seed, and dependency-aware readiness — complete.
 6. Controlled Radio Browser import outside the request path — complete.
@@ -131,7 +131,7 @@ Check readiness and seeded search after startup:
 
 ```text
 curl http://127.0.0.1:3000/health/ready
-curl -X POST http://127.0.0.1:3000/v1/search -H "content-type: application/json" -d '{"query":"calm instrumental jazz"}'
+curl -X POST http://127.0.0.1:3000/api/v1/search -H "content-type: application/json" -d '{"query":"calm instrumental jazz"}'
 
 curl -X POST http://127.0.0.1:3000/api/v1/voice/command -H "content-type: application/json" -H "x-request-id: windows-voice-1" -d '{"transcript":"calm instrumental jazz"}'
 ```
@@ -203,7 +203,7 @@ Copy `.env.example` to ignored `.env` only for local development and fill the tw
 
 ## Import Radio Browser
 
-The importer is a separate process and requires `DATABASE_URL`; it does not run from `POST /v1/search` or when the HTTP server starts. Run one bounded import with:
+The importer is a separate process and requires `DATABASE_URL`; it does not run from `POST /api/v1/search` or when the HTTP server starts. Run one bounded import with:
 
 ```text
 DATABASE_URL=postgres://USER:PASSWORD@HOST:PORT/DATABASE cargo run --bin import_radio_browser

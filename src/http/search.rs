@@ -18,7 +18,7 @@ use super::{
     state::{AppState, PublicLimit},
     transport::{
         NormalizedQueryDto, SearchResponseDto, StationResultDto, error_response,
-        parse_json_request, request_id, unauthorized_response, with_request_id,
+        parse_json_request, request_id, with_request_id,
     },
 };
 
@@ -127,19 +127,6 @@ fn is_valid_locale(locale: &str) -> bool {
             (2..=8).contains(&subtag.len())
                 && subtag.bytes().all(|byte| byte.is_ascii_alphanumeric())
         })
-}
-
-/// Runs the authenticated station search endpoint.
-pub(super) async fn search(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    body: Body,
-) -> Response {
-    let request_id = request_id(&headers);
-    if !state.is_authorized(&headers) {
-        return unauthorized_response(&request_id);
-    }
-    search_impl(state, headers, body, request_id, 50).await
 }
 
 /// Serves the approved anonymous, bounded station-search operation.

@@ -262,7 +262,7 @@ pub(super) fn token_hash(value: &str) -> SecretHash {
     SecretHash::new(Sha256::digest(value.as_bytes()).into())
 }
 
-/// Successful transport response for `POST /v1/search`.
+/// Successful transport response for `POST /api/v1/search`.
 #[derive(Serialize)]
 pub(super) struct SearchResponseDto {
     pub(super) request_id: String,

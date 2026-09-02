@@ -1,5 +1,47 @@
 # Task log
 
+## API namespace consolidation — 2026-09-02
+
+- Goal: make every first-party HTTP and WebSocket API route use one `/api/v1/*` namespace.
+- Result: removed the former non-namespaced route registrations and voice compatibility aliases. The unified
+  `/api/v1/voice/command` and `/api/v1/voice/stream` endpoints work anonymously without an
+  `Authorization` header; a supplied Bearer is validated as the legacy deployment credential or a
+  paired native-session token. Updated the RockCast client, web client, OpenAPI, Caddy routing,
+  contract coverage, and active documentation. External provider URLs were deliberately unchanged.
+- Checks: RockServer `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
+  and `cargo test` passed (113 unit tests; opt-in PostgreSQL/live-provider tests ignored). RockCast
+  passed the same formatter and strict Clippy checks plus `cargo test` (97 unit tests; live tests
+  ignored). The web client passed `pnpm build` (typecheck, lint, Vite build), and both diffs passed
+  whitespace checks.
+- Status: **complete locally; deployment remains required for alex.vault57.ru.**
+
+## DC-000 — 2026-09-02 — Windows-first readiness gate
+
+- Goal: determine whether the current RockServer/RockCast Windows path permits the
+  device-control protocol to begin, without implementing any later DC work.
+- Scope: read-only code/contract audit of `C:\repos\rockserver` and `C:\repos\rockcast`;
+  record the supported search/voice behaviour, STT/degraded-state evidence, and RockCast
+  playback, volume, Chromecast, and relay entry points in RockServer documentation.
+- Result: **GO for DC-001.**  RockCast has an anonymous `/api/v1/search` path and independent local
+  catalog/Radio Browser playback fallback.  Voice now selects anonymous `/api/v1/voice/stream` when
+  no native credential exists, and renews a paired token through `/api/v1/auth/device-session` before
+  using canonical authenticated `/api/v1/voice/stream`.  Those canonical RockServer routes now
+  accept a current native-session Bearer as well as the legacy deployment Bearer.  SpeechKit
+  remains optional and returns a defined unavailable error when unconfigured; second-provider/
+  retry hardening is future work.
+  The removed `docs/windows-production-roadmap.md` and Windows E2E/failure coverage are explicitly
+  out of scope for this decision.  Playback control presently
+  enters through `RockCastApp` actions and `PlaybackController`, with `CastService` and
+  `StreamRelay` as the receiver/relay boundaries; no remote device-control adapter exists.
+- Checks: targeted source, OpenAPI, active/historical roadmap, and status/task-log inspection;
+  RockServer checks passed serially after the native-session voice authorization update.  The
+  RockCast change passed `cargo fmt --check`,
+  `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` (97 unit tests
+  plus non-live integration coverage).  No external provider, database, deployment, or Windows
+  hardware probe was executed.
+- Status: **complete; GO recorded for DC-001.**  No ESP32 firmware or later DC implementation
+  task was started.
+
 ## Local administrator launcher — 2026-09-01
 
 - Goal: provide a simple host-based launcher for RockServer plus local administrator SPA hosting
@@ -277,7 +319,7 @@
   OpenAPI correction. No client changes, staging mutation, cleanup, migration, deploy, commit, or
   push.
 - Result: named passkey/browser/device flow is present in all three checkouts and local radio
-  fallback is preserved. OpenAPI now accurately distinguishes anonymous `/v1/*` product routes
+  fallback is preserved. OpenAPI now accurately distinguishes anonymous `/api/v1/*` product routes
   from legacy Bearer-protected `/api/v1/*` compatibility routes. Full live acceptance is blocked:
   server completion collapses pending and terminal pairing failures into `401 pairing_rejected`,
   and dismissing either native account UI does not reliably cancel a pending pairing job. A
@@ -432,7 +474,7 @@
 - Container build follow-up: pnpm requested an interactive module-directory confirmation after the
   source copy. `Dockerfile.caddy` now sets `CI=true` only for that build command, preserving a
   reproducible non-interactive release build.
-- Post-deploy probing found the SPA fallback rewrote `/health/*` and `/v1/*` before proxying,
+- Post-deploy probing found the SPA fallback rewrote `/health/*` and `/api/v1/*` before proxying,
   producing `405` instead of API responses. Both Caddyfiles now use an exclusive API `handle`
   before the static fallback; the regression test covers the required routing boundary.
 - Checks: RockServer `cargo fmt --check`, strict Clippy, and `cargo test` passed; RockCast format
@@ -637,16 +679,16 @@
 ## RS-002 — 2026-08-13 — Search API contract and service diagrams
 
 - Goal: define the public search contract before implementation and provide a clear offline architecture reference.
-- Scope: OpenAPI 3.1 contract for `POST /v1/search` and existing health routes; validation rules, defaults, response/error schemas, status semantics, and Russian and English examples; a structural contract test; autonomous Russian HTML diagrams; contributor and project documentation. Search routing, catalog/domain implementation, persistence, providers, ranking, authentication, and client changes are excluded.
-- Result: added `api/openapi.yaml` with the required schemas and 200/400/422/429/500 outcomes, explicitly separating malformed JSON (400) from well-formed but invalid input (422). Added a `cargo test` integration check using test-only `serde_yaml`; it parses the YAML and guards the required OpenAPI version, paths, POST operation, and schemas. Added `docs/service-diagrams.html`, which distinguishes CURRENT, NEXT, and FUTURE architecture and works without external resources. The Axum router was intentionally unchanged, so `POST /v1/search` remained 404 at that stage. Added permanent Rustdoc/comment guidance and a diagram-accuracy rule to `AGENTS.md`.
-- Checks: `cargo fmt --check` passed; `cargo clippy --all-targets --all-features -- -D warnings` passed; `cargo test` passed with 4 tests, including an explicit assertion that `POST /v1/search` remained 404; `git diff --check` passed. Python's standard-library `html.parser` accepted the complete HTML file and additional local checks confirmed one doctype, one `<html>` root, no external resource URLs, and balanced SVG elements.
+- Scope: OpenAPI 3.1 contract for `POST /api/v1/search` and existing health routes; validation rules, defaults, response/error schemas, status semantics, and Russian and English examples; a structural contract test; autonomous Russian HTML diagrams; contributor and project documentation. Search routing, catalog/domain implementation, persistence, providers, ranking, authentication, and client changes are excluded.
+- Result: added `api/openapi.yaml` with the required schemas and 200/400/422/429/500 outcomes, explicitly separating malformed JSON (400) from well-formed but invalid input (422). Added a `cargo test` integration check using test-only `serde_yaml`; it parses the YAML and guards the required OpenAPI version, paths, POST operation, and schemas. Added `docs/service-diagrams.html`, which distinguishes CURRENT, NEXT, and FUTURE architecture and works without external resources. The Axum router was intentionally unchanged, so `POST /api/v1/search` remained 404 at that stage. Added permanent Rustdoc/comment guidance and a diagram-accuracy rule to `AGENTS.md`.
+- Checks: `cargo fmt --check` passed; `cargo clippy --all-targets --all-features -- -D warnings` passed; `cargo test` passed with 4 tests, including an explicit assertion that `POST /api/v1/search` remained 404; `git diff --check` passed. Python's standard-library `html.parser` accepted the complete HTML file and additional local checks confirmed one doctype, one `<html>` root, no external resource URLs, and balanced SVG elements.
 - Status: complete.
 
 ## RS-003 — 2026-08-13 — Deterministic in-memory station search
 
-- Goal: make the contract-defined `POST /v1/search` route usable without persistence, providers, embeddings, LLMs, or external network access.
+- Goal: make the contract-defined `POST /api/v1/search` route usable without persistence, providers, embeddings, LLMs, or external network access.
 - Scope: Axum search routing and DTO validation; contract-compliant 400/422 errors with request IDs; a small built-in in-memory catalog; separated search domain, `StationRepository` trait, normalization, filtering, deterministic ranking, and result mapping; HTTP and domain tests; current-state documentation and diagrams. PostgreSQL, imports, external providers, semantic ranking, rate limiting, client changes, and authentication are excluded.
-- Result: registered `POST /v1/search` alongside the unchanged health routes. The route accepts all existing request fields, defaults locale and limit, rejects malformed JSON with 400 and syntactically valid invalid input with 422, and always returns the standard `ErrorResponse` fields on errors. The domain applies inferred language/country and exclusion constraints to a six-station catalog, scores matching metadata, and breaks equal scores by station ID ascending. No OpenAPI changes were needed because the existing schema already described this behavior.
+- Result: registered `POST /api/v1/search` alongside the unchanged health routes. The route accepts all existing request fields, defaults locale and limit, rejects malformed JSON with 400 and syntactically valid invalid input with 422, and always returns the standard `ErrorResponse` fields on errors. The domain applies inferred language/country and exclusion constraints to a six-station catalog, scores matching metadata, and breaks equal scores by station ID ascending. No OpenAPI changes were needed because the existing schema already described this behavior.
 - Checks: `cargo fmt --check` passed; `cargo clippy --all-targets --all-features -- -D warnings` passed; `cargo test --all-targets --all-features` passed with 13 tests; `git diff --check` passed. Search tests cover success, empty results, limit, stable ordering/tie-break, exclusions, malformed JSON 400, and semantic validation 422. The suite uses no network listener, external network, AI provider, or LLM. A standard-library HTML parser accepted the updated service diagrams.
 - Status: complete.
 
@@ -690,7 +732,7 @@
 
 ## RS-007 — 2026-08-14 — Semantic ranking foundation
 
-- Goal: add a minimal working semantic-search foundation behind domain and repository boundaries without adding a production LLM/model provider, changing the public HTTP schemas, or moving catalog/provider network work into `POST /v1/search`.
+- Goal: add a minimal working semantic-search foundation behind domain and repository boundaries without adding a production LLM/model provider, changing the public HTTP schemas, or moving catalog/provider network work into `POST /api/v1/search`.
 - Scope: provider-neutral `QueryParser` and `EmbeddingProvider`; deterministic parser/failure fallback and deterministic fakes; explicit non-production development embedder; pgvector migration and provenance-aware station embedding store; controlled one-shot backfill/update CLI; PostgreSQL exact hybrid search; in-memory metadata fallback; unit, HTTP, and opt-in real PostgreSQL coverage; Compose, OpenAPI description, architecture/status/roadmap/diagram updates. Authentication, rate limiting, RockCast, voice input, stream probing, scheduler, production providers, and ANN tuning are excluded.
 - Result: `SearchService` now interprets validated request-only input and obtains an optional query embedding before crossing `StationRepository`. Providers cannot receive a station collection through their interfaces. Parser errors or invalid structured filters use the deterministic parser; embedding errors omit semantic input. The in-memory repository continues to use the original deterministic metadata ranker. PostgreSQL applies language/country filters and exclusions before score/limit, joins only matching model/version/dimension provenance, performs exact cosine similarity, and orders score descending with station ID ascending as the last tie-break.
 - Ranking decision: domain constants own weights. Compatible embeddings use normalized cosine `1 - cosine_distance / 2` and `0.70 * metadata_score + 0.30 * semantic_score`. Missing compatible station embeddings retain full metadata score; missing/failed query embeddings use metadata-only inclusion and scoring. SQL receives the domain weights as bind parameters rather than duplicating literals.
@@ -715,7 +757,7 @@
 
 - Goal: re-verify the completed semantic-ranking foundation on the user-designated disposable local `rockserver` database before beginning RockCast integration.
 - Scope: database reset, clean migrations, the existing ignored PostgreSQL integration test, deterministic embedding backfill idempotency, database inspection, and a local HTTP smoke check. No source code, OpenAPI, migration, or runtime behavior changed.
-- Result: connected to PostgreSQL 18.1 with pgvector 0.8.6, reset only the `public` schema of database `rockserver`, and successfully applied migrations 1–4. The exact ignored integration test passed. Two consecutive `deterministic-dev` backfills produced seven unique 32-dimensional embeddings for seven stations and zero duplicate station/model/version keys. The test's four 3-dimensional `integration-model` fixtures also remained valid. A temporary server on loopback reported `live=ok` and `ready=ok`; `POST /v1/search` for `jazz` returned hybrid-ranked results headed by `station-jazz-002` with reason `Hybrid match: metadata 1.000, semantic 0.878.` The temporary server was stopped after the smoke check.
+- Result: connected to PostgreSQL 18.1 with pgvector 0.8.6, reset only the `public` schema of database `rockserver`, and successfully applied migrations 1–4. The exact ignored integration test passed. Two consecutive `deterministic-dev` backfills produced seven unique 32-dimensional embeddings for seven stations and zero duplicate station/model/version keys. The test's four 3-dimensional `integration-model` fixtures also remained valid. A temporary server on loopback reported `live=ok` and `ready=ok`; `POST /api/v1/search` for `jazz` returned hybrid-ranked results headed by `station-jazz-002` with reason `Hybrid match: metadata 1.000, semantic 0.878.` The temporary server was stopped after the smoke check.
 - Security: the database password and connection URL were supplied only through process environment variables and were not written to repository files.
 - Checks: `cargo test --test postgres_integration --all-features -- --ignored --exact postgres_migrations_seed_search_and_readiness --nocapture` passed with one test and no failures; migration, row-count, provenance, dimension, and duplicate-key queries passed; `git diff --check` passed.
 - Status: complete.
@@ -723,9 +765,9 @@
 ## RS-008 — 2026-08-14 — Windows voice-command API contract
 
 - Goal: stabilize the JSON contract used by the Windows voice-command flow after RS-007 without adding a second search implementation, audio upload, STT, or provider credentials.
-- Scope: canonical OpenAPI/Axum `POST /api/v1/voice/command`, deprecated `/v1/voice/command` compatibility alias, transcript DTOs, selected-station response semantics, request IDs, validation, request-size and service-time boundaries, contract tests, and current-state documentation. Existing `POST /v1/search` request/response fields remain compatible.
+- Scope: canonical OpenAPI/Axum `POST /api/v1/voice/command`, deprecated `/api/v1/voice/command` compatibility alias, transcript DTOs, selected-station response semantics, request IDs, validation, request-size and service-time boundaries, contract tests, and current-state documentation. Existing `POST /api/v1/search` request/response fields remain compatible.
 - Result: the canonical route accepts only a bounded, already-recognized `transcript` plus locale, limit, and station exclusions, then calls the existing `SearchService`. It returns the trimmed transcript, normalized query, deterministic `stations`, and `selected_station` equal to the first result or `null`. Valid `X-Request-Id` values are echoed in the response body and header; otherwise the server generates one. JSON bodies are limited to 65,536 bytes; malformed input returns 400, oversized input 413, validation 422, unexpected search failure 500, and the five-second interpretation/search deadline returns structured 504. No audio, STT, LLM, or provider credential is accepted or simulated.
-- Compatibility decision: `/api/v1/voice/command` is canonical for new Windows clients. `/v1/voice/command` maps to the same handler and DTOs but is documented as deprecated so the repository rule for `/v1` public versioning and the Windows `/api/v1` contract can coexist. Existing `/v1/search` remains registered with its existing body schemas; it now also uses the shared bounded JSON/error/request-ID transport behavior.
+- Compatibility decision: `/api/v1/voice/command` is canonical for new Windows clients. `/api/v1/voice/command` maps to the same handler and DTOs but is documented as deprecated so the repository rule for `/v1` public versioning and the Windows `/api/v1` contract can coexist. Existing `/api/v1/search` remains registered with its existing body schemas; it now also uses the shared bounded JSON/error/request-ID transport behavior.
 - Tests: `cargo fmt --check` passed; `cargo clippy --all-targets --all-features -- -D warnings` passed; `cargo test` passed with 40 regular tests and one opt-in PostgreSQL test ignored by default. Contract coverage verifies the canonical route, compatibility alias, request-ID propagation, selected/no-result behavior, transcript validation, structured 413 size failure, and deterministic 504 timeout.
 - Graphify: `graphify update .` rebuilt the ignored local code graph to 559 nodes, 1,165 edges, and 32 communities. The tool reported only its pre-existing `hooks.json` zero-node warning and stale community labels; generated graph artifacts remain untracked.
 - Documentation: `api/openapi.yaml` is the source of truth; `docs/status.md`, `docs/architecture.md`, `docs/windows-production-roadmap.md`, `README.md`, and `docs/service-diagrams.html` now distinguish the implemented JSON boundary from still-future microphone, audio-upload, and STT work.
@@ -734,7 +776,7 @@
 ## RS-009 — 2026-08-14 — Provider-neutral streaming voice API
 
 - Goal: add a stable bidirectional audio contract without coupling RockCast to Yandex or OpenAI protocols and without changing the RS-008 JSON endpoint.
-- Scope: canonical WebSocket `GET /api/v1/voice/stream`, deprecated `/v1/voice/stream` alias, PCM16 mono start/audio/commit protocol, incremental and final transcript events, final `SearchService` resolution, request IDs, size/time/error boundaries, provider traits, OpenAPI, deterministic tests, and current-state documentation. Real provider credentials and external-network tests are excluded.
+- Scope: canonical WebSocket `GET /api/v1/voice/stream`, deprecated `/api/v1/voice/stream` alias, PCM16 mono start/audio/commit protocol, incremental and final transcript events, final `SearchService` resolution, request IDs, size/time/error boundaries, provider traits, OpenAPI, deterministic tests, and current-state documentation. Real provider credentials and external-network tests are excluded.
 - Result: added `StreamingSpeechRecognizer` and isolated per-client `SpeechStreamSession` boundaries. The WebSocket accepts 8/16/24/48 kHz PCM signed 16-bit little-endian mono chunks, limits each chunk to 65,536 bytes and the session to 10 MiB, emits `ready`, `transcript`, and terminal `result`/`error` events, and applies ten-second provider-operation and five-second search boundaries. The final transcript reuses the existing query interpretation, ranking, exclusions, and selected-station behavior. Default startup fails closed with `speech_provider_unavailable` until a concrete provider is configured.
 - Tests: a real loopback WebSocket upgrade test injects a deterministic fake provider, verifies request-ID propagation, binary audio delivery, partial/final transcripts, and final station selection. OpenAPI structural coverage verifies both routes and all client/server event schemas. `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test` passed with 41 regular tests and one opt-in PostgreSQL test ignored. Diff whitespace and the standalone HTML parser check passed. No external provider or internet call occurs.
 - Graphify: `graphify update .` rebuilt the local ignored graph to 620 nodes, 1,339 edges, and 33 communities. The existing `hooks.json` zero-node warning remains, and labels are stale after the new community was introduced.
@@ -894,7 +936,7 @@
   application Bearer token, shows readiness, and searches catalog stations. It deliberately excludes
   persistent administrator identities, sessions, storage, and state-changing operations.
 - Result: the page keeps the entered token only in JavaScript memory for the current browser tab, calls
-  `/health/ready` and the existing protected `POST /v1/search` endpoint, and removes the in-memory
+  `/health/ready` and the existing protected `POST /api/v1/search` endpoint, and removes the in-memory
   token on disconnect. The OpenAPI contract records the HTML endpoint. The local launcher accepts a
   configured token or generates a random process-only token and prints it for the preview login.
 - Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
@@ -902,8 +944,8 @@
   PostgreSQL and provider-credential-dependent live tests remained explicitly ignored.
 - Status: complete.
 
- 
- 
+
+
 
 ## RS-032 — 2026-08-20 — Package layout and architecture review
 
@@ -1358,7 +1400,7 @@
 ## RM-011-C — 2026-08-26 — browser-proof approval slice (partial)
 
 - Scope: migration `0014_add_browser_session_cookie_hash.sql`, browser-proof persistence method,
-  `POST /v1/pairing-requests/{request_id}/approve`, CSRF header/cookie checks and OpenAPI entry.
+  `POST /api/v1/pairing-requests/{request_id}/approve`, CSRF header/cookie checks and OpenAPI entry.
 - Result: approval no longer accepts a bare/guessable browser session ID; the persistence query
   requires the opaque cookie hash, CSRF hash, active session and fresh passkey timestamp.
 - Checks: offline cargo check, strict Clippy and targeted API test passed.
@@ -1380,7 +1422,7 @@
 
 ## RM-011-C — 2026-08-26 — desktop pairing completion slice (partial)
 
-- Scope: added `POST /v1/pairing-requests/{request_id}/complete`; it delegates to B2's atomic
+- Scope: added `POST /api/v1/pairing-requests/{request_id}/complete`; it delegates to B2's atomic
   approval/consumption transaction, enforces the owner UUID, ten-device cap and one-time desktop
   proof, and issues short-lived native access plus rotating refresh credentials.
 - Result: access expires after 15 minutes and refresh after 30 days using PostgreSQL's clock; raw

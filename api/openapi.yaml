@@ -4,9 +4,8 @@ info:
   version: 0.3.0
   description: >-
     Contract for RockServer operational health checks, deterministic station search, and the
-    Windows voice-command JSON and streaming boundaries. `POST /api/v1/voice/command` is the canonical
-    voice-command route; `POST /v1/voice/command` is a compatibility alias with the same
-    request and response contract. `GET /api/v1/voice/stream` upgrades to the canonical
+    Windows voice-command JSON and streaming boundaries. `POST /api/v1/voice/command` resolves
+    an already-recognized command and `GET /api/v1/voice/stream` upgrades to the
     provider-neutral WebSocket protocol for raw PCM audio and incremental transcripts.
     PostgreSQL may use provenance-compatible semantic ranking; metadata fallback preserves
     the same schemas when embeddings are absent or unavailable.
@@ -14,7 +13,7 @@ servers:
   - url: https://alex.vault57.ru
   - url: http://localhost
 paths:
-  /v1/admin/auth/login:
+  /api/v1/admin/auth/login:
     post:
       operationId: adminLogin
       summary: Authenticate the bootstrapped administrator and issue one short-lived opaque Bearer session
@@ -29,7 +28,7 @@ paths:
         "403": { description: Request did not originate through the trusted first-party boundary. }
         "429": { description: Durable account-and-source-IP throttle temporarily locked login. }
         "503": { description: Administrator authentication persistence is unavailable. }
-  /v1/admin/auth/refresh:
+  /api/v1/admin/auth/refresh:
     post:
       operationId: refreshAdminSession
       summary: Rotate an active administrator Bearer session
@@ -39,7 +38,7 @@ paths:
         "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
         "403": { description: Request origin is not allowed. }
         "503": { description: Administrator authentication persistence is unavailable. }
-  /v1/admin/auth/logout:
+  /api/v1/admin/auth/logout:
     post:
       operationId: logoutAdminSession
       summary: Revoke the current administrator Bearer session immediately
@@ -48,7 +47,7 @@ paths:
         "204": { description: Session revoked. }
         "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
         "403": { description: Request origin is not allowed. }
-  /v1/admin/session:
+  /api/v1/admin/session:
     get:
       operationId: getAdminSession
       summary: Verify an active administrator Bearer session at the admin authorization boundary
@@ -56,7 +55,7 @@ paths:
       responses:
         "200": { description: Admin role confirmation without credential material. }
         "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
-  /v1/admin/stations:
+  /api/v1/admin/stations:
     get:
       operationId: listAdminStations
       summary: List the bounded station read model for the first-party administrator console
@@ -82,7 +81,7 @@ paths:
         "400": { description: Invalid query or pagination. }
         "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
         "503": { description: Catalog or administrator session persistence is unavailable. }
-  /v1/admin/devices:
+  /api/v1/admin/devices:
     get:
       operationId: listAdminDevices
       summary: List a paginated safe device inventory for the administrator console
@@ -98,7 +97,7 @@ paths:
         "200": { description: Safe product, display-name, lifecycle and activity fields only; no identifiers or credentials. }
         "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
         "503": { description: Account or administrator persistence is unavailable. }
-  /v1/admin/audit:
+  /api/v1/admin/audit:
     get:
       operationId: listAdminAudit
       summary: List a paginated unified administrator audit timeline
@@ -114,7 +113,7 @@ paths:
         "200": { description: Secret-free event time, action and outcome page. }
         "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
         "503": { description: Administrator persistence is unavailable. }
-  /v1/auth/passkeys/registration/options:
+  /api/v1/auth/passkeys/registration/options:
     post:
       operationId: startPasskeyRegistration
       summary: Explicitly start first-party account creation and passkey registration
@@ -131,7 +130,7 @@ paths:
         "200": { description: WebAuthn creation options and server challenge identifier. }
         "403": { description: Direct or wrong-origin requests are rejected. }
         "503": { description: Authentication persistence is unavailable. }
-  /v1/auth/passkeys/registration/verify:
+  /api/v1/auth/passkeys/registration/verify:
     post:
       operationId: finishPasskeyRegistration
       summary: Verify a passkey registration and create a browser session
@@ -154,14 +153,14 @@ paths:
         "403": { description: Direct or wrong-origin requests are rejected. }
         "409": { description: Credential already exists. }
         "503": { description: Authentication persistence is unavailable. }
-  /v1/auth/passkeys/authentication/options:
+  /api/v1/auth/passkeys/authentication/options:
     post:
       operationId: startPasskeyAuthentication
       summary: Start username-less discoverable passkey authentication
       responses:
         "200": { description: WebAuthn request options with an empty allowCredentials list and server challenge identifier. }
         "403": { description: Direct or wrong-origin requests are rejected. }
-  /v1/auth/passkeys/authentication/verify:
+  /api/v1/auth/passkeys/authentication/verify:
     post:
       operationId: finishPasskeyAuthentication
       summary: Verify a passkey assertion and create a browser session
@@ -184,7 +183,7 @@ paths:
         "200": { description: Browser session cookie and CSRF token were created. }
         "401": { description: Assertion, challenge or sign counter was rejected. }
         "403": { description: Direct or wrong-origin requests are rejected. }
-  /v1/auth/browser-session:
+  /api/v1/auth/browser-session:
     post:
       operationId: refreshBrowserSessionCsrf
       summary: Refresh the tab-local CSRF proof for an active first-party browser session
@@ -207,7 +206,7 @@ paths:
         "401": { description: Browser session cookie is absent, expired, or invalid. }
         "403": { description: Direct or wrong-origin requests are rejected. }
         "503": { description: Authentication persistence is unavailable. }
-  /v1/browser/account:
+  /api/v1/browser/account:
     get:
       operationId: getBrowserAccountCentre
       summary: Read the first-party browser account centre without native credentials
@@ -223,7 +222,7 @@ paths:
               schema: { $ref: "#/components/schemas/BrowserAccount" }
         "401": { description: Browser session cookie is absent, expired, or invalid. }
         "403": { description: Request did not arrive through the trusted first-party proxy. }
-  /v1/auth/browser-logout:
+  /api/v1/auth/browser-logout:
     post:
       operationId: logoutBrowserSession
       summary: Revoke only the current first-party browser session
@@ -238,7 +237,7 @@ paths:
         "204": { description: Current browser session revoked; native device sessions are unchanged. }
         "401": { description: Browser session cookie is absent, expired, or invalid. }
         "403": { description: Trusted proxy, origin, or CSRF proof is missing. }
-  /v1/auth/device-session:
+  /api/v1/auth/device-session:
     post:
       operationId: createDeviceSession
       summary: Issue a short-lived access token for a paired native device
@@ -257,7 +256,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DeviceSession" }
         "401": { description: Device credential is invalid, revoked, or belongs to a deleted account. }
-  /v1/account/profile:
+  /api/v1/account/profile:
     get:
       operationId: getAccountProfile
       summary: Read the caller's account and current device projection
@@ -270,7 +269,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AccountProfile" }
         "401": { $ref: "#/components/responses/AuthenticationRequired" }
-  /v1/account:
+  /api/v1/account:
     delete:
       operationId: deleteAccount
       summary: Tombstone the caller's account after fresh browser passkey proof
@@ -286,7 +285,7 @@ paths:
         "202": { description: Account credentials and devices were revoked. }
         "401": { $ref: "#/components/responses/AuthenticationRequired" }
         "403": { description: Trusted proxy, CSRF, or recent passkey proof is missing. }
-  /v1/devices:
+  /api/v1/devices:
     get:
       operationId: listOwnedDevices
       summary: List active native devices owned by the caller
@@ -299,7 +298,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DeviceList" }
         "401": { $ref: "#/components/responses/AuthenticationRequired" }
-  /v1/devices/{device_id}:
+  /api/v1/devices/{device_id}:
     delete:
       operationId: revokeOwnedDevice
       summary: Revoke one caller-owned device and its native sessions
@@ -314,7 +313,7 @@ paths:
         "204": { description: Device revoked. }
         "401": { $ref: "#/components/responses/AuthenticationRequired" }
         "404": { description: Device is unknown or belongs to another account. }
-  /v1/browser/devices/{device_id}:
+  /api/v1/browser/devices/{device_id}:
     patch:
       operationId: renameBrowserOwnedDevice
       summary: Rename one caller-owned device from the first-party browser account centre
@@ -354,7 +353,7 @@ paths:
         "401": { description: Browser session is invalid. }
         "403": { description: Trusted proxy, origin, or CSRF proof is missing. }
         "404": { description: Device is unknown or belongs to another account. }
-  /v1/pairing-requests:
+  /api/v1/pairing-requests:
     post:
       operationId: createPairingRequest
       summary: Start a short-lived desktop pairing request
@@ -378,7 +377,7 @@ paths:
               schema: { $ref: "#/components/schemas/CreatedPairingRequest" }
         "422": { description: Device metadata is invalid. }
         "503": { description: Account persistence is unavailable. }
-  /v1/pairing-requests/lookup:
+  /api/v1/pairing-requests/lookup:
     get:
       operationId: lookupPairingRequest
       summary: Resolve a pairing short code to non-secret device information
@@ -395,7 +394,7 @@ paths:
               schema: { $ref: "#/components/schemas/PairingPreview" }
         "404": { description: The code is unknown, expired, used or revoked. }
         "503": { description: Account persistence is unavailable. }
-  /v1/pairing-requests/{request_id}/approve:
+  /api/v1/pairing-requests/{request_id}/approve:
     post:
       operationId: approvePairingRequest
       summary: Approve a pairing request from a fresh browser session
@@ -427,7 +426,7 @@ paths:
         "403": { description: CSRF proof is absent or invalid. }
         "409": { description: Pairing request is expired, consumed or otherwise not approvable. }
         "503": { description: Account persistence is unavailable. }
-  /v1/pairing-requests/{request_id}/complete:
+  /api/v1/pairing-requests/{request_id}/complete:
     post:
       operationId: completePairingRequest
       summary: Complete an approved desktop pairing request
@@ -505,7 +504,7 @@ paths:
                 $ref: "#/components/schemas/HealthResponse"
               example:
                 status: not_ready
-  /v1/search:
+  /api/v1/search:
     post:
       operationId: searchStations
       summary: Find and rank internet radio stations
@@ -644,11 +643,11 @@ paths:
     post:
       operationId: resolveVoiceCommand
       summary: Resolve an already-recognized voice command to a playable station
-      security:
-        - RockCastBearer: []
       description: >-
-        Canonical Windows voice-command endpoint. The client supplies a bounded text transcript,
-        not audio. RockServer validates it and delegates exactly once to the existing query
+        Unified Windows voice-command endpoint. Requests without an Authorization header use the
+        anonymous voice limits. When supplied, a Bearer must be either the legacy deployment token
+        or a current paired native-session token. The client supplies a bounded text transcript, not
+        audio. RockServer validates it and delegates exactly once to the existing query
         interpretation and station-search flow. `X-Request-Id` is echoed when it contains 1–128
         ASCII letters, digits, `_`, or `-`; otherwise RockServer generates a request ID. The same
         ID is returned in the response JSON and `X-Request-Id` response header. The server limits
@@ -776,10 +775,10 @@ paths:
     get:
       operationId: streamVoiceCommand
       summary: Stream microphone audio and resolve the final transcript
-      security:
-        - RockCastBearer: []
       description: >-
-        Canonical WebSocket endpoint. After the HTTP upgrade the client sends one JSON
+        Unified WebSocket endpoint. Requests without an Authorization header use the anonymous
+        voice limits. When supplied, a Bearer must be either the legacy deployment token or a
+        current paired native-session token. After the HTTP upgrade the client sends one JSON
         `VoiceStreamStart` text frame, then binary PCM signed 16-bit little-endian mono chunks,
         and finally one JSON `VoiceStreamCommit` text frame. `recognizer_mode` selects either the
         compatible buffered v1 provider (default) or v3 upstream streaming. RockServer emits `ready`, zero or
@@ -818,83 +817,6 @@ paths:
           - $ref: "#/components/schemas/VoiceStreamTranscript"
           - $ref: "#/components/schemas/VoiceStreamResult"
           - $ref: "#/components/schemas/VoiceStreamError"
-  /v1/voice/stream:
-    get:
-      operationId: streamVoiceCommandCompatibility
-      deprecated: true
-      summary: Anonymous compatibility alias for the canonical voice streaming endpoint
-      responses:
-        "101":
-          description: Same WebSocket protocol as `/api/v1/voice/stream`.
-        "400":
-          description: The HTTP request is not a valid WebSocket upgrade request.
-  /v1/voice/command:
-    post:
-      operationId: resolveVoiceCommandCompatibility
-      deprecated: true
-      summary: Anonymous compatibility alias for the canonical voice-command endpoint
-      description: >-
-        Compatibility alias for `POST /api/v1/voice/command`. It has exactly the same request,
-        response, validation, timeout, and error semantics. New Windows clients must use the
-        canonical `/api/v1/voice/command` route.
-      parameters:
-        - name: X-Request-Id
-          in: header
-          required: false
-          schema:
-            type: string
-            minLength: 1
-            maxLength: 128
-            pattern: "^[A-Za-z0-9_-]+$"
-          description: Optional caller correlation ID; valid values are echoed in the response.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/VoiceCommandRequest"
-      responses:
-        "200":
-          description: Same response as the canonical endpoint.
-          headers:
-            X-Request-Id:
-              description: RockServer request ID, identical to `request_id` in the body.
-              schema:
-                type: string
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/VoiceCommandResponse"
-        "400":
-          description: Same error semantics as the canonical endpoint.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "413":
-          description: Same error semantics as the canonical endpoint.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "422":
-          description: Same error semantics as the canonical endpoint.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "500":
-          description: Same error semantics as the canonical endpoint.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "504":
-          description: Same error semantics as the canonical endpoint.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
 components:
   parameters:
     DeviceId:
@@ -916,14 +838,15 @@ components:
       scheme: bearer
       bearerFormat: opaque
       description: >-
-        Legacy deployment-configured Bearer credential required only for the protected `/api/v1/*`
-        compatibility routes. Normal `/v1/search` and `/v1/voice/*` product routes are anonymous;
-        this credential is not part of the account/device pairing UX and must not be exposed there.
+        Legacy deployment-configured Bearer accepted when supplied to `/api/v1/voice/*` routes.
+        Normal `/api/v1/search` and `/api/v1/voice/*` product routes are anonymous; this credential is not
+        part of the account/device pairing UX and must not be exposed there.
     RockserverBearer:
       type: http
       scheme: bearer
       bearerFormat: opaque
-      description: Short-lived opaque native session access token issued by pairing.
+      description: Short-lived opaque native session access token issued by pairing and accepted by
+        `/api/v1/voice/*` routes when supplied.
     AdminBearer:
       type: http
       scheme: bearer

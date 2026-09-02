@@ -19,18 +19,18 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  registrationOptions(payload?: { account_display_name: string }) { return request<RegistrationOptions>("/v1/auth/passkeys/registration/options", { method: "POST", body: JSON.stringify(payload ?? {}) }); },
-  registrationVerify(payload: unknown) { return request<{ account_display_name: string; csrf_token: string }>("/v1/auth/passkeys/registration/verify", { method: "POST", body: JSON.stringify(payload) }); },
-  authenticationOptions() { return request<AuthenticationOptions>("/v1/auth/passkeys/authentication/options", { method: "POST", body: "{}" }); },
-  authenticationVerify(payload: unknown) { return request<{ csrf_token: string }>("/v1/auth/passkeys/authentication/verify", { method: "POST", body: JSON.stringify(payload) }); },
-  browserSession() { return request<{ account_display_name: string; csrf_token: string }>("/v1/auth/browser-session", { method: "POST", body: "{}" }); },
-  browserAccount() { return request<BrowserAccount>("/v1/browser/account"); },
-  renameDevice(deviceId: string, device_display_name: string, csrfToken: string) { return request<void>(`/v1/browser/devices/${encodeURIComponent(deviceId)}`, { method: "PATCH", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ device_display_name }) }); },
-  revokeDevice(deviceId: string, csrfToken: string) { return request<void>(`/v1/browser/devices/${encodeURIComponent(deviceId)}`, { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } }); },
-  logoutBrowser(csrfToken: string) { return request<void>("/v1/auth/browser-logout", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: "{}" }); },
-  pairing(code: string) { return request<PairingPreview>(`/v1/pairing-requests/lookup?code=${encodeURIComponent(code)}`); },
+  registrationOptions(payload?: { account_display_name: string }) { return request<RegistrationOptions>("/api/v1/auth/passkeys/registration/options", { method: "POST", body: JSON.stringify(payload ?? {}) }); },
+  registrationVerify(payload: unknown) { return request<{ account_display_name: string; csrf_token: string }>("/api/v1/auth/passkeys/registration/verify", { method: "POST", body: JSON.stringify(payload) }); },
+  authenticationOptions() { return request<AuthenticationOptions>("/api/v1/auth/passkeys/authentication/options", { method: "POST", body: "{}" }); },
+  authenticationVerify(payload: unknown) { return request<{ csrf_token: string }>("/api/v1/auth/passkeys/authentication/verify", { method: "POST", body: JSON.stringify(payload) }); },
+  browserSession() { return request<{ account_display_name: string; csrf_token: string }>("/api/v1/auth/browser-session", { method: "POST", body: "{}" }); },
+  browserAccount() { return request<BrowserAccount>("/api/v1/browser/account"); },
+  renameDevice(deviceId: string, device_display_name: string, csrfToken: string) { return request<void>(`/api/v1/browser/devices/${encodeURIComponent(deviceId)}`, { method: "PATCH", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ device_display_name }) }); },
+  revokeDevice(deviceId: string, csrfToken: string) { return request<void>(`/api/v1/browser/devices/${encodeURIComponent(deviceId)}`, { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } }); },
+  logoutBrowser(csrfToken: string) { return request<void>("/api/v1/auth/browser-logout", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: "{}" }); },
+  pairing(code: string) { return request<PairingPreview>(`/api/v1/pairing-requests/lookup?code=${encodeURIComponent(code)}`); },
   approvePairing(requestId: string, approvalSecret: string, verificationPhrase: string, csrfToken: string) {
-    return request<void>(`/v1/pairing-requests/${requestId}/approve`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ approval_secret: approvalSecret, verification_phrase: verificationPhrase }) });
+    return request<void>(`/api/v1/pairing-requests/${requestId}/approve`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ approval_secret: approvalSecret, verification_phrase: verificationPhrase }) });
   },
 };
 
@@ -40,11 +40,11 @@ async function adminRequest<T>(path: string, token: string, init: RequestInit = 
 
 /** First-party admin calls accept a caller-owned in-memory bearer and never persist it. */
 export const adminApi = {
-  login(username: string, password: string) { return request<{ access_token: string }>("/v1/admin/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }); },
-  logout(token: string) { return adminRequest<void>("/v1/admin/auth/logout", token, { method: "POST", body: "{}" }); },
-  devices(token: string, offset: number) { return adminRequest<AdminPage<AdminDevice>>(`/v1/admin/devices?limit=25&offset=${offset}`, token); },
-  audit(token: string, offset: number, filters: { from?: string; until?: string; action?: string; outcome?: string }) { const params = new URLSearchParams({ limit: "25", offset: String(offset) }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); }); return adminRequest<AdminPage<AdminAuditEntry>>(`/v1/admin/audit?${params}`, token); },
-  stations(token: string, offset: number, query: string) { const params = new URLSearchParams({ limit: "25", offset: String(offset) }); if (query.trim()) params.set("q", query.trim()); return adminRequest<AdminPage<AdminStation>>(`/v1/admin/stations?${params}`, token); },
+  login(username: string, password: string) { return request<{ access_token: string }>("/api/v1/admin/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }); },
+  logout(token: string) { return adminRequest<void>("/api/v1/admin/auth/logout", token, { method: "POST", body: "{}" }); },
+  devices(token: string, offset: number) { return adminRequest<AdminPage<AdminDevice>>(`/api/v1/admin/devices?limit=25&offset=${offset}`, token); },
+  audit(token: string, offset: number, filters: { from?: string; until?: string; action?: string; outcome?: string }) { const params = new URLSearchParams({ limit: "25", offset: String(offset) }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); }); return adminRequest<AdminPage<AdminAuditEntry>>(`/api/v1/admin/audit?${params}`, token); },
+  stations(token: string, offset: number, query: string) { const params = new URLSearchParams({ limit: "25", offset: String(offset) }); if (query.trim()) params.set("q", query.trim()); return adminRequest<AdminPage<AdminStation>>(`/api/v1/admin/stations?${params}`, token); },
 };
 
 export const base64url = (bytes: ArrayBuffer | Uint8Array) => {

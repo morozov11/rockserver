@@ -1,12 +1,62 @@
 # Project status
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
+
+## API namespace consolidation (implemented locally, 2026-09-02)
+
+All first-party product, account, browser, device, administrator, search, and voice routes now use
+`/api/v1/*` exclusively. The former non-namespaced compatibility registrations were removed rather
+than redirected. Voice remains a single endpoint per transport: requests without `Authorization` use
+anonymous limits, while a supplied Bearer is validated as a legacy deployment token or a paired
+native-session token. RockCast, the administrator web client, OpenAPI, Caddy matchers, and active
+documentation use the same namespace. External SpeechKit provider URLs are unchanged.
+
+## DC-000 — Windows-first readiness decision (GO, 2026-09-02)
+
+The device-control protocol may start at DC-001.  A read-only audit of the current
+`C:\repos\rockserver` and `C:\repos\rockcast` checkouts confirms that RockCast's
+text-search path is operationally coherent: releases call anonymous `POST /api/v1/search`
+at `https://alex.vault57.ru`, and a failed or empty service result preserves the embedded
+catalog plus Radio Browser fallback and existing playback.  The account binding needed by
+a future registered player is also present (`device_id`/device secret protected by DPAPI
+and `POST /api/v1/auth/device-session`), but it is not a device-control connection.
+
+Voice route selection is now stable: an anonymous RockCast session uses
+`wss://.../api/v1/voice/stream`, while a paired PC renews its native access token through
+`POST /api/v1/auth/device-session` and uses the same WebSocket path with Bearer authentication.
+The voice routes accept either the legacy deployment Bearer or an active paired native-session
+Bearer, resolving the prior token rejection. A transient token-renewal failure preserves the
+durable binding and uses the anonymous mode. RockServer
+provides bounded buffered SpeechKit v1 and selectable v3 recognizers when `YANDEX_AI_API_KEY` is
+configured; absent configuration deliberately returns `speech_provider_unavailable`, leaving
+text search and local playback usable.  A second STT provider and retry/circuit-breaker policy
+remain future hardening, not a protocol blocker.
+
+Current RockCast control entry points are documented for the later protocol adapter:
+`app/actions/playback.rs` calls `PlaybackController::play`, `stop`, and `set_volume`;
+`playback/mod.rs` owns generation/state events and delegates local output to `LocalPlayer`
+and receiver output to `CastService`; `cast/client/mod.rs` owns discovery, CASTV2
+play/stop/current-volume; and `relay/mod.rs` owns the LAN HTTP relay lifecycle selected by
+the persisted `cast_relay` toggle.  No device-control client, capability manifest, or
+remote command adapter exists in RockCast.
+
+The removed `docs/windows-production-roadmap.md` and unperformed Windows E2E/failure
+coverage are explicitly out of this decision.  The voice/authentication route and degraded
+STT behaviour are now defined sufficiently for DC-001; no ESP32 firmware was started by
+DC-000.
+
+RockCast changed only at the existing voice/session client boundary.  RockServer now documents
+and enforces native-session Bearer acceptance on the canonical voice command and stream routes;
+no database schema or deployment changed.  RockCast verification passed: `cargo fmt --check`,
+strict all-target/all-feature Clippy, and `cargo test` (97 unit tests plus non-live integration
+coverage).  RockServer `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`
+passed; external provider and database cases are opt-in by design.
 
 ## RS-ADMIN-006 SPA administrator console (implemented locally, 2026-09-01)
 
 The former Axum server-rendered `/admin` shell is superseded: Caddy now serves the existing
 first-party Preact/Vite bundle at `/admin` in the same local and production topology, while
-`/v1/admin/*` remains reverse-proxied to RockServer before the SPA fallback. The administrator
+`/api/v1/admin/*` remains reverse-proxied to RockServer before the SPA fallback. The administrator
 Bearer exists only in Preact state and is cleared on logout or `401`; reload requires login.
 The read-only tabs are Devices (safe paired-device projection), Audit (request records plus security
 events) and Stations (repository-side name/tag filtering, stable bounded pagination). No mutation,
@@ -22,7 +72,7 @@ available, so Caddyfile validation and a browser `http://localhost/admin` smoke 
 ## Local administrator launcher (2026-09-01)
 
 `run-rockserver-admin-local.ps1` starts host `cargo run` for RockServer and a disposable Caddy
-container that serves `web/dist` at `http://127.0.0.1:3080/admin` while proxying `/v1/*`,
+container that serves `web/dist` at `http://127.0.0.1:3080/admin` while proxying `/api/v1/*`,
 `/api/v1/*`, and `/health/*` to the host listener. It sets `ROCKSERVER_LOCAL_ADMIN_ORIGIN` to the
 Caddy loopback origin (default port `3080`, overridable with `-AdminUiPort`). It builds `web/dist`
 when missing. `run-rockserver-local.ps1` remains the API-only launcher without SPA hosting.
@@ -62,9 +112,9 @@ loopback-only disposable container was removed after the test.
 JavaScript. Successful RS-ADMIN-003 login hands its opaque administrator Bearer token only to a
 JavaScript variable in the current page; the shell never serializes it and the helper does not use
 cookies, storage, URL state, DOM insertion, logs, or third-party code. Logout and any `401` clear
-the authenticated view and token. The protected, read-only `GET /v1/admin/stations` presentation
+the authenticated view and token. The protected, read-only `GET /api/v1/admin/stations` presentation
 model is bounded to 50 records and reuses the current catalog read service without new SQL.
-All `/admin` assets and `/v1/admin/*` responses carry `Cache-Control: no-store`, restrictive
+All `/admin` assets and `/api/v1/admin/*` responses carry `Cache-Control: no-store`, restrictive
 same-origin CSP, nosniff/referrer/permissions protections; existing login/refresh/logout Origin
 validation remains the state-change boundary. No import, credentials, logs, password changes, or
 other operator controls were added. Verification results are recorded in the current task log;
@@ -72,14 +122,14 @@ the next scope is RS-ADMIN-005.
 
 ## RS-ADMIN-003 administrator sessions (implemented locally, 2026-09-01)
 
-`/v1/admin/auth/login`, `/refresh`, `/logout`, and the deliberately minimal protected
-`GET /v1/admin/session` now form a separate administrator boundary. Login validates the existing
+`/api/v1/admin/auth/login`, `/refresh`, `/logout`, and the deliberately minimal protected
+`GET /api/v1/admin/session` now form a separate administrator boundary. Login validates the existing
 Argon2id PHC password, issues a 15-minute opaque Bearer value whose SHA-256 hash alone is stored,
 and records safe durable attempt/audit classes. Refresh replaces and revokes the prior session;
 logout revokes it immediately. Login uses the durable username+trusted-source-IP correlation key
 and locks after five failed attempts in fifteen minutes. State-changing admin requests require the
 existing trusted first-party Origin/proxy boundary; forwarded identity is ignored without that proof.
-Public `/v1/*`, legacy `/api/v1/*`, passkey/browser-session, and local `/admin` preview behavior
+Public `/api/v1/*`, legacy `/api/v1/*`, passkey/browser-session, and local `/admin` preview behavior
 are unchanged. The disposable `pgvector/pg17` run passed the RS-ADMIN-003 durable-query test and
 the RS-ADMIN-002 bootstrap concurrency test when each used the disposable database serially.
 The pre-existing all-ignored suite is not safe to run concurrently against one database: four
@@ -146,7 +196,7 @@ No code, API, migration, deployment, staging data or client behaviour changed.
 ## RM-011 durable device-secret sessions (implemented locally, 2026-08-30)
 
 Native pairing is now a durable device binding rather than a refresh-token family. Pairing returns
-one 256-bit opaque `device_secret`; PostgreSQL stores only its hash. `POST /v1/auth/device-session`
+one 256-bit opaque `device_secret`; PostgreSQL stores only its hash. `POST /api/v1/auth/device-session`
 accepts the device UUID and secret, retires the previous short-lived access session, and returns a
 new 15-minute access token. Only a revoked, unknown, or deleted-account credential returns
 `401 device_credential_invalid`; transient store failures return `503` and never revoke a device.
@@ -442,7 +492,7 @@ the human device name/type, connection time, most recent activity when available
 active/inactive native-session status, and the 10-device limit with an explanation for freeing a
 slot. Anonymous landing remains a sign-in/pairing entry point rather than an account centre.
 
-`GET /v1/browser/account` is cookie/proxy-bound and returns only the safe browser projection.
+`GET /api/v1/browser/account` is cookie/proxy-bound and returns only the safe browser projection.
 Rename, revoke, and browser logout use separate first-party trusted-proxy, Origin and CSRF checks;
 the server derives ownership from the cookie, writes only safe audit classifications, and owner
 checks every target device. Browser logout revokes only its cookie session. Device revoke revokes
@@ -467,7 +517,7 @@ Anonymous pairing makes the two choices explicit: sign in with an existing passk
 new Rock account with an unambiguous warning. The current URL remains unchanged through both
 ceremonies, so the original request survives login/registration and reloads. An authenticated
 browser sees the exact confirmation question for its account, with connect and cancel actions.
-`POST /v1/auth/browser-session` rotates a tab-local CSRF value for a live cookie session; it is
+`POST /api/v1/auth/browser-session` rotates a tab-local CSRF value for a live cookie session; it is
 first-party/proxy-bound, no-store, returns only the display name and CSRF value, and lets the
 specific pairing screen recover safely after reload without browser token storage.
 
@@ -545,7 +595,7 @@ The Caddy Docker build also now sets `CI=true` only for its pnpm build command, 
 non-interactive image build cannot wait for a modules-directory prompt after source copy.
 
 Post-deploy probing found that Caddy's SPA `try_files` rewrite was taking precedence over the
-API matcher, returning the static page for `/health/*` and `/v1/*`. Both Caddyfiles now use an
+API matcher, returning the static page for `/health/*` and `/api/v1/*`. Both Caddyfiles now use an
 exclusive API `handle` before the static fallback; the regression test requires that order.
 
 Final staging deployment `f960e323a2b9e06e0281bf144bb368dc244e54c9` succeeded through its
@@ -775,7 +825,7 @@ changed.
 
 ## Local ONNX semantic search
 
-`onnx-local` provides CPU-only `intfloat/multilingual-e5-small` inference (384 dimensions) using local ONNX Runtime and tokenizer assets. Migration 0005 persists normalized station text and adds an E5-provenance cosine HNSW index. On 2026-08-17 the local PostgreSQL database contained 1,005 stations (999 imported from Radio Browser), all 1,005 searchable documents were backfilled with matching E5 embeddings, and live Russian queries completed through `POST /v1/search`.
+`onnx-local` provides CPU-only `intfloat/multilingual-e5-small` inference (384 dimensions) using local ONNX Runtime and tokenizer assets. Migration 0005 persists normalized station text and adds an E5-provenance cosine HNSW index. On 2026-08-17 the local PostgreSQL database contained 1,005 stations (999 imported from Radio Browser), all 1,005 searchable documents were backfilled with matching E5 embeddings, and live Russian queries completed through `POST /api/v1/search`.
 
 ## Semantic language and country intent filters
 
@@ -801,7 +851,7 @@ Latest verification for this change: `cargo fmt --check`, `cargo clippy --all-ta
 ## Current state
 
 The first API-access security slice is implemented. Startup requires the configured application
-Bearer credential; `POST /v1/search`, both voice-command
+Bearer credential; `POST /api/v1/search`, both voice-command
 routes, and both WebSocket voice-stream handshakes reject malformed or invalid
 `Authorization: Bearer` credentials with structured `401 authentication_required` responses.
 `/health/live` and `/health/ready` remain unauthenticated for process supervision. The initial
@@ -826,11 +876,11 @@ RS-007 was re-verified on 2026-08-14 against the disposable local `rockserver` d
 
 Stages 0–10 are complete in the current working tree: repository bootstrap, Axum HTTP skeleton, OpenAPI search contract, deterministic in-memory search, PostgreSQL persistence, controlled Radio Browser import, RS-007 semantic ranking foundation, RS-008 voice-command JSON contract, the provider-neutral streaming voice API, and Yandex AI Studio intent parsing.
 
-`POST /v1/search` keeps the existing request and response schemas. `SearchService` now owns request-only query interpretation and optional query embedding before calling `StationRepository`. The in-memory repository remains metadata-only. PostgreSQL uses exact pgvector cosine similarity when the query and station embedding provenance match, and otherwise preserves metadata fallback.
+`POST /api/v1/search` keeps the existing request and response schemas. `SearchService` now owns request-only query interpretation and optional query embedding before calling `StationRepository`. The in-memory repository remains metadata-only. PostgreSQL uses exact pgvector cosine similarity when the query and station embedding provenance match, and otherwise preserves metadata fallback.
 
-RS-008 stabilizes the Windows voice-command transport contract without introducing audio upload or an STT provider. The canonical route is `POST /api/v1/voice/command`; `POST /v1/voice/command` is a deprecated compatibility alias with identical behavior. Both accept only an already-recognized `transcript` plus the established locale, limit, and station-exclusion controls, then delegate to the existing `SearchService`. A successful response returns the trimmed transcript, normalized query, full deterministic result list, and `selected_station` equal to the first result or `null` when there is no match. Existing `POST /v1/search` remains unchanged.
+RS-008 stabilizes the Windows voice-command transport contract without introducing audio upload or an STT provider. The canonical route is `POST /api/v1/voice/command`; `POST /api/v1/voice/command` is a deprecated compatibility alias with identical behavior. Both accept only an already-recognized `transcript` plus the established locale, limit, and station-exclusion controls, then delegate to the existing `SearchService`. A successful response returns the trimmed transcript, normalized query, full deterministic result list, and `selected_station` equal to the first result or `null` when there is no match. Existing `POST /api/v1/search` remains unchanged.
 
-The JSON voice route retains its existing limits and error behavior. Canonical WebSocket `GET /api/v1/voice/stream` (deprecated alias `/v1/voice/stream`) now accepts a validated start event and bounded PCM16 mono binary chunks, emits partial/final transcript events, and resolves the final transcript through `SearchService`. Chunks are limited to 65,536 bytes, sessions to 10 MiB, provider operations to ten seconds, and search to five seconds. Terminal WebSocket errors retain `code`, `message`, `request_id`, and `details`.
+The JSON voice route retains its existing limits and error behavior. Canonical WebSocket `GET /api/v1/voice/stream` (deprecated alias `/api/v1/voice/stream`) now accepts a validated start event and bounded PCM16 mono binary chunks, emits partial/final transcript events, and resolves the final transcript through `SearchService`. Chunks are limited to 65,536 bytes, sessions to 10 MiB, provider operations to ten seconds, and search to five seconds. Terminal WebSocket errors retain `code`, `message`, `request_id`, and `details`.
 
 The `StreamingSpeechRecognizer`/`SpeechStreamSession` traits keep recognizers replaceable without exposing credentials or upstream protocol details to clients. With `YANDEX_AI_API_KEY`, startup exposes both `YandexSpeechKitRecognizer` (buffered v1) and `YandexSpeechKitStreamingRecognizer` (v3 gRPC); otherwise both modes use `UnavailableSpeechRecognizer`. A client selects `recognizer_mode` in its start event: omitted or `buffered_v1` preserves commit-time recognition, while `streaming_v3` forwards chunks upstream and emits partial/final updates.
 
@@ -842,7 +892,7 @@ The query parser, LLM provider, and embedding provider are traits. `LlmQueryPars
 
 RS-015 adds a provider-neutral `CommandInterpreter` above the same replaceable `LlmProvider`. `LlmCommandInterpreter` sends bounded STT text and locale with a strict Yandex-compatible JSON Schema, deserializes directly into serde-backed `VoiceCommand`, `Intent`, and `RadioQuery`, and then performs only semantic validation and normalization. It supports radio play/search, stop, next/previous station, relative volume change, and unknown intent without an heuristic command parser. The separate ignored `yandex_llm_live` target has four exact tests; its primary calm-jazz case passed live on 2026-08-14 and safely logged the POST endpoint, redacted authorization/folder, request body, HTTP 200 response body, and final typed command.
 
-Station embedding generation is a separate `backfill_embeddings` command. It is never called by HTTP startup or `POST /v1/search`. Radio Browser import ownership and update semantics remain unchanged.
+Station embedding generation is a separate `backfill_embeddings` command. It is never called by HTTP startup or `POST /api/v1/search`. Radio Browser import ownership and update semantics remain unchanged.
 
 ## Configuration and behavior
 
@@ -1145,8 +1195,8 @@ external backup target and injected secrets. They were not performed or claimed 
 
 ## MVP-001-B — anonymous `/v1` public policy (local implementation)
 
-`/v1/catalog/stations`, `/v1/catalog/stations/{station_id}`, `/v1/search`,
-`/v1/voice/command`, and `/v1/voice/stream` now use the approved anonymous route boundary;
+`/api/v1/catalog/stations`, `/api/v1/catalog/stations/{station_id}`, `/api/v1/search`,
+`/api/v1/voice/command`, and `/api/v1/voice/stream` now use the approved anonymous route boundary;
 the existing `/api/v1` aliases retain Bearer authentication. Anonymous JSON is capped at 16 KiB;
 search/transcript length is capped at 500 characters and results at 20/10. Until trusted proxy
 CIDRs are configured, forwarded headers are ignored and a conservative direct-peer fallback
@@ -1181,21 +1231,21 @@ cryptographic WebAuthn checks, Secure/HttpOnly/SameSite cookies, CSRF/origin che
 rate limits, and desktop pairing completion with one-time native access/refresh issuance.
 The browser never receives native tokens; the desktop completion client belongs to RM-011-E.
 
-The runtime now also creates a ten-minute desktop pairing request at `POST /v1/pairing-requests`
-and resolves pending short codes at `GET /v1/pairing-requests/lookup?code=...`. PostgreSQL supplies
+The runtime now also creates a ten-minute desktop pairing request at `POST /api/v1/pairing-requests`
+and resolves pending short codes at `GET /api/v1/pairing-requests/lookup?code=...`. PostgreSQL supplies
 the expiry clock and persists only SHA-256 proof hashes; lookup exposes only device metadata and the
 verification phrase. Approval, completion and request throttling are implemented; the browser UI
 executes approval, while the native desktop client remains responsible for calling completion.
 Completion accepts only the desktop proof; PostgreSQL derives the owner from the approved request
 inside the same transaction, so native clients never need or submit an account UUID.
 
-The approve endpoint is now present at `POST /v1/pairing-requests/{request_id}/approve`; it
+The approve endpoint is now present at `POST /api/v1/pairing-requests/{request_id}/approve`; it
 requires an `HttpOnly` browser cookie proof, the `X-CSRF-Token` double-submit header, exact
 first-party HTTPS origin, and the configured Caddy proxy proof. A new nullable cookie-hash column
 keeps old B2 rows readable while all newly created browser sessions bind an opaque cookie hash.
 
-Native session/account management is exposed through `POST /v1/auth/device-session`,
-`GET /v1/account/profile`, `GET /v1/devices`, and `DELETE /v1/devices/{device_id}`.
+Native session/account management is exposed through `POST /api/v1/auth/device-session`,
+`GET /api/v1/account/profile`, `GET /api/v1/devices`, and `DELETE /api/v1/devices/{device_id}`.
 Access-token lookup and device revocation are owner-scoped in PostgreSQL; the durable device secret
 can create a replacement short-lived access session without rotating or storing a refresh token.
 

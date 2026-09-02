@@ -21,26 +21,24 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
     for path in [
         "/health/live",
         "/health/ready",
-        "/v1/admin/auth/login",
-        "/v1/admin/auth/refresh",
-        "/v1/admin/auth/logout",
-        "/v1/admin/session",
-        "/v1/admin/devices",
-        "/v1/admin/audit",
-        "/v1/admin/stations",
-        "/v1/auth/device-session",
-        "/v1/auth/browser-logout",
-        "/v1/browser/account",
-        "/v1/account/profile",
-        "/v1/account",
-        "/v1/devices",
-        "/v1/devices/{device_id}",
-        "/v1/browser/devices/{device_id}",
-        "/v1/search",
+        "/api/v1/admin/auth/login",
+        "/api/v1/admin/auth/refresh",
+        "/api/v1/admin/auth/logout",
+        "/api/v1/admin/session",
+        "/api/v1/admin/devices",
+        "/api/v1/admin/audit",
+        "/api/v1/admin/stations",
+        "/api/v1/auth/device-session",
+        "/api/v1/auth/browser-logout",
+        "/api/v1/browser/account",
+        "/api/v1/account/profile",
+        "/api/v1/account",
+        "/api/v1/devices",
+        "/api/v1/devices/{device_id}",
+        "/api/v1/browser/devices/{device_id}",
+        "/api/v1/search",
         "/api/v1/voice/command",
-        "/v1/voice/command",
         "/api/v1/voice/stream",
-        "/v1/voice/stream",
     ] {
         assert!(
             value_at(&document, "paths")
@@ -52,13 +50,13 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
 
     assert!(
         value_at(&document, "paths")
-            .and_then(|paths| paths.get("/v1/search"))
+            .and_then(|paths| paths.get("/api/v1/search"))
             .and_then(|search| search.get("post"))
             .is_some(),
         "search path must define POST"
     );
     let completion_operation = value_at(&document, "paths")
-        .and_then(|paths| paths.get("/v1/pairing-requests/{request_id}/complete"))
+        .and_then(|paths| paths.get("/api/v1/pairing-requests/{request_id}/complete"))
         .and_then(|path| path.get("post"))
         .expect("pairing completion must define POST");
     let completion = completion_operation
@@ -101,18 +99,11 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
             "voice command must document {status}"
         );
     }
-    for path in ["/api/v1/voice/command", "/api/v1/voice/stream"] {
-        assert!(
-            value_at(&document, "paths")
-                .and_then(|paths| paths.get(path))
-                .and_then(Value::as_mapping)
-                .and_then(|operations| operations.values().next())
-                .and_then(|operation| operation.get("security"))
-                .is_some(),
-            "{path} must retain the legacy Bearer boundary"
-        );
-    }
-    for path in ["/v1/search", "/v1/voice/command", "/v1/voice/stream"] {
+    for path in [
+        "/api/v1/search",
+        "/api/v1/voice/command",
+        "/api/v1/voice/stream",
+    ] {
         assert!(
             value_at(&document, "paths")
                 .and_then(|paths| paths.get(path))
@@ -128,12 +119,12 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         "the RockCast Bearer scheme must be declared"
     );
     for path in [
-        "/v1/admin/auth/refresh",
-        "/v1/admin/auth/logout",
-        "/v1/admin/session",
-        "/v1/admin/devices",
-        "/v1/admin/audit",
-        "/v1/admin/stations",
+        "/api/v1/admin/auth/refresh",
+        "/api/v1/admin/auth/logout",
+        "/api/v1/admin/session",
+        "/api/v1/admin/devices",
+        "/api/v1/admin/audit",
+        "/api/v1/admin/stations",
     ] {
         assert!(
             value_at(&document, "paths")
@@ -145,15 +136,6 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
             "{path} must retain the separate admin Bearer boundary"
         );
     }
-    assert_eq!(
-        value_at(&document, "paths")
-            .and_then(|paths| paths.get("/v1/voice/command"))
-            .and_then(|command| command.get("post"))
-            .and_then(|operation| operation.get("deprecated"))
-            .and_then(Value::as_bool),
-        Some(true),
-        "the /v1 voice route must remain an explicitly deprecated compatibility alias"
-    );
     let voice_stream = value_at(&document, "paths")
         .and_then(|paths| paths.get("/api/v1/voice/stream"))
         .and_then(|stream| stream.get("get"))
@@ -162,15 +144,6 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         voice_stream.get("x-websocket-client-messages").is_some()
             && voice_stream.get("x-websocket-server-messages").is_some(),
         "voice stream must document both WebSocket message directions"
-    );
-    assert_eq!(
-        value_at(&document, "paths")
-            .and_then(|paths| paths.get("/v1/voice/stream"))
-            .and_then(|stream| stream.get("get"))
-            .and_then(|operation| operation.get("deprecated"))
-            .and_then(Value::as_bool),
-        Some(true),
-        "the /v1 stream route must remain an explicitly deprecated compatibility alias"
     );
     assert!(
         value_at(&document, "paths")
@@ -216,7 +189,7 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
     }
     assert!(
         value_at(&document, "paths")
-            .and_then(|paths| paths.get("/v1/auth/browser-session"))
+            .and_then(|paths| paths.get("/api/v1/auth/browser-session"))
             .and_then(|path| path.get("post"))
             .is_some(),
         "browser session CSRF refresh must be documented"
@@ -274,7 +247,7 @@ async fn search_endpoint_is_registered() {
 
     let response = rockserver::http::router()
         .oneshot(
-            Request::post("/v1/search")
+            Request::post("/api/v1/search")
                 .header("content-type", "application/json")
                 .header(
                     "authorization",

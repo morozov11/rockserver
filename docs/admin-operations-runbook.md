@@ -52,7 +52,7 @@ records within that window and follow the same access controls.
   HTTPS Origin and proxy protocol marker.
 - Bootstrap credentials are supplied only to the protected one-time terminal or
   deployment process, never in a URL, API payload, or source-controlled file.
-- `/admin` and `/v1/admin/*` responses have `Cache-Control: no-store`, restrictive
+- `/admin` and `/api/v1/admin/*` responses have `Cache-Control: no-store`, restrictive
   same-origin CSP, no third-party assets, nosniff, referrer and permissions
   protections. The console keeps the Bearer only in current-page memory.
 - Verify login, refresh, logout, expired/revoked session rejection, and public

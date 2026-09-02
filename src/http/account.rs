@@ -604,7 +604,7 @@ pub(super) async fn revoke_device(
 }
 
 /// Resolves the active native session from the Bearer credential.
-async fn match_native_session(
+pub(super) async fn match_native_session(
     state: &AppState,
     headers: &HeaderMap,
     request_id: &str,

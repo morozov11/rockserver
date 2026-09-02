@@ -225,121 +225,118 @@ fn local_admin_origin_from_env() -> Option<String> {
 fn build_router(state: AppState) -> Router {
     let admin_routes = Router::new()
         .route(
-            "/v1/admin/auth/login",
+            "/api/v1/admin/auth/login",
             axum::routing::post(admin_auth::login),
         )
         .route(
-            "/v1/admin/auth/refresh",
+            "/api/v1/admin/auth/refresh",
             axum::routing::post(admin_auth::refresh),
         )
         .route(
-            "/v1/admin/auth/logout",
+            "/api/v1/admin/auth/logout",
             axum::routing::post(admin_auth::logout),
         )
-        .route("/v1/admin/session", axum::routing::get(admin_auth::session))
         .route(
-            "/v1/admin/stations",
+            "/api/v1/admin/session",
+            axum::routing::get(admin_auth::session),
+        )
+        .route(
+            "/api/v1/admin/stations",
             axum::routing::get(admin_console::stations),
         )
         .route(
-            "/v1/admin/devices",
+            "/api/v1/admin/devices",
             axum::routing::get(admin_console::devices),
         )
-        .route("/v1/admin/audit", axum::routing::get(admin_console::audit))
+        .route(
+            "/api/v1/admin/audit",
+            axum::routing::get(admin_console::audit),
+        )
         .route_layer(axum::middleware::from_fn(admin_console::security_headers));
     Router::new()
         .merge(admin_routes)
         .route("/health/live", axum::routing::get(health::live))
         .route("/health/ready", axum::routing::get(health::ready))
         .route(
-            "/v1/catalog/stations",
+            "/api/v1/catalog/stations",
             axum::routing::get(catalog::public_catalog_list),
         )
         .route(
-            "/v1/catalog/stations/{station_id}",
+            "/api/v1/catalog/stations/{station_id}",
             axum::routing::get(catalog::public_catalog_get),
         )
-        .route("/api/v1/search", axum::routing::post(search::search))
-        .route("/v1/search", axum::routing::post(search::public_search))
+        .route("/api/v1/search", axum::routing::post(search::public_search))
         .route(
             "/api/v1/voice/command",
             axum::routing::post(voice::voice_command),
-        )
-        .route(
-            "/v1/voice/command",
-            axum::routing::post(voice::public_voice_command),
         )
         .route(
             "/api/v1/voice/stream",
             axum::routing::get(voice::voice_stream),
         )
         .route(
-            "/v1/voice/stream",
-            axum::routing::get(voice::public_voice_stream),
-        )
-        .route(
-            "/v1/pairing-requests",
+            "/api/v1/pairing-requests",
             axum::routing::post(pairing::create_pairing_request),
         )
         .route(
-            "/v1/pairing-requests/lookup",
+            "/api/v1/pairing-requests/lookup",
             axum::routing::get(pairing::lookup_pairing_request),
         )
         .route(
-            "/v1/auth/browser-session",
+            "/api/v1/auth/browser-session",
             axum::routing::post(auth::browser_session),
         )
         .route(
-            "/v1/browser/account",
+            "/api/v1/browser/account",
             axum::routing::get(account::browser_account),
         )
         .route(
-            "/v1/auth/browser-logout",
+            "/api/v1/auth/browser-logout",
             axum::routing::post(account::logout_browser_session),
         )
         .route(
-            "/v1/pairing-requests/{request_id}/approve",
+            "/api/v1/pairing-requests/{request_id}/approve",
             axum::routing::post(pairing::approve_pairing_request),
         )
         .route(
-            "/v1/auth/passkeys/registration/options",
+            "/api/v1/auth/passkeys/registration/options",
             axum::routing::post(auth::registration_options),
         )
         .route(
-            "/v1/auth/passkeys/registration/verify",
+            "/api/v1/auth/passkeys/registration/verify",
             axum::routing::post(auth::registration_verify),
         )
         .route(
-            "/v1/auth/passkeys/authentication/options",
+            "/api/v1/auth/passkeys/authentication/options",
             axum::routing::post(auth::authentication_options),
         )
         .route(
-            "/v1/auth/passkeys/authentication/verify",
+            "/api/v1/auth/passkeys/authentication/verify",
             axum::routing::post(auth::authentication_verify),
         )
         .route(
-            "/v1/pairing-requests/{request_id}/complete",
+            "/api/v1/pairing-requests/{request_id}/complete",
             axum::routing::post(pairing::complete_pairing_request),
         )
         .route(
-            "/v1/auth/device-session",
+            "/api/v1/auth/device-session",
             axum::routing::post(auth::create_device_session),
         )
         .route(
-            "/v1/account/profile",
+            "/api/v1/account/profile",
             axum::routing::get(account::account_profile),
         )
         .route(
-            "/v1/account",
+            "/api/v1/account",
             axum::routing::delete(account::delete_account),
         )
-        .route("/v1/devices", axum::routing::get(account::list_devices))
+        .route("/api/v1/devices", axum::routing::get(account::list_devices))
         .route(
-            "/v1/devices/{device_id}",
+            "/api/v1/devices/{device_id}",
             axum::routing::delete(account::revoke_device),
         )
         .route(
-            "/v1/browser/devices/{device_id}",
+            "/api/v1/browser/devices/{device_id}",
             axum::routing::patch(account::rename_browser_device)
                 .delete(account::revoke_browser_device),
         )
@@ -438,7 +435,7 @@ mod tests {
         let denied = app
             .clone()
             .oneshot(
-                Request::get("/v1/admin/stations")
+                Request::get("/api/v1/admin/stations")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -447,7 +444,7 @@ mod tests {
         assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
         let allowed = app
             .oneshot(
-                Request::get("/v1/admin/stations?limit=1")
+                Request::get("/api/v1/admin/stations?limit=1")
                     .header(header::AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -501,7 +498,7 @@ mod tests {
             local_admin_origin: None,
             public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
         });
-        let refresh = Request::post("/v1/admin/auth/refresh")
+        let refresh = Request::post("/api/v1/admin/auth/refresh")
             .header(header::AUTHORIZATION, format!("Bearer {token}"))
             .header("origin", "https://alex.vault57.ru")
             .header("x-forwarded-proto", "https")
@@ -519,7 +516,7 @@ mod tests {
         let old = app
             .clone()
             .oneshot(
-                Request::get("/v1/admin/session")
+                Request::get("/api/v1/admin/session")
                     .header(header::AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -529,7 +526,7 @@ mod tests {
         assert_eq!(old.status(), StatusCode::UNAUTHORIZED);
         let current = app
             .oneshot(
-                Request::get("/v1/admin/session")
+                Request::get("/api/v1/admin/session")
                     .header(header::AUTHORIZATION, format!("Bearer {fresh_token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -546,7 +543,7 @@ mod tests {
         );
         assert!(request_records.iter().all(|record| matches!(
             record.endpoint,
-            "/v1/admin/auth/refresh" | "/v1/admin/session"
+            "/api/v1/admin/auth/refresh" | "/api/v1/admin/session"
         )));
     }
 
@@ -582,7 +579,7 @@ mod tests {
             public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
         });
         let login = |password: &str| {
-            Request::post("/v1/admin/auth/login")
+            Request::post("/api/v1/admin/auth/login")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header("origin", "http://127.0.0.1:3000")
                 .body(Body::from(
@@ -622,7 +619,7 @@ mod tests {
     async fn pairing_creation_fails_closed_without_the_postgres_account_store() {
         let response = router()
             .oneshot(
-                Request::post("/v1/pairing-requests")
+                Request::post("/api/v1/pairing-requests")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
                         r#"{"device_display_name":"Test desktop","device_type":"windows"}"#,
@@ -644,7 +641,7 @@ mod tests {
     async fn pairing_completion_rejects_a_client_supplied_owner() {
         let response = router()
             .oneshot(
-                Request::post("/v1/pairing-requests/00000000-0000-0000-0000-000000000000/complete")
+                Request::post("/api/v1/pairing-requests/00000000-0000-0000-0000-000000000000/complete")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
                         r#"{"desktop_token":"0123456789abcdef","user_id":"00000000-0000-0000-0000-000000000000"}"#,
@@ -661,7 +658,7 @@ mod tests {
     async fn passkey_authentication_rejects_a_client_supplied_account_identifier() {
         let response = router()
             .oneshot(
-                Request::post("/v1/auth/passkeys/authentication/verify")
+                Request::post("/api/v1/auth/passkeys/authentication/verify")
                     .header("content-type", "application/json")
                     .body(Body::from(
                         r#"{"challenge_id":"00000000-0000-0000-0000-000000000000","user_id":"00000000-0000-0000-0000-000000000000","id":"x","authenticatorData":"x","signature":"x","clientDataJSON":"x","userHandle":"x"}"#,
@@ -678,7 +675,7 @@ mod tests {
     async fn browser_session_refresh_rejects_direct_requests() {
         let response = router()
             .oneshot(
-                Request::post("/v1/auth/browser-session")
+                Request::post("/api/v1/auth/browser-session")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from("{}"))
                     .unwrap(),

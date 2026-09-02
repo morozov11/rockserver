@@ -74,7 +74,7 @@ async fn excluded_station_ids_do_not_appear_in_results() {
 async fn malformed_json_returns_a_contract_compliant_400_error() {
     let response = rockserver::http::router()
         .oneshot(
-            Request::post("/v1/search")
+            Request::post("/api/v1/search")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, format!("Bearer {API_TOKEN}"))
                 .body(Body::from(r#"{"query":"jazz""#))
@@ -106,7 +106,7 @@ async fn semantic_validation_returns_a_contract_compliant_422_error() {
 async fn search(payload: Value) -> (StatusCode, Value) {
     let response = rockserver::http::router()
         .oneshot(
-            Request::post("/v1/search")
+            Request::post("/api/v1/search")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, format!("Bearer {API_TOKEN}"))
                 .body(Body::from(payload.to_string()))
@@ -119,30 +119,12 @@ async fn search(payload: Value) -> (StatusCode, Value) {
 }
 
 #[tokio::test]
-async fn approved_v1_search_is_anonymous_but_api_alias_remains_bearer_protected() {
+async fn api_v1_search_is_anonymous() {
     let app = rockserver::http::router();
-    let unauthorized = app
-        .clone()
-        .oneshot(
-            Request::post("/api/v1/search")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"query":"jazz"}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(unauthorized.headers()[header::WWW_AUTHENTICATE], "Bearer");
-    assert_contract_error(
-        &response_body(unauthorized).await,
-        "authentication_required",
-        "A valid Bearer token is required.",
-    );
-
     let public_search = app
         .clone()
         .oneshot(
-            Request::post("/v1/search")
+            Request::post("/api/v1/search")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(r#"{"query":"jazz"}"#))
                 .unwrap(),
@@ -165,7 +147,7 @@ async fn anonymous_search_rejects_the_burst_before_work_is_started() {
         let response = app
             .clone()
             .oneshot(
-                Request::post("/v1/search")
+                Request::post("/api/v1/search")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(r#"{"query":"jazz"}"#))
                     .unwrap(),
@@ -176,7 +158,7 @@ async fn anonymous_search_rejects_the_burst_before_work_is_started() {
     }
     let rejected = app
         .oneshot(
-            Request::post("/v1/search")
+            Request::post("/api/v1/search")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(r#"{"query":"jazz"}"#))
                 .unwrap(),

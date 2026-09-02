@@ -205,7 +205,7 @@ async fn postgres_admin_bootstrap_is_atomic_and_idempotent() {
         .list_audit(AdminAuditFilter {
             from: None,
             until: None,
-            action: Some("/v1/admin/auth/refresh".to_owned()),
+            action: Some("/api/v1/admin/auth/refresh".to_owned()),
             outcome: Some("succeeded".to_owned()),
             offset: 0,
             limit: 10,
@@ -213,7 +213,7 @@ async fn postgres_admin_bootstrap_is_atomic_and_idempotent() {
         .await
         .unwrap();
     assert_eq!(audit.len(), 1);
-    assert_eq!(audit[0].action, "/v1/admin/auth/refresh");
+    assert_eq!(audit[0].action, "/api/v1/admin/auth/refresh");
     pool.close().await;
 }
 
@@ -310,7 +310,7 @@ async fn postgres_admin_auth_queries_are_durable_and_revocable() {
             request_id: "admin-integration-request".to_owned(),
             principal_id: credential.credential.principal_id,
             session_id: replacement_id,
-            endpoint: "/v1/admin/auth/refresh",
+            endpoint: "/api/v1/admin/auth/refresh",
             outcome: AdminRequestOutcome::Succeeded,
             duration_ms: 1,
         })
@@ -1387,7 +1387,7 @@ WHERE s.source = $1 AND s.source_station_id = $2
             .expect("repository should reconnect"),
     ))
     .oneshot(
-        Request::post("/v1/search")
+        Request::post("/api/v1/search")
             .header("content-type", "application/json")
             .header(
                 "authorization",
