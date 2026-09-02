@@ -919,9 +919,10 @@ components:
     DeviceSession:
       type: object
       additionalProperties: false
-      required: [access_token]
+      required: [access_token, access_expires_at]
       properties:
         access_token: { type: string, minLength: 16, maxLength: 128, writeOnly: true }
+        access_expires_at: { type: string, format: date-time }
     AccountProfile:
       type: object
       additionalProperties: false
@@ -986,12 +987,13 @@ components:
     PairingCompletion:
       type: object
       additionalProperties: false
-      required: [user_id, device_id, session_id, access_token, device_secret, account_display_name, device_display_name, device_type]
+      required: [user_id, device_id, session_id, access_token, access_expires_at, device_secret, account_display_name, device_display_name, device_type]
       properties:
         user_id: { type: string, format: uuid }
         device_id: { type: string, format: uuid }
         session_id: { type: string, format: uuid }
         access_token: { type: string, writeOnly: true }
+        access_expires_at: { type: string, format: date-time }
         device_secret: { type: string, minLength: 32, maxLength: 512, writeOnly: true }
         account_display_name: { type: string, minLength: 1, maxLength: 128 }
         device_display_name: { type: string, minLength: 1, maxLength: 128 }

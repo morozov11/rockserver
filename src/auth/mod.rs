@@ -269,6 +269,8 @@ pub struct PairingCompletion {
     pub device_id: Uuid,
     /// Newly created native session.
     pub session_id: Uuid,
+    /// Access expiry in PostgreSQL-formatted RFC 3339 UTC.
+    pub access_expires_at: String,
     /// User-visible owner account name resolved from the approved browser session.
     pub account_display_name: String,
     /// User-visible name of the newly connected device.

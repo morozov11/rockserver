@@ -272,7 +272,7 @@ impl PostgresAccountStore {
         device_secret_hash: &SecretHash,
         session_id: Uuid,
         access_hash: &SecretHash,
-    ) -> Result<bool, sqlx::Error> {
+    ) -> Result<Option<String>, sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
         let owner = sqlx::query_scalar::<_, Uuid>(
             "SELECT d.user_id FROM devices d JOIN users u ON u.id = d.user_id \
@@ -285,7 +285,7 @@ impl PostgresAccountStore {
         .await?;
         let Some(user_id) = owner else {
             transaction.rollback().await?;
-            return Ok(false);
+            return Ok(None);
         };
         sqlx::query(
             "UPDATE sessions SET revoked_at = now() WHERE device_id = $1 AND revoked_at IS NULL",
@@ -293,15 +293,16 @@ impl PostgresAccountStore {
         .bind(device_id)
         .execute(&mut *transaction)
         .await?;
-        sqlx::query(
+        let access_expires_at = sqlx::query_scalar::<_, String>(
             "INSERT INTO sessions (id, user_id, device_id, access_token_hash, access_expires_at) \
-             VALUES ($1, $2, $3, $4, now() + interval '15 minutes')",
+             VALUES ($1, $2, $3, $4, now() + interval '15 minutes') \
+             RETURNING to_char(access_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
         )
         .bind(session_id)
         .bind(user_id)
         .bind(device_id)
         .bind(access_hash.as_bytes())
-        .execute(&mut *transaction)
+        .fetch_one(&mut *transaction)
         .await?;
         sqlx::query("UPDATE devices SET last_seen_at = now() WHERE id = $1")
             .bind(device_id)
@@ -315,7 +316,7 @@ impl PostgresAccountStore {
         )
         .await?;
         transaction.commit().await?;
-        Ok(true)
+        Ok(Some(access_expires_at))
     }
 
     /// Creates a first-party browser session only for an active account.
@@ -958,15 +959,16 @@ impl PostgresAccountStore {
             transaction.rollback().await?;
             return Ok(PairingCompletionOutcome::DeviceLimit);
         }
-        sqlx::query(
-            "INSERT INTO sessions (id, user_id, device_id, access_token_hash, access_expires_at) VALUES ($1, $2, $3, $4, CASE WHEN $5 = 'db:15m' THEN now() + interval '15 minutes' ELSE $5::timestamptz END)",
+        let access_expires_at = sqlx::query_scalar::<_, String>(
+            "INSERT INTO sessions (id, user_id, device_id, access_token_hash, access_expires_at) VALUES ($1, $2, $3, $4, CASE WHEN $5 = 'db:15m' THEN now() + interval '15 minutes' ELSE $5::timestamptz END) \
+             RETURNING to_char(access_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
         )
         .bind(session.session_id)
         .bind(user_id)
         .bind(session.device_id)
         .bind(session.access_hash.as_bytes())
         .bind(session.access_expires_at_rfc3339)
-        .execute(&mut *transaction)
+        .fetch_one(&mut *transaction)
         .await?;
         sqlx::query("UPDATE pairing_requests SET consumed_at = now() WHERE id = $1")
             .bind(request_id)
@@ -984,6 +986,7 @@ impl PostgresAccountStore {
             user_id,
             device_id: session.device_id,
             session_id: session.session_id,
+            access_expires_at,
             account_display_name,
             device_display_name: request.device_display_name,
             device_type: request.device_type,

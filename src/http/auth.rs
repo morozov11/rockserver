@@ -46,6 +46,7 @@ struct DeviceSessionRequestDto {
 #[derive(Serialize)]
 struct DeviceSessionResponseDto {
     access_token: String,
+    access_expires_at: String,
 }
 
 #[derive(Deserialize)]
@@ -674,9 +675,13 @@ pub(super) async fn create_device_session(
         )
         .await;
     match result {
-        Ok(true) => {
+        Ok(Some(access_expires_at)) => {
             let mut response = with_request_id(
-                Json(DeviceSessionResponseDto { access_token }).into_response(),
+                Json(DeviceSessionResponseDto {
+                    access_token,
+                    access_expires_at,
+                })
+                .into_response(),
                 &request_id,
             );
             response
@@ -684,7 +689,7 @@ pub(super) async fn create_device_session(
                 .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             response
         }
-        Ok(false) => error_response(
+        Ok(None) => error_response(
             StatusCode::UNAUTHORIZED,
             "device_credential_invalid",
             "This device credential is no longer valid.",
