@@ -63,6 +63,31 @@ strict all-target/all-feature Clippy, and `cargo test` (97 unit tests plus non-l
 coverage).  RockServer `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`
 passed; external provider and database cases are opt-in by design.
 
+## DC-001 — device-control identity and authorization model (complete, 2026-09-02)
+
+The future device-control plane is now constrained to the existing account-owned model:
+an active native session resolves to the existing `(user_id, devices.id)` boundary, while the
+durable device secret only renews that short-lived session. Device roles are functional
+capabilities, not permissions; a separate minimum policy vocabulary covers directory/presence
+read, entity-state read, media, display and actuator control. Every future dispatch must verify
+actor identity, same-owner target, scope, role/capability/schema, availability/freshness and
+confirmation policy. Cross-user access, hidden broadcast and device-control access through admin
+principals are denied by default.
+
+The roadmap records the permission matrix for RockMobile, RockCast, ESP32, a future automation
+principal and the Home Assistant adapter. Automation identity, shared homes/delegation and
+fine-grained policy remain explicitly deferred; Home Assistant uses a separate least-privilege
+integration credential rather than account-device pairing. Intent safety distinguishes fresh,
+unambiguous reads; ordinary media/display control; clarification for ambiguous resolution; and
+explicit confirmation for side-effecting/risky actuator operations. No Rust, migration, OpenAPI
+or runtime behavior changed. The next device-control step remains DC-002: specify protocol v1
+and its HTTP/WebSocket contract.
+
+Verification: targeted migration, auth, HTTP, persistence and OpenAPI inspection; documentation
+consistency review; `git diff --check`; and searches for stale non-canonical device-control
+`/v1` endpoint references and prohibited duplicate pairing terminology. As a Markdown-only
+decision record, no build or test run was needed.
+
 ## RS-ADMIN-006 SPA administrator console (implemented locally, 2026-09-01)
 
 The former Axum server-rendered `/admin` shell is superseded: Caddy now serves the existing

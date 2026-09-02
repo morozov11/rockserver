@@ -53,6 +53,26 @@
 - Status: **complete; GO recorded for DC-001.**  No ESP32 firmware or later DC implementation
   task was started.
 
+## DC-001 — 2026-09-02 — device-control identity and authorization model
+
+- Goal: make the existing account-owned identity boundary and the minimum authorization model
+  unambiguous before protocol v1 is specified.
+- Scope: document-only comparison of the active account/device schema, pairing, native session,
+  device-session, inventory and revocation paths with the device-control roadmap. No runtime,
+  OpenAPI, SQL migration, DTO, pairing flow or credential changed.
+- Result: the roadmap now distinguishes actor identity, functional device roles and authorization
+  scopes; records permissions for RockMobile, RockCast, ESP32, a future automation principal and
+  the Home Assistant adapter; and requires same-owner, scope, capability/schema,
+  online/freshness and confirmation checks. It explicitly denies cross-user access and hidden
+  broadcasts, keeps administrators outside device control, and defers homes/delegation,
+  automation identity and finer-grained policy. Canonical existing device endpoints are written
+  as `/api/v1/*`.
+- Checks: inspected migrations 0012, 0013, 0016 and 0017; account/auth/pairing/persistence
+  implementation; endpoints and OpenAPI; and all affected roadmap/status/task sections. Ran
+  `git diff --check`, targeted terminology/path searches, and a manual acceptance-table review.
+  Markdown-only scope: no build, Clippy or test run required.
+- Status: **complete.** DC-002 and later tasks remain planned.
+
 ## Local administrator launcher — 2026-09-01
 
 - Goal: provide a simple host-based launcher for RockServer plus local administrator SPA hosting

@@ -6,7 +6,7 @@
 
 ### Уже реализованная основа аккаунтов и устройств
 
-Этот roadmap не проектирует новую регистрацию устройств. RockServer уже имеет `users`, привязанные к аккаунту `devices`, краткоживущие `pairing_requests`, долговечный хешированный `device_secret`, короткоживущие native access sessions, `POST /v1/auth/device-session`, `GET /v1/devices` и отзыв устройства. RockCast и Rockmobile уже используют этот account/device boundary.
+Этот roadmap не проектирует новую регистрацию устройств. RockServer уже имеет `users`, привязанные к аккаунту `devices`, краткоживущие `pairing_requests`, долговечный хешированный `device_secret`, короткоживущие native access sessions, `POST /api/v1/auth/device-session`, `GET /api/v1/devices` и отзыв устройства. RockCast и Rockmobile уже используют этот account/device boundary.
 
 Control plane обязан повторно использовать существующие `devices.id`, ownership, pairing, device-session renewal и revoke semantics. Новый WebSocket аутентифицируется обычным короткоживущим native access token. Новые таблицы могут только расширять существующее устройство capabilities, connections, entities, surfaces и state. Параллельная таблица устройств, второй pairing flow или отдельный machine credential для RockCast не создаются.
 
@@ -39,6 +39,36 @@ Rockmobile не открывает прямой управляющий кана�
 `device_id` — существующий `devices.id`, выданный завершением текущего account pairing и уже используемый native session. RockCast/ESP32 сохраняет его вместе с существующим device secret. `entity_id` — стабильный адрес отдельной функции или ресурса внутри узла или интеграции, например `sensor.kitchen_temperature` или `light.bedroom`. `surface_id` — адрес экрана/голосовой точки, на которой должен появиться результат. `connection_id` — новый на каждое WebSocket-подключение. Сейчас `user_id` определяет владельца и изолированный namespace; будущий `home_id` добавляется только отдельной миграцией и threat-model решением. Display name и тип не являются ключами маршрутизации.
 
 Один device может предоставлять много entities и surfaces. Например, один ESP32 имеет `media_player`, `sensor.temperature`, `sensor.humidity`, `display.main` и `voice.main`. Home Assistant adapter может публиковать множество entities, не регистрируя каждую как отдельное физическое устройство.
+
+### DC-001: actor, роли, scopes и policy
+
+**Actor и target.** Paired native device доказывает только identity: активная native session разрешается в `(user_id, device_id)` и её durable device secret выдаёт только короткоживущий access token. Поэтому RockMobile является account-owned actor/controller, RockCast и ESP32 — account-owned target devices, а их роли и capabilities объявляют функции, которые они предоставляют. Один `user_id` владеет и actor, и target; запрос к чужому `user_id` всегда отклоняется. Администраторский principal/session — отдельный контур и не является controller/device principal, поэтому device-control access не получает.
+
+Роль описывает функцию, а не permission; роли могут сочетаться на одном device:
+
+| Роль | Семантика |
+| --- | --- |
+| `controller` | Инициирует разрешённые typed intents и commands. |
+| `player` | Исполняет media/playback/volume commands и публикует подтверждённое состояние. |
+| `display_surface` | Принимает типизированные presentations на конкретной surface. |
+| `voice_endpoint` | Принимает bounded audio как источник intent и/или предоставляет speech output только при отдельной capability. |
+| `sensor_source` | Публикует entity manifest и telemetry/state с quality и freshness. |
+| `actuator` | Исполняет только явно объявленные и schema-validated physical/entity actions. |
+| `integration_adapter` | Server-side boundary к внешнему provider; не маскируется под paired account device. |
+
+Scopes — отдельная server-side authorization policy, не существующий claim native session и не роль. Минимальный расширяемый vocabulary для control plane: `device.directory.read` (directory/presence), `entity.state.read` (sensor/entity state), `media.control` (playback/volume), `display.control` (presentation), `actuator.control` (physical/entity action). Protocol v1 должен передавать или вычислять только эти явно проверяемые permissions; отсутствующий scope означает deny. Для integration adapter нужна отдельная integration identity/credential с least privilege, а не `device_secret`; её provider read/write policy будет определена вместе с adapter contract.
+
+| Principal | Identity/auth source | Допустимые роли | Может читать / вызывать / публиковать | Допустимые targets и ownership | Default deny |
+| --- | --- | --- | --- | --- | --- |
+| RockMobile | Existing paired native device session for its `user_id` | `controller` | Reads directory/presence and permitted entity state; invokes media/display and, only when granted, actuator commands; does not publish target state. | Explicit account-owned target/entity/surface for the same `user_id`. | Any absent scope, ambiguous target, other user, hidden broadcast or unsupported capability. |
+| RockCast | Existing paired native device session for its `user_id` | `player`; optional local `controller` only when explicitly granted | Publishes its manifest, presence and playback state; receives permitted media commands; a local controller still needs controller scopes. | Its own account-owned device/entities/surfaces; never another account. | Display, sensor, actuator and cross-device control without matching role, scope and capability. |
+| ESP32 multi-role device | Existing paired native device session for its `user_id` | Any truthful combination of `player`, `display_surface`, `voice_endpoint`, `sensor_source`, `actuator` | Publishes only declared manifest/state/telemetry; receives only matching media/display/actuator commands; voice produces typed intents, not raw commands. | Its own account-owned device/entities/surfaces; a command names one explicit target. | Undeclared capability/schema, stale state as fresh, broadcast and all cross-user access. |
+| Future automation principal | Separate future automation identity/credential and explicit grants; not a native device session | `controller` and only explicitly granted execution roles | Future bounded typed operations against granted scopes; no implicit directory-wide authority. | Explicit future owner/home/delegation boundary only after its model exists. | All access until a separate identity, ownership and revocation design is delivered. |
+| Home Assistant adapter | Separate server-side integration identity/credential with least provider privilege | `integration_adapter` | Imports allowlisted state; performs only allowlisted, schema-mapped provider calls after RockServer authorization. | Explicit configured owner boundary and allowlisted entities; never a paired device. | Arbitrary HA service/domain, raw provider tool, cross-user/home access and every unallowlisted entity. |
+
+Before dispatch, RockServer must verify: (1) live actor identity, (2) actor/target owner boundary, (3) required scope, (4) target role plus truthful capability and payload schema, (5) online/availability and state freshness where applicable, and (6) the intent's confirmation policy. A target is always explicit after resolution; there is no hidden broadcast, implicit cross-user access or implicit cross-home access. `home_id`, shared-home membership/delegation, automation principals and finer-grained policy remain deferred additions: DC-001 creates no migration, DTO, endpoint or grant for them.
+
+**Intent safety.** Safe directory and sensor/entity reads may run without confirmation only when target/entity resolution is unambiguous and the value is fresh; stale or unavailable data is returned as stale/unavailable, never as current. Ordinary media commands and a typed display presentation may run without confirmation after an explicit or unambiguous selected target and matching scope/capability. The server must request clarification for ambiguous target, entity, area or display surface. `actuator.control` always requires an explicit target plus a separate confirmation policy; locks, climate and other risky classes are denied unless a later policy explicitly allowlists them, and side-effecting/high-impact actions require explicit user confirmation. An LLM may output only a schema-valid typed intent; ordinary server code resolves, authorizes and constructs the final command, with no unrestricted tools or raw commands.
 
 Минимальные серверные записи:
 
@@ -241,7 +271,7 @@ Speech action содержит priority, interruption policy (`queue`, `duck`, `
 
 ### Жизненный цикл подключённого device/provider
 
-1. Уже paired RockCast/ESP32 получает короткоживущий access token через существующий `POST /v1/auth/device-session`, затем открывает защищённый WebSocket с этим token. Pairing secret и device secret через control WebSocket не передаются. Server-side Home Assistant adapter использует отдельную integration credential и не имитирует account-device pairing.
+1. Уже paired RockCast/ESP32 получает короткоживущий access token через существующий `POST /api/v1/auth/device-session`, затем открывает защищённый WebSocket с этим token. Pairing secret и device secret через control WebSocket не передаются. Server-side Home Assistant adapter использует отдельную integration credential и не имитирует account-device pairing.
 2. Provider отправляет `device.register`: stable ID, roles, type/name, app/firmware version, полный `DeviceCapabilities`, entities/surfaces manifest и полный `DeviceState`.
 3. RockServer создаёт/обновляет directory entry, связывает с живым connection и отвечает `device.registered` с server time, heartbeat interval и актуальными policy limits.
 4. Provider отправляет `heartbeat`, `device.state` и `entity.state`; сервер обновляет presence и публикует изменения авторизованным controllers.
@@ -299,7 +329,7 @@ Home Assistant подключается через отдельный provider a
 
 ### Phase 0 — зафиксировать контракт и product decisions
 
-- [ ] Зафиксировать существующий `user_id -> devices.id` ownership как MVP boundary; `home_id`/shared-home оформить отдельным будущим расширением и зафиксировать permission matrix для новых control scopes.
+- [x] DC-001: зафиксировать существующий `user_id -> devices.id` ownership как MVP boundary, actor/target model, role semantics, minimum control scopes, permission matrix и intent-safety policy; `home_id`/shared-home, delegation, automation identity и fine-grained policy оставить отдельным будущим расширением.
 - [ ] Выбрать canonical `/api/v1/devices/connect` и HTTP read endpoints; не менять voice WebSocket.
 - [ ] Описать OpenAPI/AsyncAPI-style schemas для devices, entities, surfaces, capabilities, state, telemetry, presentation и commands; зафиксировать protocol v1, error codes, limits, heartbeat/TTL, compatibility и deprecation rules.
 - [ ] Утвердить initial command set и exact semantics `play_station`/`play_stream`; явно задокументировать, какой сервис резолвит stream URL.

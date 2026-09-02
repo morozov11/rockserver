@@ -6,7 +6,7 @@
 
 Общие правила для всех задач:
 
-- существующие account/device pairing, `devices.id`, durable device secret, `/v1/auth/device-session`, `/v1/devices` и revoke являются готовой основой и не реализуются повторно;
+- существующие account/device pairing, `devices.id`, durable device secret, `/api/v1/auth/device-session`, `/api/v1/devices` и revoke являются готовой основой и не реализуются повторно;
 - `DeviceCapabilities`, runtime state, entity telemetry, user intents и transport commands остаются разными типами;
 - немедленный command result, долгоживущая operation, trigger event и асинхронная delivery имеют разные IDs и lifecycle;
 - OpenAPI и protocol fixtures меняются до реализации нового публичного поведения;
@@ -26,7 +26,7 @@
 
 **Приёмка:** есть зафиксированное решение go/no-go для device-control protocol; известны текущие playback/volume/Chromecast/relay entry points RockCast.
 
-### DC-001 — зафиксировать существующий ownership и новые control scopes
+### DC-001 — зафиксировать существующий ownership и новые control scopes — выполнено (2026-09-02)
 
 **Репозиторий:** RockServer.  
 **Зависимости:** DC-000.
@@ -37,7 +37,7 @@
 - Разделить scopes для чтения sensor state, управления media, display и actuator.
 - Определить, какие intents требуют уточнения или подтверждения.
 
-**Приёмка:** таблица разрешений покрывает Rockmobile, RockCast, ESP32, будущий automation principal и Home Assistant adapter; control plane использует текущий `user_id` ownership, а cross-user доступ запрещён по умолчанию.
+**Приёмка (выполнено):** roadmap фиксирует таблицу разрешений для Rockmobile, RockCast, ESP32, будущего automation principal и Home Assistant adapter, минимальные отдельные scopes, server-side checks и intent-safety matrix. Control plane использует текущий `user_id` ownership; cross-user доступ и hidden broadcast запрещены по умолчанию. Никакой новый runtime contract, pairing flow, machine credential, migration, DTO или endpoint не добавлен.
 
 ### DC-002 — описать protocol v1 и HTTP/WebSocket контракт
 
@@ -92,7 +92,7 @@
 **Репозиторий:** RockServer.  
 **Зависимости:** DC-005.
 
-- Повторно использовать завершённый account pairing, существующий durable device secret и `POST /v1/auth/device-session` для получения access token.
+- Повторно использовать завершённый account pairing, существующий durable device secret и `POST /api/v1/auth/device-session` для получения access token.
 - Аутентифицировать control WebSocket короткоживущим native access token и связать principal с существующими `user_id`/`device_id`.
 - Сохранить текущие device list/revoke и invalid/transient-error semantics; revoked device не подключается.
 - Оставить Home Assistant integration credential отдельным типом, не смешивая его с account device credential.
@@ -220,7 +220,7 @@
 **Репозиторий:** ESP32 firmware.  
 **Зависимости:** DC-003, DC-006, DC-007.
 
-- Реализовать ESP32 UI/provisioning поверх существующих RockServer pairing endpoints, безопасно сохранить выданные `device_id`/device secret, получать access token через `/v1/auth/device-session`, затем использовать WSS, bounded messages, heartbeat и reconnect jitter.
+- Реализовать ESP32 UI/provisioning поверх существующих RockServer pairing endpoints, безопасно сохранить выданные `device_id`/device secret, получать access token через `/api/v1/auth/device-session`, затем использовать WSS, bounded messages, heartbeat и reconnect jitter.
 - Задать memory/task/watchdog limits и safe firmware version reporting.
 - Реализовать generic capability/manifest/state/command dispatch core.
 
