@@ -2,6 +2,19 @@
 
 Last updated: 2026-09-02
 
+## DC-004 — device-control domain model (complete, planned runtime, 2026-09-02)
+
+`src/device_control.rs` now exposes the transport-independent protocol-v1 domain layer: separate
+device/command/message/connection/event/operation/delivery IDs; devices, entities, surfaces,
+roles/scopes, capabilities/manifests, runtime/entity state, freshness/quality, presentations,
+commands and command lifecycle values. It uses checked RFC3339 instants through the lightweight
+`time` crate, with no wall-clock tests. Unknown valid namespaced capabilities round-trip with their
+extra fields; unknown namespaced commands are preserved but explicitly return `unsupported_command`.
+Known variants remain validated, as do manifest bounds/uniqueness, numeric/unit consistency,
+deadline bounds, revision ordering and terminal results. No route, WebSocket, persistence,
+migration, credential, provider, client or voice-contract behavior was added or changed. The next
+device-control step is DC-005.
+
 ## API namespace consolidation (deployed to staging, 2026-09-02)
 
 All first-party product, account, browser, device, administrator, search, and voice routes now use

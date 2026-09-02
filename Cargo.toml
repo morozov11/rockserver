@@ -34,6 +34,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tower-http = { version = "0.6", features = ["trace"] }
 url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
+time = { version = "0.3", features = ["parsing", "formatting"] }
 ndarray = { version = "0.17", optional = true }
 ort = { version = "2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray"], optional = true }
 tokenizers = { version = "0.22", optional = true }

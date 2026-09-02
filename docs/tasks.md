@@ -1,5 +1,13 @@
 # Task log
 
+## DC-004 — 2026-09-02 — device-control transport-independent domain model
+
+- Goal: implement protocol-v1 domain values and deterministic validation without beginning transport or persistence work.
+- Scope: one public `device_control` module, checked RFC3339 timestamps via `time`, canonical-fixture domain tests, and status/roadmap updates.
+- Result: separate lifecycle IDs; device/entity/surface, role/scope, capability/manifest, runtime/entity state, presentation and command/result types are public. Unknown namespaced capabilities preserve unknown JSON fields; opaque unknown commands deserialize but are never executable and return `unsupported_command`. Validation covers contract cardinality, unique IDs/names/actions, numeric/unit constraints, deadline, fixed-time freshness, revisions/resync and terminal outcome consistency.
+- Checks: focused domain tests, OpenAPI fixture validation, formatter, strict Clippy, full tests and whitespace checks were run serially; no database/provider runtime work was introduced.
+- Status: **complete; DC-005 is next.**
+
 ## API namespace consolidation — 2026-09-02
 
 - Goal: make every first-party HTTP and WebSocket API route use one `/api/v1/*` namespace.

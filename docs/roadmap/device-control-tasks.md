@@ -76,7 +76,7 @@ schema mismatch и schema-invalid example. Unknown command теперь schema-v
 но сохраняет structured `unsupported_command`; known command branches остаются строгими.
 Runtime, pairing, provider adapter и client/firmware implementation не добавлены.
 
-### DC-004 — реализовать доменные типы без транспорта
+### DC-004 — реализовать доменные типы без транспорта (выполнено, 2026-09-02)
 
 **Репозиторий:** RockServer.  
 **Зависимости:** DC-003.
@@ -85,7 +85,14 @@ Runtime, pairing, provider adapter и client/firmware implementation не доб
 - Сделать неизвестные namespaces forward-compatible, но запретить их исполнение без зарегистрированного handler/schema.
 - Нормализовать entity domain, device class, units, area/labels, freshness и quality.
 
-**Приёмка:** unit tests покрывают serialization, validation, revision ordering и неизвестные расширения; HTTP/WebSocket код пока не меняется.
+**Приёмка (выполнено):** `src/device_control.rs` публикует transport-agnostic v1-типы
+для device/entity/surface/capability/manifest/state/presentation/command и lifecycle результатов,
+раздельные typed IDs и safe validation errors. Canonical fixtures подтверждают serde round-trip
+RockCast/ESP32 manifest, sensor-grid, telemetry и known/unknown command paths. Unknown namespaced
+capabilities сохраняют extra fields; unknown commands остаются opaque и возвращают
+`unsupported_command` до будущего handler. Проверены bounds/uniqueness, unit/value normalization,
+fixed-time freshness, revision replay/conflict/gap и terminal result invariants. HTTP/WebSocket,
+persistence, pairing и provider code не добавлены.
 
 ### DC-005 — добавить persistence foundation
 

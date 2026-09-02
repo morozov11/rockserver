@@ -10,6 +10,8 @@ pub mod auth;
 pub mod catalog;
 /// Service configuration loaded from the process environment.
 pub mod config;
+/// Transport-independent device-control protocol v1 domain types and validation.
+pub mod device_control;
 /// HTTP routes and transport types.
 pub mod http;
 /// Deterministic prebuilt SQLite export for RockMobile's extended offline catalog.
