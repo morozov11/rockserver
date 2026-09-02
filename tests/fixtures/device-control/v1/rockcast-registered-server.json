@@ -1,0 +1,15 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000004",
+  "type": "device.registered",
+  "sent_at": "2026-09-02T12:00:03Z",
+  "payload": {
+    "connection_id": "20000000-0000-4000-8000-000000000001",
+    "authenticated_user_id": "30000000-0000-4000-8000-000000000001",
+    "authenticated_device_id": "40000000-0000-4000-8000-000000000001",
+    "granted_scopes": ["device.directory.read", "media.control"],
+    "heartbeat_interval_seconds": 20,
+    "offline_ttl_seconds": 60,
+    "require_full_state": true
+  }
+}

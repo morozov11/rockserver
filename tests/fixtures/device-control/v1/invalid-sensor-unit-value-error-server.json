@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000023",
+  "type": "protocol.error",
+  "sent_at": "2026-09-02T12:03:20Z",
+  "payload": { "error": { "code": "invalid_payload", "message": "Temperature values with unit °C must be numeric.", "request_id": "fixture-invalid-temperature", "details": { "entity_id": "sensor.kitchen_temperature" } }, "in_reply_to_message_id": "10000000-0000-4000-8000-000000000022" }
+}

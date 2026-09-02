@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000010",
+  "type": "entity.state",
+  "sent_at": "2026-09-02T12:01:41Z",
+  "payload": { "state": { "entity_id": "sensor.kitchen_humidity", "entity_revision": 3, "value": 48, "unit": "%", "quality": "ok", "observed_at": "2026-09-02T12:01:39Z", "stale_after": "2026-09-02T12:06:39Z" } }
+}

@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000033",
+  "type": "protocol.error",
+  "sent_at": "2026-09-02T12:03:12Z",
+  "payload": { "error": { "code": "stale_revision", "message": "Entity revision is lower than the accepted revision.", "request_id": "fixture-stale-entity-state", "details": { "entity_id": "sensor.kitchen_temperature", "accepted_revision": 4 } }, "in_reply_to_message_id": "10000000-0000-4000-8000-000000000032" }
+}

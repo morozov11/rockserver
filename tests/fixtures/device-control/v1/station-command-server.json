@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000013",
+  "type": "device.command",
+  "sent_at": "2026-09-02T12:02:20Z",
+  "payload": { "command_id": "60000000-0000-4000-8000-000000000002", "target": { "device_id": "40000000-0000-4000-8000-000000000001" }, "body": { "name": "station.play_station", "station_id": "station.jazz_fixture" } }
+}

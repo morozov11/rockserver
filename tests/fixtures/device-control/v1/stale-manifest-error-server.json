@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000021",
+  "type": "protocol.error",
+  "sent_at": "2026-09-02T12:03:10Z",
+  "payload": { "error": { "code": "stale_revision", "message": "Manifest revision is lower than the accepted revision.", "request_id": "fixture-stale-manifest", "details": { "accepted_revision": 2 } }, "in_reply_to_message_id": "10000000-0000-4000-8000-000000000020" }
+}

@@ -39,28 +39,42 @@
 
 **Приёмка (выполнено):** roadmap фиксирует таблицу разрешений для Rockmobile, RockCast, ESP32, будущего automation principal и Home Assistant adapter, минимальные отдельные scopes, server-side checks и intent-safety matrix. Control plane использует текущий `user_id` ownership; cross-user доступ и hidden broadcast запрещены по умолчанию. Никакой новый runtime contract, pairing flow, machine credential, migration, DTO или endpoint не добавлен.
 
-### DC-002 — описать protocol v1 и HTTP/WebSocket контракт
+### DC-002 — описать protocol v1 и HTTP/WebSocket контракт — выполнено (2026-09-02)
 
 **Репозиторий:** RockServer.  
 **Зависимости:** DC-001.
 
-- Добавить в `api/openapi.yaml` planned schemas/endpoints для расширенного directory read API и `GET /api/v1/devices/connect`; сослаться на существующие pairing/device-session/device-list endpoints без их дублирования.
-- Описать envelope, version negotiation, registration, heartbeat, manifests, state, telemetry, commands, lifecycle results и errors.
-- Задать frame/payload limits, heartbeat/TTL, command timeout, idempotency window и compatibility rules.
+- Добавить в `api/openapi.yaml` planned `GET /api/v1/device-control/directory` и `GET /api/v1/devices/connect`; сослаться на существующие pairing/device-session/device-list endpoints без их дублирования.
+- Описать envelope, version negotiation, registration, heartbeat, manifests, state, telemetry, directory events, typed commands, lifecycle results и errors.
+- Задать exact frame/payload/list limits, heartbeat/TTL, registration deadline, in-flight policy, command timeout, idempotency window, revision/resync и compatibility rules.
 - Не менять семантику `/api/v1/voice/stream`.
 
-**Приёмка:** Rockmobile, RockCast и ESP32 можно реализовывать по одному контракту без чтения серверного кода; schema проходит contract validation.
+**Приёмка (выполнено):** оба operation машинно помечены `planned` и принимают только
+`RockserverBearer`; существующий inventory `GET /api/v1/devices` и voice WebSocket не
+переопределены. OpenAPI фиксирует protocol major 1, bounded lifecycle, exact limits,
+forward compatibility, typed command vocabulary, server-derived identity и owner/scope policy.
+YAML, local refs, discriminator mappings и `operationId` проходят contract validation;
+runtime по-прежнему отсутствует.
 
-### DC-003 — создать общие protocol fixtures
+### DC-003 — создать общие protocol fixtures — выполнено (2026-09-02)
 
 **Репозиторий:** RockServer; копии/генерация для клиентов только после стабилизации.  
 **Зависимости:** DC-002.
 
-- Создать golden JSON для RockCast player, ESP32 multi-role device и Home Assistant provider.
-- Добавить positive flows: register, full state, delta, command success/error, sensor telemetry, display presentation.
-- Добавить negative flows: unknown capability/command, stale revision, invalid unit/value, duplicate command, offline target, missing surface.
+- Создан канонический versioned набор в `tests/fixtures/device-control/v1/` с raw JSON messages
+  и source-neutral normalized Home Assistant entity projections; клиенты должны читать те же
+  файлы, а не создавать копии.
+- Покрыты RockCast player, ESP32 multi-role registration/manifest/state/telemetry, directory,
+  `sensor_grid`, lifecycle command success/failure и bounded semantic rejections.
+- `jsonschema` 0.30 добавлен только в dev-dependencies для JSON Schema 2020-12 validation
+  component schemas с локальными OpenAPI `$ref`; явные assertions покрывают revision,
+  correlation, idempotency и outcomes, которые не следуют из одного JSON document.
 
-**Приёмка:** fixtures машинно валидируются против schemas; клиенты используют те же примеры в contract tests.
+**Приёмка (выполнено):** каждый JSON fixture явно зарегистрирован и проверяется против
+указанного OpenAPI component schema; тест обнаруживает незарегистрированный/отсутствующий файл,
+schema mismatch и schema-invalid example. Unknown command теперь schema-valid на envelope уровне,
+но сохраняет structured `unsupported_command`; known command branches остаются строгими.
+Runtime, pairing, provider adapter и client/firmware implementation не добавлены.
 
 ### DC-004 — реализовать доменные типы без транспорта
 

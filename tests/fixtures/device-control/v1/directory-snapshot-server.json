@@ -1,0 +1,19 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000011",
+  "type": "directory.snapshot",
+  "sent_at": "2026-09-02T12:02:00Z",
+  "payload": {
+    "event_id": "50000000-0000-4000-8000-000000000001",
+    "directory": {
+      "protocol_version": 1,
+      "generated_at": "2026-09-02T12:02:00Z",
+      "directory_revision": 12,
+      "granted_scopes": ["device.directory.read", "entity.state.read", "media.control", "display.control"],
+      "devices": [
+        { "device_id": "40000000-0000-4000-8000-000000000001", "device_display_name": "Living room RockCast", "device_type": "rockcast", "roles": ["player"], "capabilities": { "revision": 1, "items": [ { "name": "media.playback", "version": 1, "actions": ["play", "pause", "stop", "next", "previous"] }, { "name": "media.station", "version": 1, "sources": ["rockserver_catalog", "direct_stream"] }, { "name": "media.volume", "version": 1, "minimum": 0, "maximum": 100, "step": 5, "mute": true }, { "name": "media.chromecast", "version": 1, "actions": ["discover", "connect", "disconnect"], "discovery_ttl_seconds": 60 }, { "name": "media.relay", "version": 1, "actions": ["start", "stop", "set_mode"], "modes": ["local", "chromecast"] } ] }, "presence": { "status": "online", "last_seen_at": "2026-09-02T12:01:59Z" }, "state_freshness": { "status": "fresh", "observed_at": "2026-09-02T12:01:58Z", "received_at": "2026-09-02T12:01:59Z", "stale_after": "2026-09-02T12:06:58Z" }, "entities": [], "surfaces": [] },
+        { "device_id": "40000000-0000-4000-8000-000000000002", "device_display_name": "Kitchen ESP32", "device_type": "esp32", "roles": ["player", "display_surface", "voice_endpoint", "sensor_source"], "capabilities": { "revision": 2, "items": [ { "name": "media.playback", "version": 1, "actions": ["play", "pause", "stop"] }, { "name": "media.volume", "version": 1, "minimum": 0, "maximum": 100, "step": 1, "mute": true }, { "name": "display.presentation", "version": 1, "views": ["text", "now_playing", "sensor_grid"], "max_items": 8, "max_text_length": 128 }, { "name": "voice.input", "version": 1, "formats": ["pcm16_mono_16000"] }, { "name": "entity.sensor", "version": 1, "entity_classes": ["temperature", "humidity"] } ] }, "presence": { "status": "online", "last_seen_at": "2026-09-02T12:01:59Z" }, "state_freshness": { "status": "fresh", "observed_at": "2026-09-02T12:01:29Z", "received_at": "2026-09-02T12:01:30Z", "stale_after": "2026-09-02T12:06:29Z" }, "entities": [ { "entity_id": "sensor.kitchen_temperature", "domain": "sensor", "device_class": "temperature", "display_name": "Kitchen temperature", "readable": true, "controllable": false, "unit": "°C", "stale_after_seconds": 300, "allowed_commands": [], "state": { "entity_id": "sensor.kitchen_temperature", "entity_revision": 4, "value": 21.5, "unit": "°C", "quality": "ok", "freshness": "fresh", "observed_at": "2026-09-02T12:01:38Z", "received_at": "2026-09-02T12:01:40Z", "stale_after": "2026-09-02T12:06:38Z" } }, { "entity_id": "sensor.kitchen_humidity", "domain": "sensor", "device_class": "humidity", "display_name": "Kitchen humidity", "readable": true, "controllable": false, "unit": "%", "stale_after_seconds": 300, "allowed_commands": [], "state": { "entity_id": "sensor.kitchen_humidity", "entity_revision": 3, "value": 48, "unit": "%", "quality": "ok", "freshness": "fresh", "observed_at": "2026-09-02T12:01:39Z", "received_at": "2026-09-02T12:01:41Z", "stale_after": "2026-09-02T12:06:39Z" } } ], "surfaces": [ { "surface_id": "display.main", "kind": "display", "display_name": "Kitchen display", "views": ["text", "now_playing", "sensor_grid"] } ] }
+      ]
+    }
+  }
+}

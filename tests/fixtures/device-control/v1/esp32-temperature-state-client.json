@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000009",
+  "type": "entity.state",
+  "sent_at": "2026-09-02T12:01:40Z",
+  "payload": { "state": { "entity_id": "sensor.kitchen_temperature", "entity_revision": 4, "value": 21.5, "unit": "°C", "quality": "ok", "observed_at": "2026-09-02T12:01:38Z", "stale_after": "2026-09-02T12:06:38Z" } }
+}

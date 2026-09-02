@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000020",
+  "type": "device.manifest",
+  "sent_at": "2026-09-02T12:03:10Z",
+  "payload": { "manifest": { "manifest_revision": 1, "roles": ["sensor_source"], "capabilities": { "revision": 1, "items": [ { "name": "entity.sensor", "version": 1, "entity_classes": ["temperature"] } ] }, "entities": [], "surfaces": [] } }
+}

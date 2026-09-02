@@ -1,0 +1,5 @@
+{
+  "name": "vendor.air_quality",
+  "version": 1,
+  "metric": "pm25"
+}

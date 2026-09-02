@@ -1,0 +1,24 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000006",
+  "type": "device.manifest",
+  "sent_at": "2026-09-02T12:01:10Z",
+  "payload": {
+    "manifest": {
+      "manifest_revision": 2,
+      "roles": ["player", "display_surface", "voice_endpoint", "sensor_source"],
+      "capabilities": { "revision": 2, "items": [
+        { "name": "media.playback", "version": 1, "actions": ["play", "pause", "stop"] },
+        { "name": "media.volume", "version": 1, "minimum": 0, "maximum": 100, "step": 1, "mute": true },
+        { "name": "display.presentation", "version": 1, "views": ["text", "now_playing", "sensor_grid"], "max_items": 8, "max_text_length": 128 },
+        { "name": "voice.input", "version": 1, "formats": ["pcm16_mono_16000"] },
+        { "name": "entity.sensor", "version": 1, "entity_classes": ["temperature", "humidity"] }
+      ] },
+      "entities": [
+        { "entity_id": "sensor.kitchen_temperature", "domain": "sensor", "device_class": "temperature", "display_name": "Kitchen temperature", "readable": true, "controllable": false, "unit": "°C", "stale_after_seconds": 300, "allowed_commands": [] },
+        { "entity_id": "sensor.kitchen_humidity", "domain": "sensor", "device_class": "humidity", "display_name": "Kitchen humidity", "readable": true, "controllable": false, "unit": "%", "stale_after_seconds": 300, "allowed_commands": [] }
+      ],
+      "surfaces": [ { "surface_id": "display.main", "kind": "display", "display_name": "Kitchen display", "views": ["text", "now_playing", "sensor_grid"] } ]
+    }
+  }
+}

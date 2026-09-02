@@ -1,0 +1,12 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000002",
+  "type": "protocol.welcome",
+  "sent_at": "2026-09-02T12:00:01Z",
+  "payload": {
+    "selected_protocol_version": 1,
+    "connection_id": "20000000-0000-4000-8000-000000000001",
+    "registration_deadline_seconds": 10,
+    "limits": { "max_json_frame_bytes": 65536, "max_payload_bytes": 61440, "max_capabilities": 32, "max_entities": 256, "max_surfaces": 16, "max_directory_devices": 50, "heartbeat_interval_seconds": 20, "offline_ttl_seconds": 60, "max_in_flight_per_connection": 16, "max_in_flight_per_target_device": 8, "default_command_timeout_seconds": 10, "max_command_timeout_seconds": 30, "command_idempotency_window_seconds": 86400, "max_stream_redirects": 5 }
+  }
+}

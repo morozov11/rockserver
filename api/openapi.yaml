@@ -1,14 +1,16 @@
 openapi: 3.1.0
 info:
   title: RockServer API
-  version: 0.3.0
+  version: 0.4.0
   description: >-
     Contract for RockServer operational health checks, deterministic station search, and the
     Windows voice-command JSON and streaming boundaries. `POST /api/v1/voice/command` resolves
     an already-recognized command and `GET /api/v1/voice/stream` upgrades to the
     provider-neutral WebSocket protocol for raw PCM audio and incremental transcripts.
     PostgreSQL may use provenance-compatible semantic ranking; metadata fallback preserves
-    the same schemas when embeddings are absent or unavailable.
+    the same schemas when embeddings are absent or unavailable. Operations marked
+    `x-rockserver-status: planned` are contract-first device-control designs and are not yet
+    registered by the runtime.
 servers:
   - url: https://alex.vault57.ru
   - url: http://localhost
@@ -285,6 +287,132 @@ paths:
         "202": { description: Account credentials and devices were revoked. }
         "401": { $ref: "#/components/responses/AuthenticationRequired" }
         "403": { description: Trusted proxy, CSRF, or recent passkey proof is missing. }
+  /api/v1/device-control/directory:
+    get:
+      operationId: getDeviceControlDirectory
+      summary: Read the permitted account-owned device-control projection
+      x-rockserver-status: planned
+      description: >-
+        Planned read projection for controllers with `device.directory.read`. It does not replace
+        `GET /api/v1/devices`, whose inventory/list-and-revoke semantics remain unchanged. The
+        server derives the caller's `user_id` and `device_id` from the active native session and
+        returns only permitted account-owned devices, entities and surfaces. Entity state is
+        included only with `entity.state.read`. Credential material, pairing data, provider-native
+        identifiers and other users' existence are never exposed. AdminBearer, browser cookies and
+        the legacy RockCastBearer do not authorize this operation.
+      security:
+        - RockserverBearer: []
+      responses:
+        "200":
+          description: Bounded directory snapshot with presence, capabilities and freshness.
+          headers:
+            Cache-Control: { schema: { type: string, example: no-store } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceControlDirectory" }
+        "401": { $ref: "#/components/responses/AuthenticationRequired" }
+        "403":
+          description: The authenticated native device lacks `device.directory.read`; target existence is not disclosed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "429":
+          description: The caller exceeded the bounded directory-read rate.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: The planned device-control projection is unavailable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /api/v1/devices/connect:
+    get:
+      operationId: connectDeviceControl
+      summary: Connect an account-owned native device to device-control protocol v1
+      x-rockserver-status: planned
+      description: >-
+        Planned WebSocket upgrade; it is not registered by the current runtime. Use TLS/WSS outside
+        localhost. The request requires the short-lived RockserverBearer issued by the existing
+        native-session flow. RockServer derives authenticated `user_id` and `device_id` from that
+        session; registration cannot claim or replace either identity. Pairing proofs, durable
+        `device_secret`, legacy RockCastBearer, AdminBearer and browser cookies are forbidden on
+        this channel. All control messages are UTF-8 JSON text frames using the shared envelope;
+        binary frames and audio chunks are rejected and remain on the unchanged voice/audio
+        protocols. The first client frame is `protocol.hello`, followed by `device.register` within
+        10 seconds of `protocol.welcome`. One active connection is allowed per device; a new valid
+        connection replaces the old one with close code 4001.
+
+        Protocol major 1 is selected only when offered. Unsupported major closes with 1002 after
+        `unsupported_protocol_version`; malformed JSON/schema closes with 1007 after
+        `invalid_message`; a frame over 65,536 bytes or payload over 61,440 bytes closes with 1009
+        after `frame_too_large` when an error frame can safely be sent. Missing registration or
+        policy violation closes with 1008. Authentication failure is HTTP 401 before upgrade.
+        Rate-limit errors normally keep the connection open, but repeated abuse may close 1008.
+      security:
+        - RockserverBearer: []
+      responses:
+        "101":
+          description: >-
+            Planned Switching Protocols. Text frames conform to the schemas referenced by
+            `x-websocket-client-messages` and `x-websocket-server-messages`.
+        "400": { description: The HTTP request is not a valid WebSocket upgrade request. }
+        "401": { $ref: "#/components/responses/AuthenticationRequired" }
+        "403":
+          description: The authenticated native device is revoked or forbidden without disclosing another target.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "426": { description: TLS/WSS is required outside localhost. }
+      x-device-control-policy:
+        protocol_major: 1
+        max_json_frame_bytes: 65536
+        max_payload_bytes: 61440
+        max_capabilities: 32
+        max_entities: 256
+        max_surfaces: 16
+        max_directory_devices: 50
+        heartbeat_interval_seconds: 20
+        offline_ttl_seconds: 60
+        registration_deadline_seconds: 10
+        max_in_flight_per_connection: 16
+        max_in_flight_per_target_device: 8
+        default_command_timeout_seconds: 10
+        max_command_timeout_seconds: 30
+        command_idempotency_window_seconds: 86400
+        max_stream_redirects: 5
+      x-websocket-client-messages:
+        oneOf:
+          - $ref: "#/components/schemas/ProtocolHelloMessage"
+          - $ref: "#/components/schemas/DeviceRegisterMessage"
+          - $ref: "#/components/schemas/DeviceHeartbeatMessage"
+          - $ref: "#/components/schemas/DeviceManifestMessage"
+          - $ref: "#/components/schemas/DeviceStateFullMessage"
+          - $ref: "#/components/schemas/DeviceStateDeltaMessage"
+          - $ref: "#/components/schemas/EntityStateMessage"
+          - $ref: "#/components/schemas/DeviceCommandMessage"
+          - $ref: "#/components/schemas/CommandAcceptedMessage"
+          - $ref: "#/components/schemas/CommandResultMessage"
+          - $ref: "#/components/schemas/UnknownControlMessage"
+      x-websocket-server-messages:
+        oneOf:
+          - $ref: "#/components/schemas/ProtocolWelcomeMessage"
+          - $ref: "#/components/schemas/DeviceRegisteredMessage"
+          - $ref: "#/components/schemas/DeviceHeartbeatAckMessage"
+          - $ref: "#/components/schemas/PresenceChangedMessage"
+          - $ref: "#/components/schemas/ResyncRequestedMessage"
+          - $ref: "#/components/schemas/DeviceStateFullMessage"
+          - $ref: "#/components/schemas/DeviceStateDeltaMessage"
+          - $ref: "#/components/schemas/EntityStateMessage"
+          - $ref: "#/components/schemas/DirectorySnapshotMessage"
+          - $ref: "#/components/schemas/DirectoryUpsertMessage"
+          - $ref: "#/components/schemas/DirectoryRemovalMessage"
+          - $ref: "#/components/schemas/DeviceCommandMessage"
+          - $ref: "#/components/schemas/CommandReceivedMessage"
+          - $ref: "#/components/schemas/CommandAcceptedMessage"
+          - $ref: "#/components/schemas/CommandResultMessage"
+          - $ref: "#/components/schemas/ProtocolErrorMessage"
+          - $ref: "#/components/schemas/UnknownControlMessage"
   /api/v1/devices:
     get:
       operationId: listOwnedDevices
@@ -845,8 +973,11 @@ components:
       type: http
       scheme: bearer
       bearerFormat: opaque
-      description: Short-lived opaque native session access token issued by pairing and accepted by
-        `/api/v1/voice/*` routes when supplied.
+      description: >-
+        Short-lived opaque native-session access token issued by the existing pairing/session flow.
+        It is the sole identity accepted by planned device-control operations and is also accepted
+        by current native account and voice routes. Roles/capabilities are not token scopes;
+        device-control policy is computed and enforced server-side.
     AdminBearer:
       type: http
       scheme: bearer
@@ -956,6 +1087,1211 @@ components:
         devices:
           type: array
           items: { $ref: "#/components/schemas/Device" }
+    ProtocolMajor:
+      type: integer
+      minimum: 1
+      maximum: 255
+      description: >-
+        Wire-protocol major. This contract defines major 1. A receiver must not reinterpret an
+        unsupported major as v1.
+    ConnectionId:
+      type: string
+      format: uuid
+      description: Server-issued identifier for one WebSocket connection; never a command, event, operation or delivery identifier.
+    CommandId:
+      type: string
+      format: uuid
+      description: Caller-issued idempotency key for one device command, retained for 86,400 seconds.
+    EventId:
+      type: string
+      format: uuid
+      description: Server-issued identifier for one directory or presence event; never reused as a command identifier.
+    OperationId:
+      type: string
+      format: uuid
+      description: Reserved identifier for a future durable operation lifecycle; it does not make a v1 device command durable.
+    DeliveryId:
+      type: string
+      format: uuid
+      description: Reserved identifier for a future asynchronous delivery lifecycle; it is not interchangeable with command_id or event_id.
+    DeviceControlScope:
+      type: string
+      enum:
+        - device.directory.read
+        - entity.state.read
+        - media.control
+        - display.control
+        - actuator.control
+      description: Server-side authorization policy. Roles and capabilities are not scopes and grant nothing by themselves.
+    DeviceRole:
+      type: string
+      enum: [controller, player, display_surface, voice_endpoint, sensor_source, actuator, integration_adapter]
+      description: >-
+        Truthful endpoint function, not an authorization grant. integration_adapter is reserved for
+        a separate future integration identity and is rejected on a paired native-device session.
+    Presence:
+      type: object
+      additionalProperties: false
+      required: [status, last_seen_at]
+      properties:
+        status: { type: string, enum: [online, offline] }
+        last_seen_at: { type: [string, "null"], format: date-time }
+        offline_reason:
+          type: string
+          enum: [graceful_disconnect, heartbeat_expired, replaced, revoked, transport_lost]
+      description: Online means a registered connection is live; it does not promise that an external receiver is available.
+    StateFreshness:
+      type: object
+      additionalProperties: false
+      required: [status, observed_at, received_at, stale_after]
+      properties:
+        status: { type: string, enum: [fresh, stale, unknown] }
+        observed_at: { type: [string, "null"], format: date-time }
+        received_at: { type: [string, "null"], format: date-time }
+        stale_after: { type: [string, "null"], format: date-time }
+    DeviceControlDirectory:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, generated_at, directory_revision, granted_scopes, devices]
+      properties:
+        protocol_version: { type: integer, const: 1 }
+        generated_at: { type: string, format: date-time }
+        directory_revision: { type: integer, format: int64, minimum: 1 }
+        granted_scopes:
+          type: array
+          uniqueItems: true
+          maxItems: 5
+          items: { $ref: "#/components/schemas/DeviceControlScope" }
+        devices:
+          type: array
+          maxItems: 50
+          items: { $ref: "#/components/schemas/DeviceControlDirectoryEntry" }
+      description: >-
+        Complete permitted collection. It contains no device secrets, tokens, pairing material,
+        provider-native identifiers or cross-account records.
+    DeviceControlDirectoryEntry:
+      type: object
+      additionalProperties: false
+      required: [device_id, device_display_name, device_type, roles, capabilities, presence, state_freshness, entities, surfaces]
+      properties:
+        device_id: { type: string, format: uuid }
+        device_display_name: { type: string, minLength: 1, maxLength: 128 }
+        device_type: { type: string, minLength: 1, maxLength: 64 }
+        roles:
+          type: array
+          uniqueItems: true
+          maxItems: 8
+          items: { $ref: "#/components/schemas/DeviceRole" }
+        capabilities: { $ref: "#/components/schemas/DeviceCapabilities" }
+        presence: { $ref: "#/components/schemas/Presence" }
+        state_freshness: { $ref: "#/components/schemas/StateFreshness" }
+        entities:
+          type: array
+          maxItems: 256
+          items: { $ref: "#/components/schemas/EntityDirectoryEntry" }
+        surfaces:
+          type: array
+          maxItems: 16
+          items: { $ref: "#/components/schemas/SurfaceManifestEntry" }
+    DeviceCapabilities:
+      type: object
+      additionalProperties: false
+      required: [revision, items]
+      properties:
+        revision: { type: integer, format: int64, minimum: 1 }
+        items:
+          type: array
+          uniqueItems: true
+          maxItems: 32
+          items: { $ref: "#/components/schemas/DeviceCapability" }
+      description: Stable supported-function manifest; runtime state never belongs here.
+    DeviceCapability:
+      oneOf:
+        - $ref: "#/components/schemas/PlaybackCapability"
+        - $ref: "#/components/schemas/StationCapability"
+        - $ref: "#/components/schemas/VolumeCapability"
+        - $ref: "#/components/schemas/ChromecastCapability"
+        - $ref: "#/components/schemas/RelayCapability"
+        - $ref: "#/components/schemas/DisplayCapability"
+        - $ref: "#/components/schemas/SensorCapability"
+        - $ref: "#/components/schemas/ActuatorCapability"
+        - $ref: "#/components/schemas/VoiceInputCapability"
+        - $ref: "#/components/schemas/UnknownCapability"
+      discriminator:
+        propertyName: name
+        mapping:
+          media.playback: "#/components/schemas/PlaybackCapability"
+          media.station: "#/components/schemas/StationCapability"
+          media.volume: "#/components/schemas/VolumeCapability"
+          media.chromecast: "#/components/schemas/ChromecastCapability"
+          media.relay: "#/components/schemas/RelayCapability"
+          display.presentation: "#/components/schemas/DisplayCapability"
+          entity.sensor: "#/components/schemas/SensorCapability"
+          entity.actuator: "#/components/schemas/ActuatorCapability"
+          voice.input: "#/components/schemas/VoiceInputCapability"
+    UnknownCapability:
+      type: object
+      additionalProperties: true
+      required: [name, version]
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 96
+          pattern: "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*)+$"
+        version: { type: integer, minimum: 1, maximum: 255 }
+      not:
+        properties:
+          name:
+            enum:
+              - media.playback
+              - media.station
+              - media.volume
+              - media.chromecast
+              - media.relay
+              - display.presentation
+              - entity.sensor
+              - entity.actuator
+              - voice.input
+        required: [name]
+      description: Forward-compatible capability extension. Controllers that do not understand it hide it.
+    PlaybackCapability:
+      type: object
+      additionalProperties: false
+      required: [name, version, actions]
+      properties:
+        name: { const: media.playback }
+        version: { type: integer, const: 1 }
+        actions:
+          type: array
+          uniqueItems: true
+          maxItems: 5
+          items: { type: string, enum: [play, pause, stop, next, previous] }
+    StationCapability:
+      type: object
+      additionalProperties: false
+      required: [name, version, sources]
+      properties:
+        name: { const: media.station }
+        version: { type: integer, const: 1 }
+        sources:
+          type: array
+          uniqueItems: true
+          maxItems: 2
+          items: { type: string, enum: [rockserver_catalog, direct_stream] }
+    VolumeCapability:
+      type: object
+      additionalProperties: false
+      required: [name, version, minimum, maximum, step, mute]
+      properties:
+        name: { const: media.volume }
+        version: { type: integer, const: 1 }
+        minimum: { type: integer, const: 0 }
+        maximum: { type: integer, const: 100 }
+        step: { type: integer, minimum: 1, maximum: 100 }
+        mute: { type: boolean }
+    ChromecastCapability:
+      type: object
+      additionalProperties: false
+      required: [name, version, actions, discovery_ttl_seconds]
+      properties:
+        name: { const: media.chromecast }
+        version: { type: integer, const: 1 }
+        actions:
+          type: array
+          uniqueItems: true
+          maxItems: 3
+          items: { type: string, enum: [discover, connect, disconnect] }
+        discovery_ttl_seconds: { type: integer, minimum: 5, maximum: 300 }
+    RelayCapability:
+      type: object
+      additionalProperties: false
+      required: [name, version, actions, modes]
+      properties:
+        name: { const: media.relay }
+        version: { type: integer, const: 1 }
+        actions:
+          type: array
+          uniqueItems: true
+          maxItems: 3
+          items: { type: string, enum: [start, stop, set_mode] }
+        modes:
+          type: array
+          uniqueItems: true
+          maxItems: 8
+          items: { type: string, minLength: 1, maxLength: 32, pattern: "^[a-z][a-z0-9_]*$" }
+    DisplayCapability:
+      type: object
+      additionalProperties: false
+      required: [name, version, views, max_items, max_text_length]
+      properties:
+        name: { const: display.presentation }
+        version: { type: integer, const: 1 }
+        views:
+          type: array
+          uniqueItems: true
+          maxItems: 3
+          items: { type: string, enum: [text, now_playing, sensor_grid] }
+        max_items: { type: integer, minimum: 1, maximum: 32 }
+        max_text_length: { type: integer, minimum: 1, maximum: 1024 }
+    SensorCapability:
+      type: object
+      additionalProperties: false
+      required: [name, version, entity_classes]
+      properties:
+        name: { const: entity.sensor }
+        version: { type: integer, const: 1 }
+        entity_classes:
+          type: array
+          uniqueItems: true
+          maxItems: 32
+          items: { type: string, minLength: 1, maxLength: 64, pattern: "^[a-z][a-z0-9_]*$" }
+    ActuatorCapability:
+      type: object
+      additionalProperties: false
+      required: [name, version, commands]
+      properties:
+        name: { const: entity.actuator }
+        version: { type: integer, const: 1 }
+        commands:
+          type: array
+          uniqueItems: true
+          maxItems: 3
+          items: { type: string, enum: [entity.turn_on, entity.turn_off, entity.set_value] }
+      description: Declares typed v1 actuator command schemas only; it is not an authorization grant.
+    VoiceInputCapability:
+      type: object
+      additionalProperties: false
+      required: [name, version, formats]
+      properties:
+        name: { const: voice.input }
+        version: { type: integer, const: 1 }
+        formats:
+          type: array
+          uniqueItems: true
+          maxItems: 4
+          items: { type: string, enum: [pcm16_mono_16000] }
+      description: Announces a voice endpoint only; binary audio never enters the device-control JSON channel.
+    EntityManifestEntry:
+      type: object
+      additionalProperties: false
+      required: [entity_id, domain, device_class, display_name, readable, controllable, unit, stale_after_seconds, allowed_commands]
+      properties:
+        entity_id: { type: string, minLength: 3, maxLength: 128, pattern: "^[a-z][a-z0-9_]*\\.[a-z0-9][a-z0-9_.-]*$" }
+        domain: { type: string, enum: [sensor, switch, light, media_player] }
+        device_class: { type: string, minLength: 1, maxLength: 64, pattern: "^[a-z][a-z0-9_]*$" }
+        display_name: { type: string, minLength: 1, maxLength: 128 }
+        readable: { type: boolean }
+        controllable: { type: boolean }
+        unit: { type: [string, "null"], maxLength: 16 }
+        stale_after_seconds: { type: integer, minimum: 1, maximum: 86400 }
+        allowed_commands:
+          type: array
+          uniqueItems: true
+          maxItems: 3
+          items: { type: string, enum: [entity.turn_on, entity.turn_off, entity.set_value] }
+        minimum: { type: number }
+        maximum: { type: number }
+        step: { type: number, exclusiveMinimum: 0 }
+      description: Public normalized entity metadata. Provider-native identifiers and credentials are forbidden.
+    EntityDirectoryEntry:
+      type: object
+      additionalProperties: false
+      required: [entity_id, domain, device_class, display_name, readable, controllable, unit, stale_after_seconds, allowed_commands]
+      properties:
+        entity_id: { type: string, minLength: 3, maxLength: 128, pattern: "^[a-z][a-z0-9_]*\\.[a-z0-9][a-z0-9_.-]*$" }
+        domain: { type: string, enum: [sensor, switch, light, media_player] }
+        device_class: { type: string, minLength: 1, maxLength: 64, pattern: "^[a-z][a-z0-9_]*$" }
+        display_name: { type: string, minLength: 1, maxLength: 128 }
+        readable: { type: boolean }
+        controllable: { type: boolean }
+        unit: { type: [string, "null"], maxLength: 16 }
+        stale_after_seconds: { type: integer, minimum: 1, maximum: 86400 }
+        allowed_commands:
+          type: array
+          uniqueItems: true
+          maxItems: 3
+          items: { type: string, enum: [entity.turn_on, entity.turn_off, entity.set_value] }
+        minimum: { type: number }
+        maximum: { type: number }
+        step: { type: number, exclusiveMinimum: 0 }
+        state: { $ref: "#/components/schemas/EntityStateSnapshot" }
+      description: >-
+        Public normalized entity metadata; state is omitted without entity.state.read. Secrets and
+        provider-native identifiers are forbidden.
+    SurfaceManifestEntry:
+      type: object
+      additionalProperties: false
+      required: [surface_id, kind, display_name, views]
+      properties:
+        surface_id: { type: string, minLength: 3, maxLength: 128, pattern: "^[a-z][a-z0-9_]*\\.[a-z0-9][a-z0-9_.-]*$" }
+        kind: { type: string, enum: [display, voice, mobile] }
+        display_name: { type: string, minLength: 1, maxLength: 128 }
+        views:
+          type: array
+          uniqueItems: true
+          maxItems: 3
+          items: { type: string, enum: [text, now_playing, sensor_grid] }
+    DeviceManifest:
+      type: object
+      additionalProperties: false
+      required: [manifest_revision, roles, capabilities, entities, surfaces]
+      properties:
+        manifest_revision: { type: integer, format: int64, minimum: 1 }
+        roles:
+          type: array
+          uniqueItems: true
+          maxItems: 8
+          items: { $ref: "#/components/schemas/DeviceRole" }
+        capabilities: { $ref: "#/components/schemas/DeviceCapabilities" }
+        entities:
+          type: array
+          maxItems: 256
+          items: { $ref: "#/components/schemas/EntityManifestEntry" }
+        surfaces:
+          type: array
+          maxItems: 16
+          items: { $ref: "#/components/schemas/SurfaceManifestEntry" }
+      description: >-
+        Full replacement manifest. Revisions are unsigned monotonic integers per device identity.
+        A lower revision is stale; an equal revision is accepted only when the content is identical.
+    EntityStateValue:
+      oneOf:
+        - type: boolean
+        - type: number
+        - type: string
+          maxLength: 256
+        - type: "null"
+    EntityStateSnapshot:
+      type: object
+      additionalProperties: false
+      required: [entity_id, entity_revision, value, unit, quality, observed_at, stale_after]
+      properties:
+        entity_id: { type: string, minLength: 3, maxLength: 128 }
+        entity_revision: { type: integer, format: int64, minimum: 1 }
+        value: { $ref: "#/components/schemas/EntityStateValue" }
+        unit: { type: [string, "null"], maxLength: 16 }
+        quality: { type: string, enum: [ok, degraded, unavailable, unknown] }
+        freshness:
+          type: string
+          enum: [fresh, stale, unknown]
+          readOnly: true
+          description: Computed by RockServer from received_at and stale_after before projection or fan-out.
+        observed_at: { type: string, format: date-time }
+        received_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Added by RockServer before persistence, HTTP projection or fan-out.
+        stale_after: { type: string, format: date-time }
+      description: >-
+        Latest normalized state regardless of whether the source is a paired device or future
+        integration adapter. Freshness is computed from received_at/stale_after; unavailable or
+        stale values must not be presented as current.
+    PlaybackRuntimeState:
+      type: object
+      additionalProperties: false
+      required: [status, station_id]
+      properties:
+        status: { type: string, enum: [idle, playing, paused, stopped, buffering, error] }
+        station_id: { type: [string, "null"], minLength: 1, maxLength: 128 }
+    VolumeRuntimeState:
+      type: object
+      additionalProperties: false
+      required: [level, muted]
+      properties:
+        level: { type: integer, minimum: 0, maximum: 100 }
+        muted: { type: boolean }
+    OutputRuntimeState:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      properties:
+        mode: { type: string, enum: [local, chromecast, relay] }
+        receiver_id: { type: string, minLength: 1, maxLength: 128 }
+    DisplayRuntimeState:
+      type: object
+      additionalProperties: false
+      required: [surface_id, view]
+      properties:
+        surface_id: { type: string, minLength: 3, maxLength: 128 }
+        view: { type: string, enum: [text, now_playing, sensor_grid, dismissed] }
+    DeviceRuntimeState:
+      type: object
+      additionalProperties: false
+      properties:
+        playback: { $ref: "#/components/schemas/PlaybackRuntimeState" }
+        volume: { $ref: "#/components/schemas/VolumeRuntimeState" }
+        output: { $ref: "#/components/schemas/OutputRuntimeState" }
+        display: { $ref: "#/components/schemas/DisplayRuntimeState" }
+      description: Mutable observed state; it neither declares support nor requests an action.
+    DeviceStateSnapshot:
+      type: object
+      additionalProperties: false
+      required: [state_revision, observed_at, state]
+      properties:
+        state_revision: { type: integer, format: int64, minimum: 1 }
+        observed_at: { type: string, format: date-time }
+        received_at: { type: string, format: date-time, readOnly: true }
+        state: { $ref: "#/components/schemas/DeviceRuntimeState" }
+      description: Full state after registration/reconnect. Equal revision is idempotent only with identical content; lower is stale.
+    DeviceStateDelta:
+      type: object
+      additionalProperties: false
+      required: [base_revision, state_revision, observed_at, changes]
+      properties:
+        base_revision: { type: integer, format: int64, minimum: 1 }
+        state_revision: { type: integer, format: int64, minimum: 2 }
+        observed_at: { type: string, format: date-time }
+        received_at: { type: string, format: date-time, readOnly: true }
+        changes: { $ref: "#/components/schemas/DeviceRuntimeState" }
+      description: >-
+        Delta is accepted only when base_revision equals the last accepted revision and
+        state_revision is exactly base_revision + 1. A gap requests a full resync.
+    DeviceCommandTarget:
+      oneOf:
+        - $ref: "#/components/schemas/DeviceTarget"
+        - $ref: "#/components/schemas/EntityTarget"
+        - $ref: "#/components/schemas/SurfaceTarget"
+      description: Exactly one explicit target; v1 has no implicit or broadcast target.
+    DeviceTarget:
+      type: object
+      additionalProperties: false
+      required: [device_id]
+      properties:
+        device_id: { type: string, format: uuid }
+    EntityTarget:
+      type: object
+      additionalProperties: false
+      required: [device_id, entity_id]
+      properties:
+        device_id: { type: string, format: uuid }
+        entity_id: { type: string, minLength: 3, maxLength: 128 }
+    SurfaceTarget:
+      type: object
+      additionalProperties: false
+      required: [device_id, surface_id]
+      properties:
+        device_id: { type: string, format: uuid }
+        surface_id: { type: string, minLength: 3, maxLength: 128 }
+    DeviceCommandBody:
+      oneOf:
+        - $ref: "#/components/schemas/PlaybackCommand"
+        - $ref: "#/components/schemas/StationCommand"
+        - $ref: "#/components/schemas/VolumeCommand"
+        - $ref: "#/components/schemas/ChromecastCommand"
+        - $ref: "#/components/schemas/RelayCommand"
+        - $ref: "#/components/schemas/DisplayCommand"
+        - $ref: "#/components/schemas/ActuatorCommand"
+        - $ref: "#/components/schemas/UnknownCommandBody"
+      discriminator:
+        propertyName: name
+        mapping:
+          playback.play: "#/components/schemas/PlaybackCommand"
+          playback.pause: "#/components/schemas/PlaybackCommand"
+          playback.stop: "#/components/schemas/PlaybackCommand"
+          playback.next: "#/components/schemas/PlaybackCommand"
+          playback.previous: "#/components/schemas/PlaybackCommand"
+          station.play_station: "#/components/schemas/StationCommand"
+          station.play_stream: "#/components/schemas/StationCommand"
+          volume.set_volume: "#/components/schemas/VolumeCommand"
+          volume.change_volume: "#/components/schemas/VolumeCommand"
+          volume.set_mute: "#/components/schemas/VolumeCommand"
+          chromecast.discover: "#/components/schemas/ChromecastCommand"
+          chromecast.connect: "#/components/schemas/ChromecastCommand"
+          chromecast.disconnect: "#/components/schemas/ChromecastCommand"
+          relay.start: "#/components/schemas/RelayCommand"
+          relay.stop: "#/components/schemas/RelayCommand"
+          relay.set_mode: "#/components/schemas/RelayCommand"
+          display.show_view: "#/components/schemas/DisplayCommand"
+          display.show_text: "#/components/schemas/DisplayCommand"
+          display.dismiss: "#/components/schemas/DisplayCommand"
+          entity.turn_on: "#/components/schemas/ActuatorCommand"
+          entity.turn_off: "#/components/schemas/ActuatorCommand"
+          entity.set_value: "#/components/schemas/ActuatorCommand"
+      description: >-
+        Compact allowlisted v1 command union. Unknown names are not coerced into an arbitrary JSON
+        tool call; a target returns unsupported_command.
+    UnknownCommandBody:
+      type: object
+      additionalProperties: true
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 96
+          pattern: "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*)+$"
+      not:
+        properties:
+          name:
+            enum:
+              - playback.play
+              - playback.pause
+              - playback.stop
+              - playback.next
+              - playback.previous
+              - station.play_station
+              - station.play_stream
+              - volume.set_volume
+              - volume.change_volume
+              - volume.set_mute
+              - chromecast.discover
+              - chromecast.connect
+              - chromecast.disconnect
+              - relay.start
+              - relay.stop
+              - relay.set_mode
+              - display.show_view
+              - display.show_text
+              - display.dismiss
+              - entity.turn_on
+              - entity.turn_off
+              - entity.set_value
+        required: [name]
+      description: >-
+        Forward-compatible command envelope. It is transport-valid but has no executable v1
+        handler, so the target returns unsupported_command. Known command bodies remain strict.
+    PlaybackCommand:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          enum: [playback.play, playback.pause, playback.stop, playback.next, playback.previous]
+    StationCommand:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [name, station_id]
+          properties:
+            name: { const: station.play_station }
+            station_id: { type: string, minLength: 1, maxLength: 128 }
+          description: >-
+            Controller supplies only the stable RockServer station_id. RockServer resolves the
+            current catalog stream and dispatches a validated station.play_stream under the same
+            command_id; the controller never chooses a catalog stream URL.
+        - type: object
+          additionalProperties: false
+          required: [name, source, stream_uri]
+          properties:
+            name: { const: station.play_stream }
+            source: { type: string, enum: [rockserver_catalog, direct_stream] }
+            stream_uri:
+              type: string
+              format: uri
+              pattern: "^https?://"
+              maxLength: 2048
+              description: >-
+                Allowed only when media.station advertises direct_stream. The absolute HTTP(S) URI
+                must have a host, no userinfo or fragment, and a TCP port in 1..65535 (including the
+                scheme default). RockServer and the target validate every DNS result and at most five
+                redirects and reject loopback, private, link-local, multicast and reserved
+                destinations; the URI must not be logged. Controllers may send only
+                source=direct_stream. RockServer transforms station.play_station into
+                source=rockserver_catalog under the same command_id after catalog resolution.
+    VolumeCommand:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [name, level]
+          properties:
+            name: { const: volume.set_volume }
+            level: { type: integer, minimum: 0, maximum: 100 }
+        - type: object
+          additionalProperties: false
+          required: [name, delta]
+          properties:
+            name: { const: volume.change_volume }
+            delta: { type: integer, minimum: -100, maximum: 100, not: { const: 0 } }
+        - type: object
+          additionalProperties: false
+          required: [name, muted]
+          properties:
+            name: { const: volume.set_mute }
+            muted: { type: boolean }
+    ChromecastCommand:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [name]
+          properties:
+            name: { const: chromecast.discover }
+        - type: object
+          additionalProperties: false
+          required: [name, receiver_id]
+          properties:
+            name: { const: chromecast.connect }
+            receiver_id: { type: string, minLength: 1, maxLength: 128 }
+        - type: object
+          additionalProperties: false
+          required: [name]
+          properties:
+            name: { const: chromecast.disconnect }
+    RelayCommand:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [name]
+          properties:
+            name: { const: relay.start }
+        - type: object
+          additionalProperties: false
+          required: [name]
+          properties:
+            name: { const: relay.stop }
+        - type: object
+          additionalProperties: false
+          required: [name, mode]
+          properties:
+            name: { const: relay.set_mode }
+            mode: { type: string, minLength: 1, maxLength: 32, pattern: "^[a-z][a-z0-9_]*$" }
+    SensorGridItem:
+      type: object
+      additionalProperties: false
+      required: [entity_id, label, value, unit, quality, freshness]
+      properties:
+        entity_id: { type: string, minLength: 3, maxLength: 128 }
+        label: { type: string, minLength: 1, maxLength: 64 }
+        value: { $ref: "#/components/schemas/EntityStateValue" }
+        unit: { type: [string, "null"], maxLength: 16 }
+        quality: { type: string, enum: [ok, degraded, unavailable, unknown] }
+        freshness: { type: string, enum: [fresh, stale, unknown] }
+    DisplayCommand:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [name, view, title, items]
+          properties:
+            name: { const: display.show_view }
+            view: { const: sensor_grid }
+            title: { type: string, minLength: 1, maxLength: 128 }
+            items:
+              type: array
+              maxItems: 32
+              items: { $ref: "#/components/schemas/SensorGridItem" }
+          description: sensor_grid carries normalized values and explicit freshness, independent of their provider source.
+        - type: object
+          additionalProperties: false
+          required: [name, view, station_id, title]
+          properties:
+            name: { const: display.show_view }
+            view: { const: now_playing }
+            station_id: { type: string, minLength: 1, maxLength: 128 }
+            title: { type: string, minLength: 1, maxLength: 128 }
+            subtitle: { type: string, maxLength: 256 }
+        - type: object
+          additionalProperties: false
+          required: [name, text]
+          properties:
+            name: { const: display.show_text }
+            text: { type: string, minLength: 1, maxLength: 1024 }
+        - type: object
+          additionalProperties: false
+          required: [name]
+          properties:
+            name: { const: display.dismiss }
+    ActuatorCommand:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [name]
+          properties:
+            name: { const: entity.turn_on }
+        - type: object
+          additionalProperties: false
+          required: [name]
+          properties:
+            name: { const: entity.turn_off }
+        - type: object
+          additionalProperties: false
+          required: [name, value]
+          properties:
+            name: { const: entity.set_value }
+            value: { type: number }
+      description: >-
+        Valid only for an explicit EntityTarget whose manifest declares the exact command and
+        numeric bounds, and only after actuator.control plus confirmation policy succeeds.
+    DeviceCommandPayload:
+      type: object
+      additionalProperties: false
+      required: [command_id, target, body]
+      properties:
+        command_id: { $ref: "#/components/schemas/CommandId" }
+        target: { $ref: "#/components/schemas/DeviceCommandTarget" }
+        deadline_at:
+          type: string
+          format: date-time
+          description: >-
+            Optional absolute deadline. When absent the server uses 10 seconds; requested deadlines
+            are capped at 30 seconds from receipt and are never an offline queue.
+        body: { $ref: "#/components/schemas/DeviceCommandBody" }
+      description: >-
+        Actor identity is never accepted from this payload. The server derives it from the native
+        session and verifies same-owner target, scope, role, capability, schema and presence.
+    ChromecastReceiver:
+      type: object
+      additionalProperties: false
+      required: [receiver_id, display_name, discovered_at, expires_at]
+      properties:
+        receiver_id: { type: string, minLength: 1, maxLength: 128 }
+        display_name: { type: string, minLength: 1, maxLength: 128 }
+        discovered_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+      description: Ephemeral player-local receiver handle; it is not a device-control identity.
+    CommandResultOutput:
+      type: object
+      additionalProperties: false
+      properties:
+        receivers:
+          type: array
+          maxItems: 32
+          items: { $ref: "#/components/schemas/ChromecastReceiver" }
+        state_revision: { type: integer, format: int64, minimum: 1 }
+        entity_revision: { type: integer, format: int64, minimum: 1 }
+    DeviceControlErrorCode:
+      type: string
+      enum:
+        - authentication_required
+        - forbidden
+        - unsupported_protocol_version
+        - invalid_message
+        - frame_too_large
+        - rate_limited
+        - target_offline
+        - capability_not_supported
+        - unsupported_command
+        - invalid_payload
+        - stale_revision
+        - command_timeout
+        - duplicate_command
+        - too_many_in_flight
+    DeviceControlError:
+      type: object
+      additionalProperties: false
+      required: [code, message, request_id, details]
+      properties:
+        code: { $ref: "#/components/schemas/DeviceControlErrorCode" }
+        message: { type: string, minLength: 1, maxLength: 512 }
+        request_id: { type: string, minLength: 1, maxLength: 128 }
+        details:
+          type: object
+          maxProperties: 16
+          additionalProperties: true
+      description: >-
+        Reuses the HTTP error shape. Cross-owner and unknown targets use the same forbidden response
+        so another account's target existence cannot be inferred.
+    CommandReceivedPayload:
+      type: object
+      additionalProperties: false
+      required: [command_id, received_at, duplicate]
+      properties:
+        command_id: { $ref: "#/components/schemas/CommandId" }
+        received_at: { type: string, format: date-time }
+        duplicate: { type: boolean }
+      description: >-
+        Confirms server receipt, not execution. A same-payload duplicate within 86,400 seconds
+        replays the stored lifecycle/result; a reused command_id with different target/body is
+        duplicate_command. Limits are 16 in-flight per controller connection and 8 per target.
+    CommandAcceptedPayload:
+      type: object
+      additionalProperties: false
+      required: [command_id, accepted_at]
+      properties:
+        command_id: { $ref: "#/components/schemas/CommandId" }
+        accepted_at: { type: string, format: date-time }
+      description: Target acknowledged that it began handling the command; this is not terminal success.
+    CommandResultPayload:
+      type: object
+      additionalProperties: false
+      required: [command_id, status, completed_at, error]
+      properties:
+        command_id: { $ref: "#/components/schemas/CommandId" }
+        status: { type: string, enum: [succeeded, failed] }
+        completed_at: { type: string, format: date-time }
+        error:
+          oneOf:
+            - $ref: "#/components/schemas/DeviceControlError"
+            - type: "null"
+        output: { $ref: "#/components/schemas/CommandResultOutput" }
+      description: >-
+        Exactly one terminal result exists per command_id. Succeeded requires error=null; failed
+        requires a structured error. Only a target-originated result may establish physical success;
+        a separate state or entity revision confirms the observed state.
+    ControlMessageEnvelope:
+      type: object
+      additionalProperties: true
+      required: [protocol_version, message_id, type, sent_at, payload]
+      properties:
+        protocol_version: { $ref: "#/components/schemas/ProtocolMajor" }
+        message_id:
+          type: string
+          format: uuid
+          description: Unique per sender for transport diagnostics; it is not an idempotency or lifecycle identifier.
+        type:
+          type: string
+          minLength: 3
+          maxLength: 96
+          pattern: "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*)+$"
+        sent_at: { type: string, format: date-time }
+        payload: { type: object }
+      description: >-
+        Common UTF-8 JSON text-frame envelope. connection_id, command_id, event_id, operation_id
+        and delivery_id have separate lifecycles and must never substitute for one another. Actor
+        identity is derived from the authenticated connection, never trusted from payload. Binary
+        frames are invalid. Within major v1, optional fields may be added but existing field
+        semantics may not change. Receivers ignore unknown optional envelope/message fields and
+        unknown message types only when doing so is safe; unknown commands are answered with
+        unsupported_command and unknown capabilities are hidden by older controllers. Known command
+        bodies remain strict at the execution boundary. Deprecation requires at least one published
+        minor-contract cycle and documentation before removal in a later major.
+    ProtocolHelloPayload:
+      type: object
+      additionalProperties: true
+      required: [supported_protocol_versions]
+      properties:
+        supported_protocol_versions:
+          type: array
+          minItems: 1
+          maxItems: 4
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/ProtocolMajor" }
+    ProtocolWelcomePayload:
+      type: object
+      additionalProperties: true
+      required: [selected_protocol_version, connection_id, registration_deadline_seconds, limits]
+      properties:
+        selected_protocol_version: { type: integer, const: 1 }
+        connection_id: { $ref: "#/components/schemas/ConnectionId" }
+        registration_deadline_seconds: { type: integer, const: 10 }
+        limits: { $ref: "#/components/schemas/DeviceControlLimits" }
+    DeviceControlLimits:
+      type: object
+      additionalProperties: false
+      required:
+        - max_json_frame_bytes
+        - max_payload_bytes
+        - max_capabilities
+        - max_entities
+        - max_surfaces
+        - max_directory_devices
+        - heartbeat_interval_seconds
+        - offline_ttl_seconds
+        - max_in_flight_per_connection
+        - max_in_flight_per_target_device
+        - default_command_timeout_seconds
+        - max_command_timeout_seconds
+        - command_idempotency_window_seconds
+        - max_stream_redirects
+      properties:
+        max_json_frame_bytes: { type: integer, const: 65536 }
+        max_payload_bytes: { type: integer, const: 61440 }
+        max_capabilities: { type: integer, const: 32 }
+        max_entities: { type: integer, const: 256 }
+        max_surfaces: { type: integer, const: 16 }
+        max_directory_devices: { type: integer, const: 50 }
+        heartbeat_interval_seconds: { type: integer, const: 20 }
+        offline_ttl_seconds: { type: integer, const: 60 }
+        max_in_flight_per_connection: { type: integer, const: 16 }
+        max_in_flight_per_target_device: { type: integer, const: 8 }
+        default_command_timeout_seconds: { type: integer, const: 10 }
+        max_command_timeout_seconds: { type: integer, const: 30 }
+        command_idempotency_window_seconds: { type: integer, const: 86400 }
+        max_stream_redirects: { type: integer, const: 5 }
+    DeviceRegisterPayload:
+      type: object
+      additionalProperties: false
+      required: [device_type, app_version, manifest]
+      properties:
+        device_type: { type: string, minLength: 1, maxLength: 64 }
+        app_version: { type: string, minLength: 1, maxLength: 64 }
+        manifest: { $ref: "#/components/schemas/DeviceManifest" }
+      description: >-
+        Full truthful registration. It deliberately has no user_id, device_id, credential, pairing
+        or actor field; the authenticated session supplies identity.
+    DeviceRegisteredPayload:
+      type: object
+      additionalProperties: true
+      required: [connection_id, authenticated_user_id, authenticated_device_id, granted_scopes, heartbeat_interval_seconds, offline_ttl_seconds, require_full_state]
+      properties:
+        connection_id: { $ref: "#/components/schemas/ConnectionId" }
+        authenticated_user_id: { type: string, format: uuid, readOnly: true }
+        authenticated_device_id: { type: string, format: uuid, readOnly: true }
+        granted_scopes:
+          type: array
+          uniqueItems: true
+          maxItems: 5
+          items: { $ref: "#/components/schemas/DeviceControlScope" }
+        heartbeat_interval_seconds: { type: integer, const: 20 }
+        offline_ttl_seconds: { type: integer, const: 60 }
+        require_full_state: { type: boolean, const: true }
+      description: Server-derived identity and policy. Registration data cannot alter these values.
+    DeviceHeartbeatPayload:
+      type: object
+      additionalProperties: true
+      required: [sequence]
+      properties:
+        sequence: { type: integer, format: int64, minimum: 0 }
+    DeviceHeartbeatAckPayload:
+      type: object
+      additionalProperties: true
+      required: [sequence, server_time]
+      properties:
+        sequence: { type: integer, format: int64, minimum: 0 }
+        server_time: { type: string, format: date-time }
+    DeviceManifestPayload:
+      type: object
+      additionalProperties: true
+      required: [manifest]
+      properties:
+        source_device_id: { type: string, format: uuid, readOnly: true }
+        manifest: { $ref: "#/components/schemas/DeviceManifest" }
+    DeviceStateFullPayload:
+      type: object
+      additionalProperties: true
+      required: [snapshot]
+      properties:
+        source_device_id: { type: string, format: uuid, readOnly: true }
+        snapshot: { $ref: "#/components/schemas/DeviceStateSnapshot" }
+    DeviceStateDeltaPayload:
+      type: object
+      additionalProperties: true
+      required: [delta]
+      properties:
+        source_device_id: { type: string, format: uuid, readOnly: true }
+        delta: { $ref: "#/components/schemas/DeviceStateDelta" }
+    EntityStatePayload:
+      type: object
+      additionalProperties: true
+      required: [state]
+      properties:
+        source_device_id: { type: string, format: uuid, readOnly: true }
+        state: { $ref: "#/components/schemas/EntityStateSnapshot" }
+      description: >-
+        Device-originated frames omit source_device_id; the server derives it from the connection
+        and adds it only to authorized forwarded events. Entity revisions are monotonic per entity;
+        lower/equal-different revisions are stale and a gap requests a full entity state.
+    PresenceChangedPayload:
+      type: object
+      additionalProperties: true
+      required: [event_id, device_id, presence]
+      properties:
+        event_id: { $ref: "#/components/schemas/EventId" }
+        device_id: { type: string, format: uuid }
+        presence: { $ref: "#/components/schemas/Presence" }
+    ResyncRequestedPayload:
+      type: object
+      additionalProperties: true
+      required: [kind, reason]
+      properties:
+        kind: { type: string, enum: [manifest, device_state, entity_state] }
+        entity_id: { type: string, minLength: 3, maxLength: 128 }
+        reason: { type: string, enum: [reconnect, missing_base, revision_gap, conflicting_revision] }
+      description: Full manifest and full device state are always required after reconnect; deltas never bridge connections.
+    DirectorySnapshotPayload:
+      type: object
+      additionalProperties: true
+      required: [event_id, directory]
+      properties:
+        event_id: { $ref: "#/components/schemas/EventId" }
+        directory: { $ref: "#/components/schemas/DeviceControlDirectory" }
+      description: Automatically sent to registered controllers with device.directory.read; v1 needs no separate subscription message.
+    DirectoryUpsertPayload:
+      type: object
+      additionalProperties: true
+      required: [event_id, directory_revision, device]
+      properties:
+        event_id: { $ref: "#/components/schemas/EventId" }
+        directory_revision: { type: integer, format: int64, minimum: 1 }
+        device: { $ref: "#/components/schemas/DeviceControlDirectoryEntry" }
+    DirectoryRemovalPayload:
+      type: object
+      additionalProperties: true
+      required: [event_id, directory_revision, device_id, reason]
+      properties:
+        event_id: { $ref: "#/components/schemas/EventId" }
+        directory_revision: { type: integer, format: int64, minimum: 1 }
+        device_id: { type: string, format: uuid }
+        reason: { type: string, enum: [revoked, no_longer_permitted, removed] }
+    ProtocolErrorPayload:
+      type: object
+      additionalProperties: true
+      required: [error]
+      properties:
+        error: { $ref: "#/components/schemas/DeviceControlError" }
+        in_reply_to_message_id: { type: string, format: uuid }
+        command_id: { $ref: "#/components/schemas/CommandId" }
+      description: Error correlation never changes the lifecycle meaning of message_id or command_id.
+    ProtocolHelloMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: protocol.hello }
+            payload: { $ref: "#/components/schemas/ProtocolHelloPayload" }
+    ProtocolWelcomeMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: protocol.welcome }
+            payload: { $ref: "#/components/schemas/ProtocolWelcomePayload" }
+    DeviceRegisterMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: device.register }
+            payload: { $ref: "#/components/schemas/DeviceRegisterPayload" }
+    DeviceRegisteredMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: device.registered }
+            payload: { $ref: "#/components/schemas/DeviceRegisteredPayload" }
+    DeviceHeartbeatMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: device.heartbeat }
+            payload: { $ref: "#/components/schemas/DeviceHeartbeatPayload" }
+    DeviceHeartbeatAckMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: device.heartbeat_ack }
+            payload: { $ref: "#/components/schemas/DeviceHeartbeatAckPayload" }
+    DeviceManifestMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: device.manifest }
+            payload: { $ref: "#/components/schemas/DeviceManifestPayload" }
+    DeviceStateFullMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: device.state_full }
+            payload: { $ref: "#/components/schemas/DeviceStateFullPayload" }
+    DeviceStateDeltaMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: device.state_delta }
+            payload: { $ref: "#/components/schemas/DeviceStateDeltaPayload" }
+    EntityStateMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: entity.state }
+            payload: { $ref: "#/components/schemas/EntityStatePayload" }
+    PresenceChangedMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: device.presence_changed }
+            payload: { $ref: "#/components/schemas/PresenceChangedPayload" }
+    ResyncRequestedMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: device.resync_requested }
+            payload: { $ref: "#/components/schemas/ResyncRequestedPayload" }
+    DirectorySnapshotMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: directory.snapshot }
+            payload: { $ref: "#/components/schemas/DirectorySnapshotPayload" }
+    DirectoryUpsertMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: directory.upsert }
+            payload: { $ref: "#/components/schemas/DirectoryUpsertPayload" }
+    DirectoryRemovalMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: directory.removed }
+            payload: { $ref: "#/components/schemas/DirectoryRemovalPayload" }
+    DeviceCommandMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: device.command }
+            payload: { $ref: "#/components/schemas/DeviceCommandPayload" }
+    CommandReceivedMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: command.received }
+            payload: { $ref: "#/components/schemas/CommandReceivedPayload" }
+    CommandAcceptedMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: command.accepted }
+            payload: { $ref: "#/components/schemas/CommandAcceptedPayload" }
+    CommandResultMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: command.result }
+            payload: { $ref: "#/components/schemas/CommandResultPayload" }
+    ProtocolErrorMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type: { const: protocol.error }
+            payload: { $ref: "#/components/schemas/ProtocolErrorPayload" }
+    UnknownControlMessage:
+      allOf:
+        - $ref: "#/components/schemas/ControlMessageEnvelope"
+        - type: object
+          properties:
+            type:
+              not:
+                enum:
+                  - protocol.hello
+                  - protocol.welcome
+                  - protocol.error
+                  - device.register
+                  - device.registered
+                  - device.heartbeat
+                  - device.heartbeat_ack
+                  - device.manifest
+                  - device.state_full
+                  - device.state_delta
+                  - device.presence_changed
+                  - device.resync_requested
+                  - entity.state
+                  - directory.snapshot
+                  - directory.upsert
+                  - directory.removed
+                  - device.command
+                  - command.received
+                  - command.accepted
+                  - command.result
+          description: Unknown namespaced message type that a v1 receiver ignores only when safe.
     CreatedPairingRequest:
       type: object
       additionalProperties: false

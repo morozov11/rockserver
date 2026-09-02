@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000024",
+  "type": "command.received",
+  "sent_at": "2026-09-02T12:04:00Z",
+  "payload": { "command_id": "60000000-0000-4000-8000-000000000002", "received_at": "2026-09-02T12:04:00Z", "duplicate": true }
+}

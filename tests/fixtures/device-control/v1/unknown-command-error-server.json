@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000019",
+  "type": "protocol.error",
+  "sent_at": "2026-09-02T12:03:00Z",
+  "payload": { "error": { "code": "unsupported_command", "message": "No v1 handler is registered for vendor.calibrate_output.", "request_id": "fixture-unknown-command", "details": {} }, "command_id": "60000000-0000-4000-8000-000000000004", "in_reply_to_message_id": "10000000-0000-4000-8000-000000000018" }
+}

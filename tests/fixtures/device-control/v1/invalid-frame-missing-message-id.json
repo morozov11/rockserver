@@ -1,0 +1,6 @@
+{
+  "protocol_version": 1,
+  "type": "device.heartbeat",
+  "sent_at": "2026-09-02T12:05:00Z",
+  "payload": { "sequence": 1 }
+}

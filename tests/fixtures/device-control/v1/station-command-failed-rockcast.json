@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000017",
+  "type": "command.result",
+  "sent_at": "2026-09-02T12:02:50Z",
+  "payload": { "command_id": "60000000-0000-4000-8000-000000000003", "status": "failed", "completed_at": "2026-09-02T12:02:50Z", "error": { "code": "command_timeout", "message": "Target did not finish before its deadline.", "request_id": "fixture-command-timeout", "details": {} } }
+}

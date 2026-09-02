@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000031",
+  "type": "protocol.error",
+  "sent_at": "2026-09-02T12:03:11Z",
+  "payload": { "error": { "code": "stale_revision", "message": "State revision is lower than the accepted revision.", "request_id": "fixture-stale-device-state", "details": { "accepted_revision": 8 } }, "in_reply_to_message_id": "10000000-0000-4000-8000-000000000030" }
+}

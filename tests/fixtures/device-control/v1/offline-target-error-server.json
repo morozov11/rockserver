@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000027",
+  "type": "protocol.error",
+  "sent_at": "2026-09-02T12:04:10Z",
+  "payload": { "error": { "code": "target_offline", "message": "Target is offline and commands are not queued.", "request_id": "fixture-offline-target", "details": {} }, "command_id": "60000000-0000-4000-8000-000000000005", "in_reply_to_message_id": "10000000-0000-4000-8000-000000000026" }
+}

@@ -1,0 +1,23 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000003",
+  "type": "device.register",
+  "sent_at": "2026-09-02T12:00:02Z",
+  "payload": {
+    "device_type": "rockcast",
+    "app_version": "1.0.0-fixture",
+    "manifest": {
+      "manifest_revision": 1,
+      "roles": ["player"],
+      "capabilities": { "revision": 1, "items": [
+        { "name": "media.playback", "version": 1, "actions": ["play", "pause", "stop", "next", "previous"] },
+        { "name": "media.station", "version": 1, "sources": ["rockserver_catalog", "direct_stream"] },
+        { "name": "media.volume", "version": 1, "minimum": 0, "maximum": 100, "step": 5, "mute": true },
+        { "name": "media.chromecast", "version": 1, "actions": ["discover", "connect", "disconnect"], "discovery_ttl_seconds": 60 },
+        { "name": "media.relay", "version": 1, "actions": ["start", "stop", "set_mode"], "modes": ["local", "chromecast"] }
+      ] },
+      "entities": [],
+      "surfaces": []
+    }
+  }
+}

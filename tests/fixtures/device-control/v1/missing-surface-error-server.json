@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000029",
+  "type": "protocol.error",
+  "sent_at": "2026-09-02T12:04:20Z",
+  "payload": { "error": { "code": "capability_not_supported", "message": "The target does not declare display.secondary.", "request_id": "fixture-missing-surface", "details": { "surface_id": "display.secondary" } }, "command_id": "60000000-0000-4000-8000-000000000006", "in_reply_to_message_id": "10000000-0000-4000-8000-000000000028" }
+}

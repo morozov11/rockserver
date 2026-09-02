@@ -71,7 +71,60 @@
   implementation; endpoints and OpenAPI; and all affected roadmap/status/task sections. Ran
   `git diff --check`, targeted terminology/path searches, and a manual acceptance-table review.
   Markdown-only scope: no build, Clippy or test run required.
-- Status: **complete.** DC-002 and later tasks remain planned.
+- Status: **complete.** The next entry records completed DC-002; DC-003 and later remain planned.
+
+## DC-002 — 2026-09-02 — device-control protocol v1 and transport contract
+
+- Goal: make the RockMobile controller, RockCast player and future ESP32 multi-role client
+  independently implementable without reading RockServer Rust code.
+- Scope: contract-first OpenAPI changes only: machine-marked planned
+  `GET /api/v1/devices/connect`, separate planned
+  `GET /api/v1/device-control/directory`, protocol schemas, and minimal structural contract
+  assertions. Existing runtime routes, database, clients, firmware and fixtures were not changed.
+- Result: protocol major 1 now specifies native-session-only/server-derived identity; common JSON
+  envelope and distinct correlation IDs; negotiation/registration, roles/capabilities,
+  entity/surface manifests, heartbeat/presence, full/delta state and telemetry, directory events,
+  explicit targeting, a typed namespaced command union, received/accepted/exactly-one-result
+  lifecycle, structured errors, revision/resync rules and forward/deprecation compatibility.
+  `station.play_station` is resolved by RockServer; direct `station.play_stream` requires the
+  declared capability and strict URI/DNS/redirect validation.
+- Limits: 65,536-byte JSON frame, 61,440-byte payload, 32 capabilities, 256 entities, 16 surfaces,
+  50 directory devices, 20-second heartbeat, 60-second offline TTL, 10-second registration,
+  16/8 in-flight commands per connection/target, 10-second default and 30-second maximum command
+  timeout, 86,400-second command-id idempotency, and at most five revalidated stream redirects.
+- Checks: focused `cargo test --test openapi_contract --jobs 1` passed (3 tests), including YAML
+  parsing, planned/security markers, exact policy constants, identity/secret exclusions, dangling
+  refs, discriminator mappings and unique operation IDs. `cargo fmt --check`, strict
+  all-target/all-feature Clippy and full `cargo test --jobs 1` also passed; external PostgreSQL and
+  provider tests remained ignored behind explicit gates. No database query changed.
+- Status: **complete contract; runtime remains planned.** DC-003 and later tasks remain planned.
+
+## DC-003 — 2026-09-02 — shared device-control v1 golden fixtures
+
+- Goal: provide one canonical, machine-validated raw JSON fixture corpus that each future
+  RockServer/RockCast/RockMobile/ESP32 contract test can consume without copying or reading Rust.
+- Scope: `tests/fixtures/device-control/v1/`, a concise fixture index, a narrow OpenAPI-schema
+  contract test and the smallest v1 schema correction necessary for the documented unknown-command
+  compatibility rule. No runtime transport, database, pairing, client, firmware or provider
+  adapter work.
+- Result: fixtures cover hello/welcome; truthful RockCast player and ESP32 multi-role
+  registration/manifests; ESP32 full/delta state and temperature/humidity telemetry; a
+  RockMobile-suitable directory snapshot; explicit display `sensor_grid`; success and structured
+  failure command lifecycles; forward unknown capability/command; stale revision; semantic sensor
+  unit/value rejection; duplicate command replay; offline target; missing surface; and an
+  intentionally schema-invalid frame. Home Assistant is limited to source-neutral normalized
+  entity directory/state projections, never a paired device or provider-native integration
+  protocol. `UnknownCommandBody` permits an unknown namespaced envelope to validate and receive
+  `unsupported_command`, while known command schemas remain strict.
+- Validator: dev-only `jsonschema` 0.30 compiles JSON Schema 2020-12 roots using the OpenAPI
+  component graph and enforces required/type/const/enum/oneOf/additionalProperties/bounds/local
+  `$ref`. Explicit flow assertions add command/message correlation, exactly one terminal result,
+  monotonic state revisions, idempotent replay, semantic error replies and identity exclusions.
+- Checks: focused `cargo test --test openapi_contract --jobs 1` passed (4 tests); `cargo fmt
+  --check`, strict `cargo clippy --all-targets --all-features -- -D warnings`, and full `cargo
+  test --jobs 1` passed. External PostgreSQL and provider tests stayed ignored behind their
+  explicit environment gates; no database query changed.
+- Status: **complete contract fixtures; runtime remains planned.** DC-004 and later remain planned.
 
 ## Local administrator launcher — 2026-09-01
 
@@ -1733,7 +1786,7 @@
   session, inventory and revocation flows already implemented in RockServer.
 - Result: removed the proposed `device_pairings` persistence and every task that
   would recreate pairing. The plan now uses the existing `devices.id`, durable
-  device secret, `/v1/auth/device-session`, `/v1/devices` and revoke semantics;
+  device secret, `/api/v1/auth/device-session`, `/api/v1/devices` and revoke semantics;
   only capabilities, presence, entities, surfaces, state and routing are additive.
 - Scope: documentation only; no API, source, migration, account/device row,
   credential, session, pairing request, client or runtime behaviour changed.

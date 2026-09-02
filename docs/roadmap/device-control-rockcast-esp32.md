@@ -92,68 +92,35 @@ Before dispatch, RockServer must verify: (1) live actor identity, (2) actor/targ
 
 ### DeviceCapabilities
 
-Capabilities — сравнительно стабильная декларация прошивки/приложения или integration adapter. Provider присылает полный набор при `device.register`/`integration.sync` и повторно при обновлении. Каждая capability имеет namespace, version и параметры, чтобы UI и intent router не гадали о границах.
-
-```json
-{
-  "protocol_version": 1,
-  "device_type": "esp32",
-  "roles": ["player", "display_surface", "voice_endpoint", "sensor_source"],
-  "capabilities": {
-    "playback": {"supported": true, "actions": ["play", "pause", "stop", "next", "previous"]},
-    "volume": {"supported": true, "min": 0, "max": 100, "step": 1, "mute": true},
-    "station_selection": {"supported": true, "sources": ["rockserver_catalog", "direct_stream"]},
-    "display": {"supported": true, "surfaces": ["main"], "views": ["text", "sensor_grid", "now_playing"]},
-    "sensors": {"supported": true, "entity_classes": ["temperature", "humidity"]},
-    "voice_input": {"supported": true, "audio": ["pcm16_mono_16000"], "wake_word": false},
-    "speech_output": {"supported": true, "delivery": ["audio_url", "audio_stream"], "codecs": ["opus", "mp3"], "local_tts": false},
-    "relay": {"supported": false},
-    "home_assistant": {"supported": false}
-  }
-}
-```
+Capabilities — сравнительно стабильная декларация прошивки/приложения или integration adapter. Provider присылает полный набор при `device.register`/`integration.sync` и повторно при обновлении. Каждая capability имеет namespace, version и параметры, чтобы UI и intent router не гадали о границах. Канонические v1 oneOf-схемы и bounds находятся только в `api/openapi.yaml`; DC-003 позже добавит отдельные golden fixtures.
 
 Для несинхронных сценариев тот же versioned envelope переносит `operation.created`, `operation.updated`, `operation.triggered`, `delivery.available` и `delivery.updated`. Controller подписывается на доступные ему operations/events, но доставка на speech/display surface не зависит от активной controller-сессии. Для получения временного audio asset используется отдельный авторизованный HTTP endpoint или бинарная audio session; большие audio chunks не смешиваются с JSON control frames.
 
-Первый RockCast MVP объявляет только реально работающие playback/volume/Chromecast/relay возможности. ESP32 объявляет только физически доступные функции конкретной прошивки и подключённых модулей. После подключения или отключения датчика ESP32 повторно публикует capabilities/entities snapshot с новой revision. Capability `supported: false` можно не передавать; она показана выше только для ясности примера.
+Первый RockCast MVP объявляет только реально работающие playback/volume/Chromecast/relay возможности. ESP32 объявляет только физически доступные функции конкретной прошивки и подключённых модулей. После подключения или отключения датчика ESP32 повторно публикует полный manifest с новой revision. Неподдерживаемая capability не публикуется.
 
 ### Runtime state
 
-State изменчив, имеет `state_revision`, timestamp и partial-update семантику. Его нельзя использовать для вывода о поддержке функции. Пример:
-
-```json
-{
-  "type": "device.state",
-  "device_id": "9b0e…",
-  "state_revision": 42,
-  "observed_at": "2026-09-02T12:00:00Z",
-  "state": {
-    "online": true,
-    "playback": {"status": "playing", "station_id": "station-jazz-001", "position_ms": null},
-    "volume": {"level": 35, "muted": false},
-    "output": {"mode": "chromecast", "receiver_name": "Living room TV"},
-    "display": {"surface_id": "display.main", "view": "sensor_grid"},
-    "entities": {
-      "sensor.kitchen_temperature": {"value": 23.4, "unit": "°C", "quality": "ok"},
-      "sensor.kitchen_humidity": {"value": 41, "unit": "%", "quality": "ok"}
-    }
-  }
-}
-```
+State изменчив, имеет `state_revision`, `observed_at`/server `received_at` и full/delta семантику. Его нельзя использовать для вывода о поддержке функции. Wire-типы — `device.state_full`, `device.state_delta` и отдельный `entity.state`; их поля и revision rules канонически заданы в OpenAPI.
 
 Обязательный серверный presence-state ограничен `online`, `last_seen` и причиной disconnect. Остальной state — best effort: controller показывает `unknown` или «обновляется», если snapshot/telemetry устарели. Provider отправляет полный snapshot после регистрации/reconnect и delta после каждого значимого фактического изменения. Для sensor value отдельно хранятся `observed_at`, `received_at`, `quality` и `stale_after`; отсутствие свежего значения нельзя превращать в ноль.
 
 ### Commands
 
-Команда содержит `command_id` (UUID, идемпотентный), `target_device_id`, `type`, типизированный `payload`, actor и deadline. Сервер проверяет ownership, online, capability и schema, затем отправляет её player. Player отвечает `command.accepted`, потом ровно одним terminal `command.result`; параллельно рассылает подтверждающий state.
+Каноническая wire-форма находится в `api/openapi.yaml`: общий envelope содержит
+`protocol_version`, `message_id`, namespaced `type`, `sent_at` и `payload`, а
+`device.command` — `command_id`, один явный device/entity/surface target, deadline и
+типизированный body. Actor не передаётся на доверии: сервер выводит его из native session,
+проверяет ownership, online, scope, capability и schema, затем отправляет команду target.
+Target отвечает `command.accepted`, потом ровно одним terminal `command.result`; параллельно
+рассылает подтверждающий state.
 
 Начальный набор:
 
 | Группа | Команды |
 | --- | --- |
-| Playback | `play`, `pause`, `stop`, `next`, `previous` |
-| Station | `play_station` (stable `station_id`; player при необходимости получает поток через серверный API), `play_stream` (строго валидируемый URL, только если capability разрешает) |
-| Volume | `set_volume`, `change_volume`, `set_mute` |
+| Playback | `playback.play`, `playback.pause`, `playback.stop`, `playback.next`, `playback.previous` |
+| Station | `station.play_station` (stable `station_id`; RockServer резолвит catalog stream), `station.play_stream` (строго валидируемый URI, только при объявленном source capability) |
+| Volume | `volume.set_volume`, `volume.change_volume`, `volume.set_mute` |
 | Chromecast | `chromecast.discover`, `chromecast.connect`, `chromecast.disconnect` |
 | Relay | `relay.start`, `relay.stop`, `relay.set_mode` |
 | Display | `display.show_view`, `display.show_text`, `display.dismiss` |
@@ -176,24 +143,9 @@ RockServer хранит только последнее оперативное �
 
 Presentation — типизированная модель результата, а не готовая bitmap-картинка. Для protocol v1 достаточно `text`, `now_playing` и `sensor_grid`. Команда `display.show_view` передаёт `view`, `surface_id`, заголовок и нормализованные карточки. ESP32 сам рисует подходящий layout под свой экран; Rockmobile использует собственные widgets. Это позволяет одной фразе породить эквивалентный результат на разных surfaces.
 
-Пример команды для ESP32:
-
-```json
-{
-  "command_id": "uuid",
-  "target_device_id": "kitchen-esp32",
-  "type": "display.show_view",
-  "payload": {
-    "surface_id": "display.main",
-    "view": "sensor_grid",
-    "title": "Датчики кухни",
-    "items": [
-      {"entity_id": "sensor.kitchen_temperature", "label": "Температура", "value": 23.4, "unit": "°C", "quality": "ok"},
-      {"entity_id": "sensor.kitchen_humidity", "label": "Влажность", "value": 41, "unit": "%", "quality": "ok"}
-    ]
-  }
-}
-```
+Для ESP32 `display.show_view` адресуется явным `SurfaceTarget` и переносит bounded
+`sensor_grid` items с `entity_id`, value, unit, quality и freshness. Канонический envelope
+и typed body не дублируются здесь; fixtures появятся только в DC-003.
 
 ### Intent layer
 
@@ -330,11 +282,11 @@ Home Assistant подключается через отдельный provider a
 ### Phase 0 — зафиксировать контракт и product decisions
 
 - [x] DC-001: зафиксировать существующий `user_id -> devices.id` ownership как MVP boundary, actor/target model, role semantics, minimum control scopes, permission matrix и intent-safety policy; `home_id`/shared-home, delegation, automation identity и fine-grained policy оставить отдельным будущим расширением.
-- [ ] Выбрать canonical `/api/v1/devices/connect` и HTTP read endpoints; не менять voice WebSocket.
-- [ ] Описать OpenAPI/AsyncAPI-style schemas для devices, entities, surfaces, capabilities, state, telemetry, presentation и commands; зафиксировать protocol v1, error codes, limits, heartbeat/TTL, compatibility и deprecation rules.
-- [ ] Утвердить initial command set и exact semantics `play_station`/`play_stream`; явно задокументировать, какой сервис резолвит stream URL.
+- [x] DC-002: зафиксировать canonical planned `GET /api/v1/devices/connect` и `GET /api/v1/device-control/directory`; не менять voice WebSocket и inventory `GET /api/v1/devices`.
+- [x] Описать в OpenAPI 3.1 schemas для devices, entities, surfaces, capabilities, state, telemetry, directory events и commands; зафиксировать protocol v1, errors, exact limits, revisions/resync, compatibility и deprecation rules.
+- [x] Утвердить initial namespaced command set и exact semantics `station.play_station`/`station.play_stream`: catalog station резолвит RockServer, direct stream требует capability и строгой URI/redirect validation.
 - [ ] Зафиксировать typed intent vocabulary (`play_radio`, `show_sensors`, `query_sensor`, actuator intents) и правило «LLM интерпретирует, обычный код разрешает и исполняет».
-- [ ] Добавить protocol fixtures и negative examples для unknown capability/command, stale sensor, duplicate command, missing surface и offline target.
+- [x] DC-003: добавить canonical protocol fixtures и negative examples для unknown capability/command, stale revision, invalid sensor unit/value, duplicate command, missing surface и offline target; raw JSON валидируется против OpenAPI component schemas.
 
 **Готово, когда:** schema и примеры reviewable без кода; Rockmobile и RockCast могут начать независимую реализацию против fixtures.
 

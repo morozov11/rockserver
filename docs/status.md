@@ -63,6 +63,59 @@ strict all-target/all-feature Clippy, and `cargo test` (97 unit tests plus non-l
 coverage).  RockServer `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`
 passed; external provider and database cases are opt-in by design.
 
+## DC-003 — device-control v1 golden fixtures (complete, planned runtime, 2026-09-02)
+
+`tests/fixtures/device-control/v1/` is now the single canonical raw-JSON fixture set for
+RockServer, RockCast, RockMobile and future firmware contract tests. It includes negotiation,
+truthful RockCast and ESP32 registration/manifests, full/delta state, sensor telemetry,
+controller directory projection, `sensor_grid`, command lifecycle success/failure and semantic
+rejection flows. Home Assistant is represented only as source-neutral, allowlisted normalized
+entity directory/state projections: it is neither registered as a paired device nor given a
+provider-native ID, credential, WebSocket or service-call contract.
+
+`tests/openapi_contract.rs` registers every JSON fixture, rejects unregistered/missing fixtures,
+and validates each against its named OpenAPI component with dev-only `jsonschema` 0.30 (JSON Schema
+2020-12 plus the OpenAPI component `$ref` graph). The test also checks message/command correlation,
+one terminal lifecycle result, revision progression, explicit target, registration identity
+exclusion and semantic error replies. The fixture review exposed a compatibility gap: an unknown
+namespaced command was prohibited by the command union despite the v1 rule requiring a structured
+`unsupported_command`. `UnknownCommandBody` now accepts only unknown namespaced command envelopes;
+known command branches retain their strict payload schemas.
+
+Focused fixture validation (4 tests), `cargo fmt --check`, strict all-target/all-feature Clippy,
+and full `cargo test --jobs 1` pass. External PostgreSQL/provider tests remain ignored behind
+their explicit gates; no database query changed. Runtime WebSocket/HTTP routes, persistence,
+clients, firmware and a Home Assistant adapter remain unimplemented, and `/api/v1/voice/stream`
+is unchanged. The next device-control step is DC-004.
+
+## DC-002 — device-control protocol v1 contract (complete, planned runtime, 2026-09-02)
+
+`api/openapi.yaml` now defines the contract-first, machine-marked planned operations
+`GET /api/v1/devices/connect` and `GET /api/v1/device-control/directory`. Both accept only the
+short-lived native-session `RockserverBearer`; the server derives `user_id`/`device_id`, and the
+registration payload cannot assert identity or carry pairing/device secrets. Existing
+`GET /api/v1/devices` remains the implemented account inventory/list-revoke contract, and the
+existing voice WebSocket is unchanged.
+
+Protocol major 1 defines a shared JSON envelope, negotiation/registration, truthful roles and
+capabilities, bounded entity/surface manifests, heartbeat/presence, full/delta device state,
+entity telemetry/freshness, directory snapshot/upsert/removal events, explicit-target typed
+commands, received/accepted/one-terminal-result lifecycle and structured errors. Exact limits are
+65,536-byte frames, 61,440-byte payloads, 32 capabilities, 256 entities, 16 surfaces, 50 directory
+devices, 20-second heartbeat, 60-second offline TTL, 10-second registration, 16/8 in-flight
+commands per connection/target, 10-second default and 30-second maximum command deadlines, and a
+24-hour command-id idempotency window; stream URIs allow at most five fully revalidated redirects.
+Reconnect requires full manifest/state resync and never
+re-executes a retained duplicate command.
+
+The focused OpenAPI contract test and full required verification pass: `cargo fmt --check`, strict
+all-target/all-feature Clippy and `cargo test --jobs 1`. Contract checks cover parsing, planned
+markers, native-only security, bounded constants, identity/secret exclusions, local references,
+discriminator mappings and unique operation IDs. External PostgreSQL/provider tests remain ignored
+behind their explicit gates; no database query changed. No WebSocket route, directory handler,
+persistence, router, client, firmware or DC-003 fixture was implemented. The next device-control
+step is DC-003.
+
 ## DC-001 — device-control identity and authorization model (complete, 2026-09-02)
 
 The future device-control plane is now constrained to the existing account-owned model:
@@ -80,12 +133,12 @@ fine-grained policy remain explicitly deferred; Home Assistant uses a separate l
 integration credential rather than account-device pairing. Intent safety distinguishes fresh,
 unambiguous reads; ordinary media/display control; clarification for ambiguous resolution; and
 explicit confirmation for side-effecting/risky actuator operations. No Rust, migration, OpenAPI
-or runtime behavior changed. The next device-control step remains DC-002: specify protocol v1
-and its HTTP/WebSocket contract.
+or runtime behavior changed. This is the historical DC-001 decision; the current next
+device-control step is DC-004.
 
 Verification: targeted migration, auth, HTTP, persistence and OpenAPI inspection; documentation
 consistency review; `git diff --check`; and searches for stale non-canonical device-control
-`/v1` endpoint references and prohibited duplicate pairing terminology. As a Markdown-only
+non-canonical endpoint references and prohibited duplicate pairing terminology. As a Markdown-only
 decision record, no build or test run was needed.
 
 ## RS-ADMIN-006 SPA administrator console (implemented locally, 2026-09-01)
@@ -1344,7 +1397,7 @@ device-control endpoint, scheduler, weather provider, TTS path, or asynchronous 
 is implemented by this change.
 
 The roadmap reuses the implemented account-owned `devices`, pairing requests, durable
-device secret, native access-session renewal, `GET /v1/devices`, and device revocation.
+device secret, native access-session renewal, `GET /api/v1/devices`, and device revocation.
 It does not introduce a second device table, pairing flow, or RockCast machine credential;
 new control-plane persistence is linked to the existing `devices.id`.
 

@@ -1,0 +1,12 @@
+{
+  "entity_id": "sensor.living_room_temperature",
+  "domain": "sensor",
+  "device_class": "temperature",
+  "display_name": "Living room temperature",
+  "readable": true,
+  "controllable": false,
+  "unit": "°C",
+  "stale_after_seconds": 300,
+  "allowed_commands": [],
+  "state": { "entity_id": "sensor.living_room_temperature", "entity_revision": 9, "value": 20.8, "unit": "°C", "quality": "ok", "freshness": "fresh", "observed_at": "2026-09-02T12:01:00Z", "received_at": "2026-09-02T12:01:02Z", "stale_after": "2026-09-02T12:06:00Z" }
+}

@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000012",
+  "type": "device.command",
+  "sent_at": "2026-09-02T12:02:10Z",
+  "payload": { "command_id": "60000000-0000-4000-8000-000000000001", "target": { "device_id": "40000000-0000-4000-8000-000000000002", "surface_id": "display.main" }, "body": { "name": "display.show_view", "view": "sensor_grid", "title": "Kitchen sensors", "items": [ { "entity_id": "sensor.kitchen_temperature", "label": "Temperature", "value": 21.5, "unit": "°C", "quality": "ok", "freshness": "fresh" }, { "entity_id": "sensor.kitchen_humidity", "label": "Humidity", "value": 48, "unit": "%", "quality": "ok", "freshness": "fresh" } ] } }
+}

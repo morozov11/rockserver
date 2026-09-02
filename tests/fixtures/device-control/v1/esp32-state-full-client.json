@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000007",
+  "type": "device.state_full",
+  "sent_at": "2026-09-02T12:01:20Z",
+  "payload": { "snapshot": { "state_revision": 7, "observed_at": "2026-09-02T12:01:19Z", "state": { "playback": { "status": "idle", "station_id": null }, "volume": { "level": 35, "muted": false }, "display": { "surface_id": "display.main", "view": "dismissed" } } } }
+}

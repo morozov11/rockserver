@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000016",
+  "type": "command.result",
+  "sent_at": "2026-09-02T12:02:22Z",
+  "payload": { "command_id": "60000000-0000-4000-8000-000000000002", "status": "succeeded", "completed_at": "2026-09-02T12:02:22Z", "error": null, "output": { "state_revision": 9 } }
+}
