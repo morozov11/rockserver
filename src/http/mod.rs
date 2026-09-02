@@ -4,8 +4,8 @@ mod endpoints;
 
 pub use endpoints::{
     DEFAULT_VOICE_COMMAND_TIMEOUT, HealthResponse, HealthStatus, TEST_API_BEARER_TOKEN,
-    TRUSTED_PROXY_TOKEN_ENV, router, router_with_repository, router_with_search_service,
-    router_with_search_service_and_voice_timeout, router_with_services,
+    TRUSTED_PROXY_TOKEN_ENV, authenticate_control_ingress, router, router_with_repository,
+    router_with_search_service, router_with_search_service_and_voice_timeout, router_with_services,
     router_with_services_and_bearer_token, router_with_speech_recognizers_and_bearer_token,
     router_with_speech_recognizers_bearer_account_admin_store_and_proxy,
     router_with_speech_recognizers_bearer_account_store_and_proxy,

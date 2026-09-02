@@ -1400,6 +1400,28 @@ pressure during builds; acceptance checks in this run used explicit `--jobs 1` s
 
 ## Future device-control roadmap (planned, 2026-09-02)
 
+## DC-006 — control-plane native authentication foundation (complete, 2026-09-02)
+
+`device_control_auth` reuses the existing native-session lookup rather than creating a control
+credential, device table, pairing flow, or renewal path. A bounded `Bearer` access token resolves
+only through active native sessions into a server-derived `(user_id, device_id)` principal. The
+PostgreSQL lookup now additionally requires that the resolved device belongs to the session owner;
+expired, unknown, revoked, malformed, legacy, administrator, and browser credentials do not
+produce a principal. Lookup failure is distinct and retryable (`Unavailable`), without revoking a
+device or altering its durable secret/binding.
+
+`http::authenticate_control_ingress` is the reusable header extractor for the future
+`/api/v1/devices/connect` upgrade; its caller will map invalid credentials to a generic 401 and
+storage failures to a retryable 503. The endpoint itself, WebSocket upgrade, device registration,
+connection registry, heartbeat, TTL/reconnect and presence remain unimplemented and belong to
+DC-007. `POST /api/v1/auth/device-session` remains the sole access-token renewal flow, and the
+future Home Assistant integration remains a separate credential type.
+
+Verification: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and
+`cargo test` passed (120 library tests, all regular suites). The four OpenAPI contract tests passed
+within the full suite; PostgreSQL, live provider, and ONNX opt-in tests remained ignored because no
+disposable `TEST_DATABASE_URL` was configured.
+
 ## DC-005 — device-control persistence foundation (complete, 2026-09-02)
 
 Migration `0021_add_device_control_persistence.sql` adds owner-linked manifest, current

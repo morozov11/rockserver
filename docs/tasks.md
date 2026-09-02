@@ -1805,7 +1805,7 @@
   passed. External PostgreSQL and credential/provider tests remained ignored.
 - Status: **complete.**
 
-## DC-005 — 2026-09-02 — device-control persistence foundation (in progress)
+## DC-005 — 2026-09-02 — device-control persistence foundation
 
 - Goal: add the smallest durable PostgreSQL foundation for the DC-004 device-control domain.
 - Result: added migration `0021_add_device_control_persistence.sql`, a domain-facing
@@ -1820,3 +1820,26 @@
   postgres_device_control_manifest_is_owner_scoped_and_tombstoned --nocapture` passed (1 test).
   Its container, network, and named volume were removed immediately afterwards.
 - Status: **complete.**
+
+## DC-006 — 2026-09-02 — control-plane native authentication foundation
+
+- Goal: reuse completed account/device authentication for the future device-control ingress without
+  creating a second credential, pairing, device, or native-session lifecycle.
+- Scope: a public native-session resolver boundary, server-derived `DeviceControlPrincipal`, a
+  reusable HTTP header extractor for the future `/api/v1/devices/connect`, one ownership-safe
+  session lookup predicate, focused deterministic tests, and documentation. No runtime route,
+  WebSocket upgrade/registration, registry, heartbeat, TTL/reconnect, presence, provider, or
+  Home Assistant credential was added.
+- Result: only a bounded native `Bearer` access token may resolve to an active session's existing
+  `user_id` and `device_id`; no request/query/frame payload can assert either identifier. Expired,
+  malformed, unknown and revoked native credentials have the same non-disclosing invalid outcome;
+  legacy RockCast and administrator Bearers do not resolve through the native-session store, and
+  browser cookies are not an input to the extractor. Session-store failure is a distinct retryable
+  `Unavailable` outcome and does not revoke the device or its durable binding. The resolver also
+  verifies that `sessions.user_id` owns `devices.id`. Renewal remains only
+  `POST /api/v1/auth/device-session`.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and
+  `cargo test` passed (120 library tests plus all regular suites; the four OpenAPI contract tests
+  passed). PostgreSQL/live-provider/ONNX tests remained explicitly ignored because no disposable
+  `TEST_DATABASE_URL` was configured.
+- Status: **complete; DC-007 owns the WebSocket lifecycle and presence implementation.**

@@ -146,6 +146,22 @@ pub struct ActiveSession {
     pub device_id: Uuid,
 }
 
+/// Failure to resolve an active native session without exposing storage internals.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeSessionLookupError;
+
+/// Resolves an opaque native access-token hash to its active server-owned session.
+///
+/// Implementations must reject expired, revoked, inactive, and ownership-inconsistent sessions.
+#[async_trait::async_trait]
+pub trait NativeSessionResolver: Send + Sync {
+    /// Resolves one active native session, or reports a retryable lookup failure.
+    async fn resolve_active_native_session(
+        &self,
+        access_hash: &SecretHash,
+    ) -> Result<Option<ActiveSession>, NativeSessionLookupError>;
+}
+
 /// Hashed material required to create one short-lived native access session.
 pub struct NewSession<'a> {
     /// New session identifier.

@@ -28,6 +28,9 @@ mod admin_console;
 mod auth;
 #[path = "catalog.rs"]
 mod catalog;
+#[path = "control_auth.rs"]
+mod control_auth;
+pub use control_auth::authenticate_control_ingress;
 #[path = "health.rs"]
 mod health;
 #[path = "pairing.rs"]

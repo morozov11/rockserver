@@ -12,6 +12,8 @@ pub mod catalog;
 pub mod config;
 /// Transport-independent device-control protocol v1 domain types and validation.
 pub mod device_control;
+/// Authentication foundation for future device-control ingress.
+pub mod device_control_auth;
 /// HTTP routes and transport types.
 pub mod http;
 /// Deterministic prebuilt SQLite export for RockMobile's extended offline catalog.

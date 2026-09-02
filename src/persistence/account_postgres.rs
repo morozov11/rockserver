@@ -9,10 +9,11 @@ use crate::account_cleanup::{
     CleanupError, CleanupPreview, validate_confirmation,
 };
 use crate::auth::{
-    AccountProjection, ActiveSession, BrowserDevice, MAX_ACCOUNT_DEVICES, NewBrowserSession,
-    NewPairingRequest, NewPairingSession, NewPasskeyRegistration, NewSession, NewWebAuthnChallenge,
-    OwnedDevice, PairingCompletion, PairingCompletionOutcome, PairingPreview,
-    PasskeyRegistrationOutcome, SecretHash, WebAuthnCeremony, is_safe_audit_event,
+    AccountProjection, ActiveSession, BrowserDevice, MAX_ACCOUNT_DEVICES, NativeSessionLookupError,
+    NativeSessionResolver, NewBrowserSession, NewPairingRequest, NewPairingSession,
+    NewPasskeyRegistration, NewSession, NewWebAuthnChallenge, OwnedDevice, PairingCompletion,
+    PairingCompletionOutcome, PairingPreview, PasskeyRegistrationOutcome, SecretHash,
+    WebAuthnCeremony, is_safe_audit_event,
 };
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
@@ -133,7 +134,7 @@ impl PostgresAccountStore {
             "SELECT s.id AS session_id, s.user_id, s.device_id FROM sessions s \
              JOIN users u ON u.id = s.user_id JOIN devices d ON d.id = s.device_id \
              WHERE s.access_token_hash = $1 AND s.revoked_at IS NULL AND s.access_expires_at > now() \
-             AND u.status = 'active' AND d.revoked_at IS NULL",
+             AND u.status = 'active' AND d.revoked_at IS NULL AND d.user_id = s.user_id",
         )
         .bind(access_hash.as_bytes())
         .fetch_optional(&self.pool)
@@ -1388,6 +1389,18 @@ ORDER BY account_id, created_at, id
         .await?;
         transaction.commit().await?;
         Ok(true)
+    }
+}
+
+#[async_trait::async_trait]
+impl NativeSessionResolver for PostgresAccountStore {
+    async fn resolve_active_native_session(
+        &self,
+        access_hash: &SecretHash,
+    ) -> Result<Option<ActiveSession>, NativeSessionLookupError> {
+        self.find_active_session_by_access_hash(access_hash)
+            .await
+            .map_err(|_| NativeSessionLookupError)
     }
 }
 

@@ -116,17 +116,24 @@ baseline, owner isolation, revocation, manifest/state/command outcomes, constrai
 
 ## Milestone B — RockServer control plane
 
-### DC-006 — интегрировать control plane с существующей device authentication
+### DC-006 — интегрировать control plane с существующей device authentication — выполнено (2026-09-02)
 
 **Репозиторий:** RockServer.  
 **Зависимости:** DC-005.
 
 - Повторно использовать завершённый account pairing, существующий durable device secret и `POST /api/v1/auth/device-session` для получения access token.
-- Аутентифицировать control WebSocket короткоживущим native access token и связать principal с существующими `user_id`/`device_id`.
+- Переиспользовать общий validator/extractor для будущего control ingress: короткоживущий native access token разрешается в server-derived principal с существующими `user_id`/`device_id`; client не передаёт и не заменяет эти поля.
 - Сохранить текущие device list/revoke и invalid/transient-error semantics; revoked device не подключается.
 - Оставить Home Assistant integration credential отдельным типом, не смешивая его с account device credential.
 
-**Приёмка:** paired device подключается без нового pairing; expired access token обновляется существующим flow; revoked/wrong-user device отклоняется; transient store failure не отзывает устройство.
+**Приёмка (выполнено):** `device_control_auth` разрешает только bounded native `Bearer` через
+существующий session resolver и возвращает именно server-derived `(user_id, device_id)`; expiry,
+unknown/revoked session, legacy/admin Bearer и любые cookie не становятся control principal.
+Ошибка session store отдельна как retryable `Unavailable` и не меняет durable device binding;
+renewal остаётся исключительно `POST /api/v1/auth/device-session`. HTTP guard для будущего
+`/api/v1/devices/connect` готов и отдаёт typed invalid/unavailable outcome будущему handler для
+controlled `401`/`503`, однако самого WebSocket upgrade, register, registry, heartbeat, TTL и
+presence нет: это точная граница DC-007.
 
 ### DC-007 — реализовать connection registry и presence
 
