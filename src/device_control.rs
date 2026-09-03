@@ -713,6 +713,7 @@ impl EntityState {
 
 /// Explicit device, entity, or surface command target.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CommandTarget {
     pub device_id: DeviceId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -804,6 +805,11 @@ pub enum CommandBody {
     Playback {
         action: String,
     },
+    /// An allowlisted actuator action for one explicit entity target.
+    Actuator {
+        action: ActuatorAction,
+        value: Option<f64>,
+    },
     Unknown {
         name: String,
         payload: Map<String, Value>,
@@ -811,6 +817,7 @@ pub enum CommandBody {
 }
 /// A command with explicit target and optional bounded deadline.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeviceCommand {
     pub command_id: CommandId,
     pub target: CommandTarget,
@@ -839,6 +846,13 @@ impl DeviceCommand {
             {
                 Ok(())
             }
+            CommandBody::Actuator { action, value } => match (action, value) {
+                (ActuatorAction::SetValue, Some(value)) if value.is_finite() => Ok(()),
+                (ActuatorAction::SetValue, _) | (_, Some(_)) => {
+                    Err(ValidationError::InvalidPayload { field: "command" })
+                }
+                _ => Ok(()),
+            },
             _ => Err(ValidationError::InvalidPayload { field: "command" }),
         }
     }
@@ -858,6 +872,12 @@ impl Serialize for CommandBody {
                 serde_json::json!({"name":"station.play_station","station_id":station_id})
             }
             Self::Playback { action } => serde_json::json!({"name":format!("playback.{action}")}),
+            Self::Actuator { action, value } => match action {
+                ActuatorAction::TurnOn | ActuatorAction::TurnOff => {
+                    serde_json::json!({"name": action})
+                }
+                ActuatorAction::SetValue => serde_json::json!({"name": action, "value": value}),
+            },
             Self::Display { presentation } => match presentation {
                 Presentation::Text { text } => {
                     serde_json::json!({"name":"display.show_text","text":text})
@@ -923,6 +943,18 @@ impl<'de> Deserialize<'de> for CommandBody {
             },
             n if n.starts_with("playback.") => Self::Playback {
                 action: n.trim_start_matches("playback.").into(),
+            },
+            "entity.turn_on" => Self::Actuator {
+                action: ActuatorAction::TurnOn,
+                value: None,
+            },
+            "entity.turn_off" => Self::Actuator {
+                action: ActuatorAction::TurnOff,
+                value: None,
+            },
+            "entity.set_value" => Self::Actuator {
+                action: ActuatorAction::SetValue,
+                value: Some(serde_json::from_value(get("value")?).map_err(D::Error::custom)?),
             },
             _ if namespaced(name) => Self::Unknown {
                 name: name.into(),

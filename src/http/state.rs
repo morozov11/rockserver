@@ -13,8 +13,10 @@ use axum::{
 use serde_json::json;
 
 use crate::{
-    admin::AdminStore, auth::NativeSessionResolver, device_control_presence::ConnectionRegistry,
-    persistence::PostgresAccountStore, search::SearchService, voice::SpeechRecognizers,
+    admin::AdminStore, auth::NativeSessionResolver, device_control::DeviceControlStore,
+    device_control_command::CommandRouter, device_control_presence::ConnectionRegistry,
+    device_control_state::StateHub, persistence::PostgresAccountStore, search::SearchService,
+    voice::SpeechRecognizers,
 };
 
 use super::{
@@ -62,6 +64,12 @@ pub(super) struct AppState {
     pub(super) local_admin_origin: Option<String>,
     pub(super) public_limits: Arc<Mutex<PublicLimitState>>,
     pub(super) control_registry: ConnectionRegistry,
+    /// Shared bounded command lifecycle router for live control sessions.
+    pub(super) control_commands: CommandRouter,
+    /// Ephemeral owner-scoped latest state and bounded internal fan-out.
+    pub(super) control_state_hub: StateHub,
+    /// Durable account-owned state projections, configured only for production routers.
+    pub(super) control_store: Option<Arc<dyn DeviceControlStore>>,
     /// Resolver used only by the native device-control ingress before WebSocket upgrade.
     pub(super) control_session_resolver: Option<Arc<dyn NativeSessionResolver>>,
     pub(super) control_timing: ControlTiming,

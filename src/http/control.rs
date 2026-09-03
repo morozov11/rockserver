@@ -16,8 +16,17 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use uuid::Uuid;
 
 use crate::{
+    device_control::{
+        CommandAccepted, CommandResult, DeviceCommand, DeviceControlScope, DeviceId,
+        DeviceManifest, DeviceRuntimeState, DeviceStateDelta, DeviceStateSnapshot, EntityState,
+        RevisionOrder, revision_order,
+    },
     device_control_auth::{DeviceControlAuthenticationError, DeviceControlPrincipal},
-    device_control_presence::{ConnectionRegistry, DisconnectReason, control_shutdown_subscriber},
+    device_control_command::CommandRouter,
+    device_control_presence::{
+        ConnectionRegistration, ConnectionRegistry, DisconnectReason, control_shutdown_subscriber,
+    },
+    device_control_state::StateHub,
 };
 
 use super::{
@@ -58,13 +67,73 @@ struct HelloPayload {
     supported_protocol_versions: Vec<u8>,
 }
 
-/// Bounded registration metadata; manifest semantics are intentionally deferred to DC-008.
+/// Bounded registration metadata and the first typed manifest declaration.
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct RegisterPayload {
     device_type: String,
     app_version: String,
-    manifest: serde_json::Map<String, Value>,
+    manifest: DeviceManifest,
+}
+
+/// Typed manifest replacement after registration.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManifestPayload {
+    manifest: DeviceManifest,
+}
+
+/// Required full runtime-state observation after every register or reconnect.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FullStatePayload {
+    snapshot: DeviceStateSnapshot,
+}
+
+/// Ordered partial runtime-state observation.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StateDeltaPayload {
+    delta: DeviceStateDelta,
+}
+
+/// Typed latest entity observation.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EntityStatePayload {
+    state: EntityState,
+}
+
+/// Explicit request to replace a state stream with a full snapshot.
+#[derive(Serialize)]
+struct ResyncRequestedPayload {
+    kind: &'static str,
+    reason: &'static str,
+}
+
+/// Initial controller directory snapshot delivered on the authenticated control socket.
+#[derive(Serialize)]
+struct DirectorySnapshotPayload {
+    event_id: Uuid,
+    directory: super::directory::DirectoryDto,
+}
+
+/// One replacement directory entry delivered after an owned control transition.
+#[derive(Serialize)]
+struct DirectoryUpsertPayload {
+    event_id: Uuid,
+    directory_revision: u64,
+    device: super::directory::DirectoryDeviceDto,
+}
+
+/// Shared process-local dependencies for one authenticated control socket.
+struct ControlRuntime {
+    registry: ConnectionRegistry,
+    state_hub: StateHub,
+    store: Option<std::sync::Arc<dyn crate::device_control::DeviceControlStore>>,
+    commands: CommandRouter,
+    timing: super::state::ControlTiming,
+    directory_state: AppState,
 }
 
 /// Server-owned control-plane limits sent after version negotiation.
@@ -101,7 +170,7 @@ struct RegisteredPayload {
     connection_id: Uuid,
     authenticated_user_id: Uuid,
     authenticated_device_id: Uuid,
-    granted_scopes: [&'static str; 2],
+    granted_scopes: Vec<&'static str>,
     heartbeat_interval_seconds: u8,
     offline_ttl_seconds: u8,
     require_full_state: bool,
@@ -132,6 +201,8 @@ struct ProtocolErrorPayload<'a> {
 struct ProtocolError<'a> {
     code: &'a str,
     message: &'a str,
+    request_id: String,
+    details: std::collections::BTreeMap<String, String>,
 }
 
 /// Authenticates then upgrades the canonical device-control WebSocket endpoint.
@@ -172,21 +243,40 @@ pub(super) async fn connect(
         }
     };
     let registry = state.control_registry.clone();
+    let state_hub = state.control_state_hub.clone();
+    let store = state.control_store.clone();
     let timing = state.control_timing;
+    let commands = state.control_commands.clone();
     with_request_id(
         upgrade
             .max_message_size(MAX_FRAME_BYTES + 1)
-            .on_upgrade(move |socket| run(socket, principal, registry, timing)),
+            .on_upgrade(move |socket| {
+                run(
+                    socket,
+                    principal,
+                    ControlRuntime {
+                        registry,
+                        state_hub,
+                        store,
+                        commands,
+                        timing,
+                        directory_state: state,
+                    },
+                )
+            }),
         &request_id,
     )
 }
 
-async fn run(
-    mut socket: WebSocket,
-    principal: DeviceControlPrincipal,
-    registry: ConnectionRegistry,
-    timing: super::state::ControlTiming,
-) {
+async fn run(mut socket: WebSocket, principal: DeviceControlPrincipal, runtime: ControlRuntime) {
+    let ControlRuntime {
+        registry,
+        state_hub,
+        store,
+        commands,
+        timing,
+        directory_state,
+    } = runtime;
     let connection_id = Uuid::new_v4();
     match receive_message::<HelloPayload>(
         &mut socket,
@@ -224,6 +314,7 @@ async fn run(
     {
         return;
     }
+    state_hub.publish_presence(principal.user_id, DeviceId(principal.device_id), true);
     let register = match receive_message::<RegisterPayload>(
         &mut socket,
         timing.registration_deadline,
@@ -241,18 +332,53 @@ async fn run(
             return;
         }
     };
-    if !valid_registration(&register.payload) {
+    if !valid_registration(&register.payload) || register.payload.manifest.validate().is_err() {
         let _ = protocol_close(&mut socket, "invalid_message", 1007).await;
         return;
     }
+    if let Some(store) = &store
+        && !matches!(
+            store
+                .apply_manifest(
+                    principal.user_id,
+                    DeviceId(principal.device_id),
+                    register.payload.manifest.clone()
+                )
+                .await,
+            Ok(crate::device_control::StoreOutcome::Accepted
+                | crate::device_control::StoreOutcome::Replay)
+        )
+    {
+        let _ = protocol_close(&mut socket, "registration_rejected", 1008).await;
+        return;
+    }
     let (replacement, mut replaced) = registry.replacement_channel();
-    registry.register(
-        principal.user_id,
-        principal.device_id,
-        connection_id,
-        replacement,
+    let (outbound, mut outbound_messages) = registry.outbound_channel();
+    let granted_scopes = granted_scopes(&register.payload.manifest);
+    let replaced_previous = registry.register(
+        ConnectionRegistration {
+            user_id: principal.user_id,
+            device_id: principal.device_id,
+            connection_id,
+            replacement,
+            outbound,
+            manifest: register.payload.manifest.clone(),
+            scopes: granted_scopes.clone(),
+        },
         std::time::Instant::now(),
     );
+    if let Some((replaced_owner, replaced_connection)) = replaced_previous {
+        commands
+            .disconnected(
+                &registry,
+                store.as_ref(),
+                replaced_owner,
+                principal.device_id,
+                replaced_connection,
+            )
+            .await;
+    }
+    state_hub.publish_manifest(principal.user_id, DeviceId(principal.device_id));
     if send_envelope(
         &mut socket,
         "device.registered",
@@ -260,7 +386,7 @@ async fn run(
             connection_id,
             authenticated_user_id: principal.user_id,
             authenticated_device_id: principal.device_id,
-            granted_scopes: ["device.directory.read", "media.control"],
+            granted_scopes: granted_scopes.iter().map(scope_name).collect(),
             heartbeat_interval_seconds: 20,
             offline_ttl_seconds: 60,
             require_full_state: true,
@@ -277,22 +403,161 @@ async fn run(
         );
         return;
     }
+    let directory_enabled = granted_scopes.contains(&DeviceControlScope::DirectoryRead);
+    let mut directory_events = state_hub.subscribe(principal.user_id);
+    if directory_enabled {
+        let cursor = state_hub.cursor(principal.user_id);
+        let snapshot = match super::directory::snapshot(
+            &directory_state,
+            principal.user_id,
+            &granted_scopes,
+            &super::directory::DirectoryFilters::default(),
+            cursor,
+        )
+        .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(()) => {
+                let _ = protocol_close(&mut socket, "directory_unavailable", 1011).await;
+                return;
+            }
+        };
+        if send_envelope(
+            &mut socket,
+            "directory.snapshot",
+            DirectorySnapshotPayload {
+                event_id: Uuid::new_v4(),
+                directory: snapshot,
+            },
+        )
+        .await
+        .is_err()
+        {
+            return;
+        }
+    }
     let mut reason = DisconnectReason::TransportLost;
     let mut last_seen = tokio::time::Instant::now();
     let mut shutdown = control_shutdown_subscriber();
+    let mut manifest = register.payload.manifest;
+    let mut needs_full_state = true;
     loop {
         tokio::select! {
             _ = shutdown.recv() => { let _ = socket.send(Message::Close(Some(CloseFrame { code: 1001, reason: "server_shutdown".into() }))).await; break; }
             _ = tokio::time::sleep_until(last_seen + timing.offline_ttl) => { reason = DisconnectReason::HeartbeatExpired; let _ = protocol_close(&mut socket, "heartbeat_expired", 1008).await; break; }
             replacement_reason = replaced.recv() => { reason = replacement_reason.unwrap_or(DisconnectReason::TransportLost); let _ = socket.send(Message::Close(Some(CloseFrame { code: 4001, reason: "replaced".into() }))).await; break; }
-            message = socket.recv() => match message {
-                Some(Ok(Message::Text(text))) => match parse_message::<HeartbeatPayload>(&text, "device.heartbeat") {
-                    Ok(envelope) => {
-                        let sequence = envelope.payload.sequence;
-                        last_seen = tokio::time::Instant::now();
-                        if !registry.heartbeat(principal.device_id, connection_id, std::time::Instant::now()) { reason = DisconnectReason::Replaced; break; }
-                        if send_envelope(&mut socket, "device.heartbeat_ack", HeartbeatAckPayload { sequence, server_time: now() }).await.is_err() { break; }
+            outbound = outbound_messages.recv() => match outbound {
+                Some(outbound) => if send_envelope(&mut socket, outbound.kind, outbound.payload).await.is_err() { break; },
+                None => break,
+            },
+            event = directory_events.recv(), if directory_enabled => match event {
+                Ok(event) => {
+                    let device_id = match event {
+                        crate::device_control_state::StateEvent::Manifest { device_id }
+                        | crate::device_control_state::StateEvent::Presence { device_id, .. }
+                        | crate::device_control_state::StateEvent::DeviceState { device_id, .. }
+                        | crate::device_control_state::StateEvent::EntityState { device_id, .. } => device_id,
+                    };
+                    let cursor = state_hub.cursor(principal.user_id);
+                    match super::directory::snapshot(&directory_state, principal.user_id, &granted_scopes, &super::directory::DirectoryFilters::default(), cursor).await {
+                        Ok(snapshot) => if let Some(device) = snapshot.devices.into_iter().find(|device| device.device_id == device_id)
+                            && send_envelope(&mut socket, "directory.upsert", DirectoryUpsertPayload { event_id: Uuid::new_v4(), directory_revision: cursor.max(1), device }).await.is_err() { break; },
+                        Err(()) => { let _ = protocol_close(&mut socket, "directory_unavailable", 1011).await; break; }
                     }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => { let _ = protocol_close(&mut socket, "directory_resync_required", 1008).await; break; }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            },
+            message = socket.recv() => match message {
+                Some(Ok(Message::Text(text))) => match parse_any(&text) {
+                    Ok(envelope) => match envelope.kind.as_str() {
+                        "device.heartbeat" => match serde_json::from_value::<HeartbeatPayload>(envelope.payload) {
+                            Ok(payload) => {
+                                if needs_full_state {
+                                    let _ = protocol_close(&mut socket, "full_state_required", 1008).await;
+                                    break;
+                                }
+                                last_seen = tokio::time::Instant::now();
+                                if !registry.heartbeat(principal.device_id, connection_id, std::time::Instant::now()) { reason = DisconnectReason::Replaced; break; }
+                                if send_envelope(&mut socket, "device.heartbeat_ack", HeartbeatAckPayload { sequence: payload.sequence, server_time: now() }).await.is_err() { break; }
+                            }
+                            Err(_) => { let _ = protocol_close(&mut socket, "invalid_message", 1007).await; break; }
+                        },
+                        "device.manifest" => match serde_json::from_value::<ManifestPayload>(envelope.payload) {
+                            Ok(payload) if payload.manifest.validate().is_ok() => {
+                                let persisted = match &store { Some(store) => matches!(store.apply_manifest(principal.user_id, DeviceId(principal.device_id), payload.manifest.clone()).await, Ok(crate::device_control::StoreOutcome::Accepted | crate::device_control::StoreOutcome::Replay)), None => true };
+                                if persisted { manifest = payload.manifest; let _ = registry.update_manifest(principal.device_id, connection_id, manifest.clone()); state_hub.publish_manifest(principal.user_id, DeviceId(principal.device_id)); } else { let _ = protocol_close(&mut socket, "manifest_rejected", 1008).await; break; }
+                            }
+                            _ => { let _ = protocol_close(&mut socket, "invalid_message", 1007).await; break; }
+                        },
+                        "device.state_full" => match serde_json::from_value::<FullStatePayload>(envelope.payload) {
+                            Ok(payload) if valid_snapshot(&payload.snapshot) => {
+                                let persisted = match &store {
+                                    Some(store) => matches!(store.store_device_state(principal.user_id, DeviceId(principal.device_id), payload.snapshot.clone()).await, Ok(crate::device_control::StoreOutcome::Accepted | crate::device_control::StoreOutcome::Replay)),
+                                    None => true,
+                                };
+                                if !persisted { needs_full_state = true; let _ = send_envelope(&mut socket, "device.resync_requested", ResyncRequestedPayload { kind: "device_state", reason: "revision_gap" }).await; continue; }
+                                match accept_snapshot(&state_hub, principal.user_id, principal.device_id, payload.snapshot) {
+                                    RevisionOrder::Next | RevisionOrder::Replay => needs_full_state = false,
+                                    RevisionOrder::Stale => {},
+                                    RevisionOrder::Conflict | RevisionOrder::Gap => { needs_full_state = true; let _ = send_envelope(&mut socket, "device.resync_requested", ResyncRequestedPayload { kind: "device_state", reason: "revision_gap" }).await; }
+                                }
+                            }
+                            _ => { let _ = protocol_close(&mut socket, "invalid_message", 1007).await; break; }
+                        },
+                        "device.state_delta" => match serde_json::from_value::<StateDeltaPayload>(envelope.payload) {
+                            Ok(payload) if !needs_full_state && valid_delta(&payload.delta) => {
+                                let Some(current) = state_hub.device_state(principal.user_id, DeviceId(principal.device_id)) else { needs_full_state = true; let _ = send_envelope(&mut socket, "device.resync_requested", ResyncRequestedPayload { kind: "device_state", reason: "missing_base" }).await; continue; };
+                                let merged = DeviceStateSnapshot { state_revision: payload.delta.state_revision, observed_at: payload.delta.observed_at, received_at: None, state: merge_state(current.state.clone(), payload.delta.changes) };
+                                match revision_order(current.state_revision, &current.state, merged.state_revision, &merged.state, Some(payload.delta.base_revision)) {
+                                    RevisionOrder::Next => {
+                                        let persisted = match &store {
+                                            Some(store) => matches!(store.store_device_state(principal.user_id, DeviceId(principal.device_id), merged.clone()).await, Ok(crate::device_control::StoreOutcome::Accepted | crate::device_control::StoreOutcome::Replay)),
+                                            None => true,
+                                        };
+                                        if persisted { state_hub.publish_device_state(principal.user_id, DeviceId(principal.device_id), merged) } else { needs_full_state = true; let _ = send_envelope(&mut socket, "device.resync_requested", ResyncRequestedPayload { kind: "device_state", reason: "revision_gap" }).await; }
+                                    },
+                                    RevisionOrder::Replay | RevisionOrder::Stale => {},
+                                    RevisionOrder::Conflict | RevisionOrder::Gap => { needs_full_state = true; let _ = send_envelope(&mut socket, "device.resync_requested", ResyncRequestedPayload { kind: "device_state", reason: "revision_gap" }).await; }
+                                }
+                            }
+                            Ok(_) => { needs_full_state = true; let _ = send_envelope(&mut socket, "device.resync_requested", ResyncRequestedPayload { kind: "device_state", reason: "missing_base" }).await; }
+                            Err(_) => { let _ = protocol_close(&mut socket, "invalid_message", 1007).await; break; }
+                        },
+                        "entity.state" => match serde_json::from_value::<EntityStatePayload>(envelope.payload) {
+                            Ok(mut payload) if manifest.entities.iter().any(|entity| payload.state.validate_for(entity).is_ok()) => {
+                                payload.state.freshness = Some(payload.state.freshness_at(&crate::device_control::Timestamp::parse(now()).expect("server time")));
+                                match entity_revision(&state_hub, principal.user_id, DeviceId(principal.device_id), &payload.state) {
+                                    RevisionOrder::Next => {
+                                        match &store {
+                                            Some(store) => match store.store_entity_state(principal.user_id, DeviceId(principal.device_id), payload.state.clone()).await {
+                                                Ok(crate::device_control::StoreOutcome::Accepted | crate::device_control::StoreOutcome::Replay) => state_hub.publish_entity_state(principal.user_id, DeviceId(principal.device_id), payload.state),
+                                                Ok(crate::device_control::StoreOutcome::Stale) => {},
+                                                _ => { let _ = send_envelope(&mut socket, "device.resync_requested", ResyncRequestedPayload { kind: "entity_state", reason: "revision_gap" }).await; }
+                                            },
+                                            None => state_hub.publish_entity_state(principal.user_id, DeviceId(principal.device_id), payload.state),
+                                        }
+                                    }
+                                    RevisionOrder::Replay | RevisionOrder::Stale => {},
+                                    RevisionOrder::Conflict | RevisionOrder::Gap => { let _ = send_envelope(&mut socket, "device.resync_requested", ResyncRequestedPayload { kind: "entity_state", reason: "revision_gap" }).await; }
+                                }
+                            }
+                            _ => { let _ = protocol_close(&mut socket, "invalid_message", 1007).await; break; }
+                        },
+                        "device.command" => match serde_json::from_value::<DeviceCommand>(envelope.payload) {
+                            Ok(command) => if let Err(error) = commands.submit(&registry, store.as_ref(), principal.user_id, principal.device_id, connection_id, command).await { let _ = send_command_error(&mut socket, error.code).await; },
+                            Err(_) => { let _ = send_command_error(&mut socket, "invalid_payload").await; }
+                        },
+                        "command.accepted" => match serde_json::from_value::<CommandAccepted>(envelope.payload) {
+                            Ok(accepted) => if let Err(error) = commands.accepted(&registry, principal.user_id, principal.device_id, connection_id, accepted) { let _ = send_command_error(&mut socket, error.code).await; },
+                            Err(_) => { let _ = send_command_error(&mut socket, "invalid_payload").await; }
+                        },
+                        "command.result" => match serde_json::from_value::<CommandResult>(envelope.payload) {
+                            Ok(result) => if let Err(error) = commands.result(&registry, store.as_ref(), principal.user_id, principal.device_id, connection_id, result).await { let _ = send_command_error(&mut socket, error.code).await; },
+                            Err(_) => { let _ = send_command_error(&mut socket, "invalid_payload").await; }
+                        },
+                        _ => { let _ = protocol_close(&mut socket, "invalid_message", 1007).await; break; }
+                    },
                     Err(ProtocolParseError::TooLarge) => { let _ = protocol_close(&mut socket, "frame_too_large", 1009).await; break; }
                     Err(ProtocolParseError::Invalid) => { let _ = protocol_close(&mut socket, "invalid_message", 1007).await; break; }
                 },
@@ -303,12 +568,54 @@ async fn run(
             }
         }
     }
-    registry.disconnect(
+    if registry.disconnect(
         principal.device_id,
         connection_id,
         reason,
         std::time::Instant::now(),
-    );
+    ) {
+        commands
+            .disconnected(
+                &registry,
+                store.as_ref(),
+                principal.user_id,
+                principal.device_id,
+                connection_id,
+            )
+            .await;
+        state_hub.publish_presence(principal.user_id, DeviceId(principal.device_id), false);
+    }
+}
+
+fn granted_scopes(manifest: &DeviceManifest) -> Vec<DeviceControlScope> {
+    super::directory::granted_scopes(manifest)
+}
+
+fn scope_name(scope: &DeviceControlScope) -> &'static str {
+    match scope {
+        DeviceControlScope::DirectoryRead => "device.directory.read",
+        DeviceControlScope::PresenceRead => "device.presence.read",
+        DeviceControlScope::EntityStateRead => "entity.state.read",
+        DeviceControlScope::MediaControl => "media.control",
+        DeviceControlScope::DisplayControl => "display.control",
+        DeviceControlScope::ActuatorControl => "actuator.control",
+    }
+}
+
+async fn send_command_error(socket: &mut WebSocket, code: &'static str) -> Result<(), ()> {
+    send_envelope(
+        socket,
+        "protocol.error",
+        ProtocolErrorPayload {
+            error: ProtocolError {
+                code,
+                message: "Device command was rejected.",
+                request_id: Uuid::new_v4().to_string(),
+                details: Default::default(),
+            },
+        },
+    )
+    .await
 }
 
 enum ProtocolParseError {
@@ -354,6 +661,95 @@ where
     }
     let _ = message.message_id;
     Ok(message)
+}
+
+/// Parses a bounded, versioned envelope before dispatching to a typed payload DTO.
+fn parse_any(text: &str) -> Result<ClientEnvelope<Value>, ProtocolParseError> {
+    if text.len() > MAX_FRAME_BYTES {
+        return Err(ProtocolParseError::TooLarge);
+    }
+    let message: ClientEnvelope<Value> =
+        serde_json::from_str(text).map_err(|_| ProtocolParseError::Invalid)?;
+    if message.protocol_version != 1
+        || message.kind.len() > 64
+        || OffsetDateTime::parse(&message.sent_at, &Rfc3339).is_err()
+        || serde_json::to_vec(&message.payload)
+            .map_err(|_| ProtocolParseError::Invalid)?
+            .len()
+            > MAX_PAYLOAD_BYTES
+    {
+        return Err(ProtocolParseError::Invalid);
+    }
+    Ok(message)
+}
+
+/// Rejects impossible or deliberately empty complete runtime observations.
+fn valid_snapshot(snapshot: &DeviceStateSnapshot) -> bool {
+    snapshot.state_revision > 0
+        && (snapshot.state.playback.is_some()
+            || snapshot.state.volume.is_some()
+            || snapshot.state.display.is_some())
+}
+
+/// Rejects a delta that cannot represent the next monotonic device observation.
+fn valid_delta(delta: &DeviceStateDelta) -> bool {
+    delta.base_revision > 0
+        && delta.state_revision > delta.base_revision
+        && (delta.changes.playback.is_some()
+            || delta.changes.volume.is_some()
+            || delta.changes.display.is_some())
+}
+
+/// Applies only fields explicitly included by a typed state delta.
+fn merge_state(current: DeviceRuntimeState, changes: DeviceRuntimeState) -> DeviceRuntimeState {
+    DeviceRuntimeState {
+        playback: changes.playback.or(current.playback),
+        volume: changes.volume.or(current.volume),
+        display: changes.display.or(current.display),
+    }
+}
+
+/// Publishes a full snapshot only when its revision is a legal successor.
+fn accept_snapshot(
+    hub: &StateHub,
+    user_id: Uuid,
+    device_id: Uuid,
+    snapshot: DeviceStateSnapshot,
+) -> RevisionOrder {
+    let device_id = DeviceId(device_id);
+    let result = match hub.device_state(user_id, device_id) {
+        Some(current) => revision_order(
+            current.state_revision,
+            &current.state,
+            snapshot.state_revision,
+            &snapshot.state,
+            None,
+        ),
+        None => RevisionOrder::Next,
+    };
+    if result == RevisionOrder::Next {
+        hub.publish_device_state(user_id, device_id, snapshot);
+    }
+    result
+}
+
+/// Classifies a typed entity observation against the account-scoped latest observation.
+fn entity_revision(
+    hub: &StateHub,
+    user_id: Uuid,
+    device_id: DeviceId,
+    incoming: &EntityState,
+) -> RevisionOrder {
+    match hub.entity_state(user_id, device_id, &incoming.entity_id) {
+        Some(accepted) => revision_order(
+            accepted.entity_revision,
+            &accepted,
+            incoming.entity_revision,
+            incoming,
+            None,
+        ),
+        None => RevisionOrder::Next,
+    }
 }
 
 fn valid_hello(payload: &HelloPayload) -> bool {
@@ -419,6 +815,8 @@ async fn protocol_close(socket: &mut WebSocket, code: &str, close_code: u16) -> 
             error: ProtocolError {
                 code,
                 message: "Device-control protocol error.",
+                request_id: Uuid::new_v4().to_string(),
+                details: Default::default(),
             },
         },
     )
@@ -513,6 +911,9 @@ mod tests {
             local_admin_origin: None,
             public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
             control_registry: registry,
+            control_commands: Default::default(),
+            control_state_hub: Default::default(),
+            control_store: None,
             control_session_resolver: Some(resolver),
             control_timing: ControlTiming {
                 registration_deadline: Duration::from_millis(100),
@@ -607,13 +1008,19 @@ mod tests {
             1,
             envelope(
                 "device.register",
-                json!({"device_type":"rockcast","app_version":"test","manifest":{}}),
+                json!({"device_type":"rockcast","app_version":"test","manifest":{"manifest_revision":1,"roles":[],"capabilities":{"revision":1,"items":[]},"entities":[],"surfaces":[]}}),
             )
             .as_bytes(),
         )
         .await;
         let (_, registered) = read_frame(&mut stream).await;
         let registered: Value = serde_json::from_slice(&registered).unwrap();
+        write_frame(
+            &mut stream,
+            1,
+            envelope("device.state_full", json!({"snapshot":{"state_revision":1,"observed_at":"2026-09-02T12:00:00Z","state":{"playback":{"status":"idle","station_id":null}}}})).as_bytes(),
+        ).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
         assert_eq!(registered["type"], "device.registered");
         (stream, registered)
     }
@@ -836,5 +1243,38 @@ mod tests {
             .unwrap()
             .unwrap()
             .unwrap();
+    }
+
+    #[test]
+    fn full_state_replay_is_idempotent_and_gap_requires_resync() {
+        let hub = StateHub::default();
+        let user = Uuid::new_v4();
+        let device = Uuid::new_v4();
+        let snapshot = DeviceStateSnapshot {
+            state_revision: 1,
+            observed_at: crate::device_control::Timestamp::parse("2026-09-03T00:00:00Z").unwrap(),
+            received_at: None,
+            state: DeviceRuntimeState {
+                playback: Some(crate::device_control::PlaybackState {
+                    status: "idle".into(),
+                    station_id: None,
+                }),
+                volume: None,
+                display: None,
+            },
+        };
+        assert_eq!(
+            accept_snapshot(&hub, user, device, snapshot.clone()),
+            RevisionOrder::Next
+        );
+        assert_eq!(
+            accept_snapshot(&hub, user, device, snapshot.clone()),
+            RevisionOrder::Replay
+        );
+        let gap = DeviceStateSnapshot {
+            state_revision: 3,
+            ..snapshot
+        };
+        assert_eq!(accept_snapshot(&hub, user, device, gap), RevisionOrder::Gap);
     }
 }

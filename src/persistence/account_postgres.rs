@@ -58,6 +58,11 @@ impl PostgresAccountStore {
         Self { pool }
     }
 
+    /// Returns a clone of the shared pool for account-owned projection stores.
+    pub(crate) fn pool(&self) -> PgPool {
+        self.pool.clone()
+    }
+
     /// Closes the underlying pool for deterministic integration-test cleanup.
     pub async fn close(&self) {
         self.pool.close().await;

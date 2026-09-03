@@ -1,6 +1,50 @@
 # Project status
 
-Last updated: 2026-09-02
+Last updated: 2026-09-03
+
+## DC-010 — controller directory (complete, 2026-09-03)
+
+`GET /api/v1/device-control/directory` is now a runtime native-control projection, not a
+replacement for the existing inventory/list/revoke route. It resolves only the existing native
+`RockserverBearer` to server-derived account/device identity, returns 401 for invalid native
+credentials and retryable 503 for unavailable control storage, then requires the server-computed
+`device.directory.read` scope before reading any account-owned projection. The bounded v1
+projection joins existing active account devices with their DC-005 manifest/latest state and DC-007
+presence; entity values are omitted unless `entity.state.read` is granted. It exposes no pairing
+or credential material, provider IDs, or user IDs. Only canonical `domain` and `device_class`
+filters exist; `home` and `area` are not modelled and are rejected rather than treated as wildcards.
+
+Registered controllers subscribe to the existing account-local bounded hub before their directory
+snapshot is built. The returned `directory_revision` is the server watermark; every later owned
+presence, manifest, device-state, or entity-state transition rebuilds only the affected permitted
+entry and emits `directory.upsert`. A lagging receiver is closed with
+`directory_resync_required`, so it reloads the HTTP snapshot rather than continuing from an
+unknown gap. Reconnect replaces the old DC-007 socket generation, which also ends its subscription.
+DC-011 intents/presentation and DC-015 client UI remain out of scope.
+
+## DC-009 — live command routing (complete, 2026-09-03)
+
+The authenticated control WebSocket now admits commands only from the active server-derived
+principal whose registered manifest carries the controller role and an explicitly server-granted
+command scope. Before durable reservation it checks same-owner namespace, exact active target
+generation, target role/capability and the required entity/surface plus bounded typed payload.
+The registry has a bounded per-connection server delivery channel, so only the one active target
+generation receives a command; it never builds an offline queue or blocks a producer.
+
+The lifecycle is `command.received`, target-only `command.accepted`, then exactly one terminal
+`command.result`. Target timestamps are replaced with server observation time; a result is accepted
+only from the matching owner/device/connection generation. Target loss/replacement and timeout
+persist a terminal failure; duplicate or late result cannot alter it. The existing DC-005 command
+store remains the single idempotency/audit mechanism: SHA-256 fingerprints cover the client-visible
+canonical request for 24-hour replay, while a server-selected default deadline does not make an
+otherwise identical retry conflict. Reused IDs with another owner, target, or fingerprint conflict.
+The v1 contract has no explicit cancel message, therefore deadline/loss are the implemented
+cancellation policy. DC-010's public directory/subscriptions and DC-011's user-intent/presentation
+routing remain out of scope.
+
+Verification passed: `cargo fmt --check`, strict all-target/all-feature Clippy, full `cargo test`
+(132 library tests plus regular suites), OpenAPI contract fixtures, and `git diff --check`.
+PostgreSQL integration remains skipped because no safe disposable `TEST_DATABASE_URL` was supplied.
 
 ## Graphify agent policy removed (2026-09-02)
 
@@ -1485,3 +1529,20 @@ continuous DC-000 through DC-038 task sequence were validated; `cargo fmt --chec
 strict all-target/all-feature Clippy, and `cargo test` passed. The regular suite
 included 113 library tests and the listed binary/integration suites; external
 PostgreSQL, Yandex, SpeechKit, and asset-dependent tests remained ignored.
+
+## DC-008 — manifest and latest-state ingress (complete, 2026-09-03)
+
+The native control socket now accepts typed, validated `DeviceManifest`, complete device-state,
+device-state delta, and entity-state payloads after DC-007 registration. Production routers share
+the existing PostgreSQL pool with `PostgresDeviceControlStore`, preserving owner/active/revoked
+checks and DC-005 manifest tombstones; offline routers retain no durable state. Accepted latest
+snapshots and entity values enter an account-scoped bounded internal broadcast hub. Slow receivers
+are lossy (`broadcast::Lagged`) and cannot block a provider connection. Entity freshness is derived
+at server time from received/stale timestamps and unknown or removed entities are rejected rather
+than fabricated as zero values.
+
+Full snapshots are required before heartbeat; replay is idempotent, and gaps/conflicts request a
+full resync. This intentionally excludes the DC-009 command router and DC-010 public
+directory/subscription API. Verification: `cargo fmt --check`, strict Clippy, `cargo test` (130
+library tests and regular suites), OpenAPI fixture tests, and `git diff --check` passed.
+PostgreSQL integration tests were not run because no disposable `TEST_DATABASE_URL` was supplied.

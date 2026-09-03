@@ -154,7 +154,7 @@ shutdown производят ровно один offline transition active gene
 handshake/auth, reconnect, heartbeat/TTL, invalid/binary/timeout frames, identity injection,
 owner isolation и shutdown cleanup. DC-008/DC-010 по-прежнему не реализованы.
 
-### DC-008 — реализовать manifests и state hub
+### DC-008 — реализовать manifests и state hub — выполнено (2026-09-03)
 
 **Репозиторий:** RockServer.  
 **Зависимости:** DC-007.
@@ -166,7 +166,13 @@ owner isolation и shutdown cleanup. DC-008/DC-010 по-прежнему не р
 
 **Приёмка:** тесты покрывают reconnect, out-of-order delta, manifest replacement, sensor removal, stale time и backpressure медленного subscriber.
 
-### DC-009 — реализовать command router
+`/api/v1/devices/connect` теперь принимает typed manifest при register и последующие typed
+manifest/state/entity frames, требует full state перед heartbeat/reconnect и сохраняет latest-only
+projection через DC-005 store. Gaps/conflicts запрашивают `device.resync_requested`; stale/replay
+не изменяют accepted state. Internal fan-out owner-scoped и bounded/lossy для slow subscribers;
+публичного directory API и command router нет.
+
+### DC-009 — реализовать command router — выполнено (2026-09-03)
 
 **Репозиторий:** RockServer.  
 **Зависимости:** DC-008.
@@ -175,7 +181,16 @@ owner isolation и shutdown cleanup. DC-008/DC-010 по-прежнему не р
 - Реализовать `received → accepted → terminal result`, deadline, cancellation policy и correlation.
 - Дедуплицировать `command_id` в bounded idempotency window; не создавать бесконечную offline queue.
 
-**Приёмка:** одна команда исполняется не более одного раза; offline/forbidden/unsupported/timeout возвращают стабильные errors; success подтверждается provider result/state.
+**Приёмка (выполнено):** authenticated WebSocket теперь маршрутизирует только explicit
+owner-scoped commands с lifecycle `received → accepted → terminal result`; target acknowledgement
+не является success. Router проверяет server-derived principal/active generation, controller role,
+server-derived scope, owner, presence, target role/capability/entity/surface and bounded payload.
+Durable DC-005 reservation uses a SHA-256 fingerprint of the client-visible canonical command for
+24-hour replay/conflict, while the server applies the default deadline separately. One exact active
+target generation receives delivery; timeout, disconnect/replacement and bounded 16/8 admission
+produce a terminal failure without an offline queue. v1 не содержит explicit command cancel, so
+deadline/disconnect are its deterministic cancellation policy. DC-010 directory API и DC-011 intents
+остаются не реализованы.
 
 ### DC-010 — реализовать directory/controller API
 

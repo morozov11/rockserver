@@ -514,7 +514,7 @@ fn device_control_v1_is_bounded_and_fully_linked() {
         .expect("OpenAPI paths must be declared");
 
     for (path, status) in [
-        ("/api/v1/device-control/directory", "planned"),
+        ("/api/v1/device-control/directory", "implemented"),
         ("/api/v1/devices/connect", "implemented"),
     ] {
         let operation = paths

@@ -291,17 +291,28 @@ paths:
     get:
       operationId: getDeviceControlDirectory
       summary: Read the permitted account-owned device-control projection
-      x-rockserver-status: planned
+      x-rockserver-status: implemented
       description: >-
-        Planned read projection for controllers with `device.directory.read`. It does not replace
+        Read projection for controllers with `device.directory.read`. It does not replace
         `GET /api/v1/devices`, whose inventory/list-and-revoke semantics remain unchanged. The
         server derives the caller's `user_id` and `device_id` from the active native session and
         returns only permitted account-owned devices, entities and surfaces. Entity state is
         included only with `entity.state.read`. Credential material, pairing data, provider-native
         identifiers and other users' existence are never exposed. AdminBearer, browser cookies and
         the legacy RockCastBearer do not authorize this operation.
+        V1 filters only canonical entity `domain` and `device_class`; home and area are not
+        modelled identities and are explicitly rejected as unsupported query parameters.
       security:
         - RockserverBearer: []
+      parameters:
+        - name: domain
+          in: query
+          required: false
+          schema: { type: string, enum: [sensor, switch, light, media_player] }
+        - name: device_class
+          in: query
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 64, pattern: "^[a-z][a-z0-9_]*$" }
       responses:
         "200":
           description: Bounded directory snapshot with presence, capabilities and freshness.
@@ -313,6 +324,11 @@ paths:
         "401": { $ref: "#/components/responses/AuthenticationRequired" }
         "403":
           description: The authenticated native device lacks `device.directory.read`; target existence is not disclosed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "400":
+          description: An unknown, malformed, or unsupported bounded directory filter was supplied.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
@@ -1123,6 +1139,7 @@ components:
       type: string
       enum:
         - device.directory.read
+        - device.presence.read
         - entity.state.read
         - media.control
         - display.control
@@ -1872,6 +1889,7 @@ components:
         - command_timeout
         - duplicate_command
         - too_many_in_flight
+        - persistence_unavailable
     DeviceControlError:
       type: object
       additionalProperties: false
@@ -2047,28 +2065,28 @@ components:
         server_time: { type: string, format: date-time }
     DeviceManifestPayload:
       type: object
-      additionalProperties: true
+      additionalProperties: false
       required: [manifest]
       properties:
         source_device_id: { type: string, format: uuid, readOnly: true }
         manifest: { $ref: "#/components/schemas/DeviceManifest" }
     DeviceStateFullPayload:
       type: object
-      additionalProperties: true
+      additionalProperties: false
       required: [snapshot]
       properties:
         source_device_id: { type: string, format: uuid, readOnly: true }
         snapshot: { $ref: "#/components/schemas/DeviceStateSnapshot" }
     DeviceStateDeltaPayload:
       type: object
-      additionalProperties: true
+      additionalProperties: false
       required: [delta]
       properties:
         source_device_id: { type: string, format: uuid, readOnly: true }
         delta: { $ref: "#/components/schemas/DeviceStateDelta" }
     EntityStatePayload:
       type: object
-      additionalProperties: true
+      additionalProperties: false
       required: [state]
       properties:
         source_device_id: { type: string, format: uuid, readOnly: true }
@@ -2087,7 +2105,7 @@ components:
         presence: { $ref: "#/components/schemas/Presence" }
     ResyncRequestedPayload:
       type: object
-      additionalProperties: true
+      additionalProperties: false
       required: [kind, reason]
       properties:
         kind: { type: string, enum: [manifest, device_state, entity_state] }
@@ -2101,7 +2119,11 @@ components:
       properties:
         event_id: { $ref: "#/components/schemas/EventId" }
         directory: { $ref: "#/components/schemas/DeviceControlDirectory" }
-      description: Automatically sent to registered controllers with device.directory.read; v1 needs no separate subscription message.
+      description: >-
+        Automatically sent to registered controllers with device.directory.read; v1 needs no
+        separate subscription message. `directory_revision` is a server watermark: subscribe is
+        established before this snapshot is built, and later transitions arrive as upserts. A
+        lagged receiver closes with `directory_resync_required` and must reload this snapshot.
     DirectoryUpsertPayload:
       type: object
       additionalProperties: true

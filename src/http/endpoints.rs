@@ -11,7 +11,7 @@ use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, Tr
 use tracing::Level;
 
 use crate::{
-    persistence::{PostgresAccountStore, PostgresAdminStore},
+    persistence::{PostgresAccountStore, PostgresAdminStore, PostgresDeviceControlStore},
     search::{
         InMemoryStationRepository, SearchService, StationRepository, UnavailableStationRepository,
     },
@@ -33,6 +33,8 @@ mod control;
 #[path = "control_auth.rs"]
 mod control_auth;
 pub use control_auth::authenticate_control_ingress;
+#[path = "directory.rs"]
+mod directory;
 #[path = "health.rs"]
 mod health;
 #[path = "pairing.rs"]
@@ -148,6 +150,9 @@ pub fn router_with_speech_recognizers_and_bearer_token(
         local_admin_origin: local_admin_origin_from_env(),
         public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
         control_registry: Default::default(),
+        control_commands: Default::default(),
+        control_state_hub: Default::default(),
+        control_store: None,
         control_session_resolver: None,
         control_timing: Default::default(),
     })
@@ -182,6 +187,8 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
 ) -> Router {
     let control_session_resolver: Arc<dyn crate::auth::NativeSessionResolver> =
         Arc::new(account_store.clone());
+    let control_store: Arc<dyn crate::device_control::DeviceControlStore> =
+        Arc::new(PostgresDeviceControlStore::from_pool(account_store.pool()));
     build_router(AppState {
         search_service,
         speech_recognizers,
@@ -193,6 +200,9 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
         local_admin_origin: local_admin_origin_from_env(),
         public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
         control_registry: Default::default(),
+        control_commands: Default::default(),
+        control_state_hub: Default::default(),
+        control_store: Some(control_store),
         control_session_resolver: Some(control_session_resolver),
         control_timing: Default::default(),
     })
@@ -210,6 +220,8 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_and_proxy(
 ) -> Router {
     let control_session_resolver: Arc<dyn crate::auth::NativeSessionResolver> =
         Arc::new(account_store.clone());
+    let control_store: Arc<dyn crate::device_control::DeviceControlStore> =
+        Arc::new(PostgresDeviceControlStore::from_pool(account_store.pool()));
     build_router(AppState {
         search_service,
         speech_recognizers,
@@ -221,6 +233,9 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_and_proxy(
         local_admin_origin: local_admin_origin_from_env(),
         public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
         control_registry: Default::default(),
+        control_commands: Default::default(),
+        control_state_hub: Default::default(),
+        control_store: Some(control_store),
         control_session_resolver: Some(control_session_resolver),
         control_timing: Default::default(),
     })
@@ -295,6 +310,10 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/devices/connect",
             axum::routing::get(control::connect),
+        )
+        .route(
+            "/api/v1/device-control/directory",
+            axum::routing::get(directory::get),
         )
         .route(
             "/api/v1/pairing-requests",
@@ -454,6 +473,9 @@ mod tests {
             local_admin_origin: None,
             public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
             control_registry: Default::default(),
+            control_commands: Default::default(),
+            control_state_hub: Default::default(),
+            control_store: None,
             control_session_resolver: None,
             control_timing: Default::default(),
         });
@@ -523,6 +545,9 @@ mod tests {
             local_admin_origin: None,
             public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
             control_registry: Default::default(),
+            control_commands: Default::default(),
+            control_state_hub: Default::default(),
+            control_store: None,
             control_session_resolver: None,
             control_timing: Default::default(),
         });
@@ -606,6 +631,9 @@ mod tests {
             local_admin_origin: Some("http://127.0.0.1:3000".to_owned()),
             public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
             control_registry: Default::default(),
+            control_commands: Default::default(),
+            control_state_hub: Default::default(),
+            control_store: None,
             control_session_resolver: None,
             control_timing: Default::default(),
         });

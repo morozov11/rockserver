@@ -14,8 +14,12 @@ pub mod config;
 pub mod device_control;
 /// Authentication foundation for future device-control ingress.
 pub mod device_control_auth;
+/// Bounded authorization, idempotency and lifecycle routing for live device commands.
+pub mod device_control_command;
 /// Process-local live connection registry and owner-scoped presence transitions.
 pub mod device_control_presence;
+/// Bounded owner-scoped latest-state cache and internal event fan-out.
+pub mod device_control_state;
 /// HTTP routes and transport types.
 pub mod http;
 /// Deterministic prebuilt SQLite export for RockMobile's extended offline catalog.

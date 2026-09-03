@@ -1876,3 +1876,61 @@
   graceful and transport-loss cleanup, heartbeat/TTL, invalid/binary/timeout frames and shutdown;
   registry tests cover owner isolation and revocation.
 - Status: **complete.**
+
+## DC-008 — 2026-09-03 — typed manifest/latest-state ingress
+
+- Goal: begin the DC-008 manifest, state, persistence and internal fan-out lifecycle on the
+  completed authenticated DC-007 transport.
+- Result: registration now carries a typed `DeviceManifest`; later manifest replacement, full
+  snapshots, state deltas and entity observations use typed DTOs and bounded payload dispatch.
+  Production control routers use the DC-005 `PostgresDeviceControlStore`; latest accepted values
+  are also sent through a per-user, 64-event lossy internal hub. Device deltas use
+  `revision_order`, gaps/conflicts request a full resync, and entity freshness is calculated from
+  server time without synthesizing sensor values. No command routing or public directory API was
+  introduced.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
+  `cargo test` (128 library tests plus all regular suites), OpenAPI contract fixtures, and
+  `git diff --check` passed. Ignored PostgreSQL integration tests were not run because no safe
+  disposable `TEST_DATABASE_URL` was configured.
+- Status: **complete.**
+
+## DC-009 — 2026-09-03 — bounded owner-scoped command router
+
+- Goal: route typed control commands over the existing authenticated WebSocket without adding a
+  directory API, intent resolver, offline queue, pairing flow, or a parallel idempotency store.
+- Result: added `device_control_command`, bounded outbound delivery on the single-active DC-007
+  registry, and command dispatch for `device.command`, `command.accepted`, and `command.result`.
+  Admission derives actor identity from `DeviceControlPrincipal`; it checks active controller role,
+  explicit server grant, same owner, target presence/generation, role/capability/entity/surface and
+  the bounded command payload before DC-005 `reserve_command`. The command lifecycle is received,
+  accepted and one terminal target result; success is never inferred from queueing or acceptance.
+  Result/acceptance correlation verifies owner/device/connection generation, timestamps are server
+  observed, and timeout/disconnect/replacement end the record deterministically. The 16 per
+  controller connection / 8 per target limits fail with `too_many_in_flight`; no command is queued
+  offline. A canonical SHA-256 request fingerprint provides 24-hour replay, while the server default
+  deadline remains stable across retries. v1 has no explicit cancel frame, so deadline/loss is the
+  documented cancellation policy. Added a typed actuator command variant aligned with the existing
+  OpenAPI union. No credential/token/raw payload logging was added.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, focused
+  `cargo test device_control_command --lib`, full `cargo test`, OpenAPI contract test, and
+  `git diff --check` were run. PostgreSQL ignored integration was skipped because no disposable
+  `TEST_DATABASE_URL` was supplied.
+- Status: **complete; DC-010 public directory/subscription API and DC-011 intents remain future work.**
+
+## DC-010 — 2026-09-03 — controller directory HTTP projection
+
+- Goal: begin the public account-owned controller directory without changing inventory/revoke,
+  pairing, commands, homes, or client UI.
+- Result: implemented the canonical native-authenticated `GET /api/v1/device-control/directory`
+  route, owner-scoped persistent projection, capability/entity/surface metadata, presence,
+  freshness metadata, bounded `domain`/`device_class` filtering, no-store response, and typed
+  rejection of malformed/unknown filters. Entity values remain absent without `entity.state.read`.
+  OpenAPI now marks the HTTP endpoint implemented and describes the exact v1 filter boundary.
+- Checks: formatting, strict Clippy and the regular test suite were run; PostgreSQL ignored tests
+  remain skipped because no safe disposable `TEST_DATABASE_URL` was supplied.
+- Result: controllers now subscribe to the existing owner-scoped 64-event hub before receiving an
+  initial watermark snapshot. Later owned presence, manifest, device-state, and entity-state
+  transitions emit a bounded `directory.upsert`; a broadcast lag produces the explicit
+  `directory_resync_required` close/reload policy. DC-007 replacement closes the prior socket and
+  its subscription, preventing duplicate deliveries.
+- Status: **complete.** DC-011 intents/presentation and DC-015 client UI remain out of scope.

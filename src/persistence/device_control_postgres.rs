@@ -259,8 +259,8 @@ impl DeviceControlStore for PostgresDeviceControlStore {
         if !owned(&mut tx, user, device).await? {
             return Ok(StoreOutcome::NotOwned);
         };
-        if let Some((owner,target,fingerprint,accepted,status,fresh))=sqlx::query_as::<_,(Uuid,Uuid,Vec<u8>,Value,String,bool)>("SELECT user_id,target_device_id,request_fingerprint,request_payload,status,created_at >= now()-interval '24 hours' FROM device_control_commands WHERE command_id=$1 FOR UPDATE").bind(request.command.command_id.0).fetch_optional(&mut *tx).await.map_err(StoreError::database)? {
-            if fresh && owner==user && target==device.0 && fingerprint==request.fingerprint && accepted==payload { return Ok(StoreOutcome::Replay); }
+        if let Some((owner,target,fingerprint,status,fresh))=sqlx::query_as::<_,(Uuid,Uuid,Vec<u8>,String,bool)>("SELECT user_id,target_device_id,request_fingerprint,status,created_at >= now()-interval '24 hours' FROM device_control_commands WHERE command_id=$1 FOR UPDATE").bind(request.command.command_id.0).fetch_optional(&mut *tx).await.map_err(StoreError::database)? {
+            if fresh && owner==user && target==device.0 && fingerprint==request.fingerprint { return Ok(StoreOutcome::Replay); }
             if !fresh && matches!(status.as_str(),"succeeded"|"failed") { sqlx::query("DELETE FROM device_control_commands WHERE command_id=$1").bind(request.command.command_id.0).execute(&mut *tx).await.map_err(StoreError::database)?; } else { return Ok(StoreOutcome::Conflict); }
         }
         sqlx::query("INSERT INTO device_control_commands(command_id,user_id,target_device_id,request_fingerprint,request_payload,status,deadline_at) VALUES($1,$2,$3,$4,$5,'reserved',$6::timestamptz)").bind(request.command.command_id.0).bind(user).bind(device.0).bind(request.fingerprint.to_vec()).bind(payload).bind(request.deadline_at.as_str()).execute(&mut *tx).await.map_err(StoreError::database)?;

@@ -9,6 +9,8 @@ use std::{
 use tokio::sync::{broadcast, mpsc};
 use uuid::Uuid;
 
+use crate::device_control::{DeviceControlScope, DeviceManifest};
+
 const USER_EVENT_CAPACITY: usize = 128;
 static CONTROL_SHUTDOWN: OnceLock<broadcast::Sender<()>> = OnceLock::new();
 
@@ -63,6 +65,47 @@ struct ActiveConnection {
     connection_id: Uuid,
     last_seen: Instant,
     replacement: mpsc::Sender<DisconnectReason>,
+    outbound: mpsc::Sender<OutboundFrame>,
+    manifest: DeviceManifest,
+    scopes: Vec<DeviceControlScope>,
+}
+
+/// One bounded server-to-device protocol message awaiting WebSocket serialization.
+#[derive(Clone, Debug)]
+pub struct OutboundFrame {
+    /// Protocol message type.
+    pub kind: &'static str,
+    /// Already typed payload encoded only at the transport edge.
+    pub payload: serde_json::Value,
+}
+
+/// Server-derived metadata for the active generation of an owned device.
+#[derive(Clone, Debug)]
+pub struct ActiveDevice {
+    /// Active connection generation.
+    pub connection_id: Uuid,
+    /// Registered truthful declaration for this generation.
+    pub manifest: DeviceManifest,
+    /// Explicit scopes granted by server policy.
+    pub scopes: Vec<DeviceControlScope>,
+}
+
+/// Complete server-side registration data for one active WebSocket generation.
+pub struct ConnectionRegistration {
+    /// Authenticated owner namespace.
+    pub user_id: Uuid,
+    /// Stable paired device identity.
+    pub device_id: Uuid,
+    /// Server-generated connection generation.
+    pub connection_id: Uuid,
+    /// Replacement notification sender owned by this session.
+    pub replacement: mpsc::Sender<DisconnectReason>,
+    /// Bounded protocol delivery sender owned by this session.
+    pub outbound: mpsc::Sender<OutboundFrame>,
+    /// The current registration manifest.
+    pub manifest: DeviceManifest,
+    /// The server-derived granted scopes.
+    pub scopes: Vec<DeviceControlScope>,
 }
 
 #[derive(Default)]
@@ -88,41 +131,103 @@ impl ConnectionRegistry {
         mpsc::channel(1)
     }
 
+    /// Creates the bounded command/event delivery channel for one WebSocket session.
+    pub fn outbound_channel(&self) -> (mpsc::Sender<OutboundFrame>, mpsc::Receiver<OutboundFrame>) {
+        mpsc::channel(16)
+    }
+
     /// Atomically makes this connection active, replacing any earlier connection for its device.
     pub fn register(
         &self,
-        user_id: Uuid,
-        device_id: Uuid,
-        connection_id: Uuid,
-        replacement: mpsc::Sender<DisconnectReason>,
+        registration: ConnectionRegistration,
         now: Instant,
-    ) {
+    ) -> Option<(Uuid, Uuid)> {
         let mut state = self
             .state
             .lock()
             .expect("connection registry mutex is not poisoned");
-        if let Some(previous) = state.active.insert(
-            device_id,
+        let previous = state.active.insert(
+            registration.device_id,
             ActiveConnection {
-                user_id,
-                connection_id,
+                user_id: registration.user_id,
+                connection_id: registration.connection_id,
                 last_seen: now,
-                replacement,
+                replacement: registration.replacement,
+                outbound: registration.outbound,
+                manifest: registration.manifest,
+                scopes: registration.scopes,
             },
-        ) {
+        );
+        if let Some(previous) = &previous {
             let _ = previous.replacement.try_send(DisconnectReason::Replaced);
         }
         push_event(
             &mut state,
             PresenceEvent {
-                user_id,
-                device_id,
-                connection_id,
+                user_id: registration.user_id,
+                device_id: registration.device_id,
+                connection_id: registration.connection_id,
                 online: true,
                 last_seen: now,
                 reason: None,
             },
         );
+        previous.map(|previous| (previous.user_id, previous.connection_id))
+    }
+
+    /// Returns an active target only when it belongs to the supplied owner.
+    pub fn active_for(&self, user_id: Uuid, device_id: Uuid) -> Option<ActiveDevice> {
+        self.state
+            .lock()
+            .expect("connection registry mutex is not poisoned")
+            .active
+            .get(&device_id)
+            .filter(|active| active.user_id == user_id)
+            .map(|active| ActiveDevice {
+                connection_id: active.connection_id,
+                manifest: active.manifest.clone(),
+                scopes: active.scopes.clone(),
+            })
+    }
+
+    /// Replaces the declaration for exactly the active connection generation.
+    pub fn update_manifest(
+        &self,
+        device_id: Uuid,
+        connection_id: Uuid,
+        manifest: DeviceManifest,
+    ) -> bool {
+        let mut state = self
+            .state
+            .lock()
+            .expect("connection registry mutex is not poisoned");
+        let Some(active) = state
+            .active
+            .get_mut(&device_id)
+            .filter(|active| active.connection_id == connection_id)
+        else {
+            return false;
+        };
+        active.manifest = manifest;
+        true
+    }
+
+    /// Attempts non-blocking delivery to one exact active connection generation.
+    pub fn send_to(
+        &self,
+        user_id: Uuid,
+        device_id: Uuid,
+        connection_id: Uuid,
+        frame: OutboundFrame,
+    ) -> bool {
+        self.state
+            .lock()
+            .expect("connection registry mutex is not poisoned")
+            .active
+            .get(&device_id)
+            .filter(|active| active.user_id == user_id && active.connection_id == connection_id)
+            .map(|active| active.outbound.clone())
+            .is_some_and(|sender| sender.try_send(frame).is_ok())
     }
 
     /// Refreshes server-observed activity only if this connection is still the active generation.
@@ -254,6 +359,28 @@ fn push_event(state: &mut RegistryState, event: PresenceEvent) {
 mod tests {
     use super::*;
 
+    fn registration() -> (
+        mpsc::Sender<OutboundFrame>,
+        DeviceManifest,
+        Vec<DeviceControlScope>,
+    ) {
+        let (outbound, _) = mpsc::channel(1);
+        (
+            outbound,
+            DeviceManifest {
+                manifest_revision: 1,
+                roles: Vec::new(),
+                capabilities: crate::device_control::DeviceCapabilities {
+                    revision: 1,
+                    items: Vec::new(),
+                },
+                entities: Vec::new(),
+                surfaces: Vec::new(),
+            },
+            Vec::new(),
+        )
+    }
+
     #[test]
     fn replacement_and_stale_cleanup_do_not_take_new_connection_offline() {
         let registry = ConnectionRegistry::default();
@@ -263,9 +390,33 @@ mod tests {
         let new = Uuid::new_v4();
         let now = Instant::now();
         let (old_tx, mut old_rx) = registry.replacement_channel();
-        registry.register(user, device, old, old_tx, now);
+        let (outbound, manifest, scopes) = registration();
+        registry.register(
+            ConnectionRegistration {
+                user_id: user,
+                device_id: device,
+                connection_id: old,
+                replacement: old_tx,
+                outbound,
+                manifest,
+                scopes,
+            },
+            now,
+        );
         let (new_tx, _) = registry.replacement_channel();
-        registry.register(user, device, new, new_tx, now);
+        let (outbound, manifest, scopes) = registration();
+        registry.register(
+            ConnectionRegistration {
+                user_id: user,
+                device_id: device,
+                connection_id: new,
+                replacement: new_tx,
+                outbound,
+                manifest,
+                scopes,
+            },
+            now,
+        );
         assert_eq!(old_rx.try_recv(), Ok(DisconnectReason::Replaced));
         assert!(!registry.disconnect(device, old, DisconnectReason::Replaced, now));
         assert_eq!(registry.snapshot_for(user), vec![(device, new, now)]);
@@ -287,7 +438,19 @@ mod tests {
         let device = Uuid::new_v4();
         let connection = Uuid::new_v4();
         let (tx, _) = registry.replacement_channel();
-        registry.register(one, device, connection, tx, Instant::now());
+        let (outbound, manifest, scopes) = registration();
+        registry.register(
+            ConnectionRegistration {
+                user_id: one,
+                device_id: device,
+                connection_id: connection,
+                replacement: tx,
+                outbound,
+                manifest,
+                scopes,
+            },
+            Instant::now(),
+        );
         assert_eq!(registry.snapshot_for(two), Vec::new());
         assert_eq!(registry.events_for(two), Vec::new());
     }
@@ -300,7 +463,19 @@ mod tests {
         let device = Uuid::new_v4();
         let connection = Uuid::new_v4();
         let (tx, mut rx) = registry.replacement_channel();
-        registry.register(owner, device, connection, tx, Instant::now());
+        let (outbound, manifest, scopes) = registration();
+        registry.register(
+            ConnectionRegistration {
+                user_id: owner,
+                device_id: device,
+                connection_id: connection,
+                replacement: tx,
+                outbound,
+                manifest,
+                scopes,
+            },
+            Instant::now(),
+        );
         assert!(!registry.revoke(other, device, Instant::now()));
         assert!(registry.revoke(owner, device, Instant::now()));
         assert_eq!(rx.try_recv(), Ok(DisconnectReason::Revoked));
