@@ -1957,3 +1957,54 @@
   and `git diff --check` are recorded after final verification. Ignored PostgreSQL tests remain
   skipped unless a safe disposable `TEST_DATABASE_URL` is supplied.
 - Status: **complete.** DC-020 owns end-to-end display dispatch and DC-025 owns parser/LLM wiring.
+
+## REFACTOR-002 — 2026-09-04 — cohesive control and intent module boundaries
+
+- Goal: safely reduce two current Rust god objects without changing any service behavior.
+- Scope: private v1 WebSocket protocol and state-admission helpers beneath `http::control`, plus
+  private public-model ownership beneath `device_control_intent`. No endpoint, OpenAPI, migration,
+  persistence, auth, authorization, command lifecycle, logging, audit, configuration or client
+  changes.
+- Result: `src/http/control.rs` is now the socket lifecycle/composition facade; its exact typed
+  wire DTOs, bounded parsing, serialization and close helpers are in `control/protocol.rs`, and
+  its monotonic state-admission helpers are in `control/state.rs`. `src/device_control_intent.rs`
+  is now the resolver facade; its existing public schema/validation/context/result types are
+  re-exported unchanged from `device_control_intent/model.rs`.
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`;
+  `cargo test` (141 library tests, OpenAPI contract fixtures, and regular suites passed);
+  `git diff --check`. Ten PostgreSQL integration tests remain ignored because no disposable
+  `TEST_DATABASE_URL` was configured; billable Yandex and SpeechKit live tests also remain ignored
+  by their explicit credential/asset gates.
+- Status: **complete; behavior-preserving internal refactor only.**
+
+## REFACTOR-003 — 2026-09-04 — layered domain and persistence boundaries
+
+- Goal: remove the remaining thousand-line source units and make the codebase easier to navigate
+  for both maintainers and automated readers, without changing service behavior.
+- Scope: private decomposition of the device-control domain model and PostgreSQL account store;
+  extraction of existing unit tests from device-control, command, intent and search production
+  modules. No endpoint, OpenAPI, migration, persistence behavior, auth, authorization, command
+  lifecycle, logging, audit, configuration or client change.
+- Result: `device_control.rs` is a documented public facade over focused model, validation,
+  manifest, runtime-state, command, lifecycle and store modules. `account_postgres.rs` delegates
+  to cohesive account, browser, passkey, pairing, rate-limit, cleanup and native-session modules;
+  common private SQL row conversions are centralized. Existing unit tests now reside in private
+  sibling test modules, so production flows can be read without fixture noise.
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`;
+  `cargo test` (141 library tests, regular suites and four OpenAPI contract tests passed);
+  `cargo test --test openapi_contract` (4 passed); `git diff --check`. Ten PostgreSQL integration
+  tests and five credential/asset-gated live tests were correctly ignored.
+- Status: **complete; behavior-preserving internal refactor only.**
+
+## DOCS-001 — 2026-09-04 — compact source navigation map
+
+- Goal: provide maintainers and agents with a small, code-adjacent architecture index without
+  duplicating implementation details in every source file.
+- Result: added `src/ARCHITECTURE.md`, covering root-module responsibilities, dependency direction,
+  focused device-control/persistence maps, test placement, and reading order. Added compact links
+  from the crate root and Codex project context.
+- Scope: documentation and crate-level Rustdoc only; no runtime, public API, storage, provider,
+  authorization, or service-diagram behavior changed.
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`;
+  `cargo test`; `git diff --check`.
+- Status: **complete.**

@@ -1,6 +1,51 @@
 # Project status
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
+
+## DOCS-001 — source navigation map (complete, 2026-09-04)
+
+`src/ARCHITECTURE.md` now provides a compact, code-adjacent map of every root module, dependency
+direction, focused control/persistence submodules, test locations, and safe reading order. The
+crate root points to it and the persistent Codex context lists it among the reference documents.
+It intentionally describes responsibilities and boundaries rather than duplicating implementation
+or HTTP schemas, keeping code-navigation context small. No runtime, public API, persistence,
+provider, authorization, or service-diagram behavior changed.
+
+## REFACTOR-003 — layered domain and persistence boundaries (complete, 2026-09-04)
+
+The largest remaining source modules were reduced to focused private units while preserving their
+public Rust APIs. `src/device_control.rs` is now a compatibility facade over identities and
+validation, manifest metadata, runtime state, commands, lifecycle values and store contracts.
+`src/persistence/account_postgres.rs` is an account-store facade over account, browser, passkey,
+pairing, rate-limit, cleanup and native-session implementations, with private row mappings kept in
+one location. The existing unit tests for device control, command routing, intent resolution and
+search orchestration now live beside their respective domain modules rather than among production
+logic.
+
+No endpoint, WebSocket/OpenAPI message, JSON serialization, authentication, scope, owner-scoping,
+presence, state, command, idempotency, persistence, migration, configuration, logging or audit
+behavior changed. The service diagram was reviewed and needs no update because the change only
+introduces internal source boundaries. Verification passed: `cargo fmt --check`, strict
+all-target/all-feature Clippy, `cargo test` (141 library tests plus regular suites), the four
+OpenAPI contract tests, and `git diff --check`. PostgreSQL integration remains skipped because no
+safe disposable `TEST_DATABASE_URL` was supplied.
+
+## REFACTOR-002 — cohesive control and intent module boundaries (complete, 2026-09-04)
+
+The device-control WebSocket lifecycle remains in `src/http/control.rs`, while its private v1
+wire DTOs, frame bounds, serialization, parsing and protocol-close helpers now live in
+`src/http/control/protocol.rs`; revision admission and state merge helpers live in
+`src/http/control/state.rs`. `src/device_control_intent.rs` remains the transport-free resolver
+facade, and its public schema, validation, contextual inputs and result types now live in the
+private `src/device_control_intent/model.rs` module and are re-exported unchanged.
+
+No endpoint, WebSocket/OpenAPI message, JSON serialization, authentication, scope, owner-scoping,
+presence, state, command, idempotency, persistence, migration, configuration, logging or audit
+behavior changed. The service diagram was reviewed and needs no update because this is an internal
+code-boundary refactor only. Verification passed: `cargo fmt --check`, strict all-target/all-feature
+Clippy, `cargo test` (141 library tests plus regular suites), OpenAPI contract fixtures, and
+`git diff --check`. PostgreSQL integration remains skipped because no safe disposable
+`TEST_DATABASE_URL` was supplied.
 
 ## DC-011 — typed intents and presentation builder (complete, 2026-09-03)
 

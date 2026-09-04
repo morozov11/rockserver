@@ -1,7 +1,5 @@
 //! Native device-control WebSocket ingress and its bounded v1 handshake.
 
-use std::time::Duration;
-
 use axum::{
     extract::{
         State, WebSocketUpgrade,
@@ -10,16 +8,13 @@ use axum::{
     http::HeaderMap,
     response::Response,
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use serde_json::{Value, json};
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::{
     device_control::{
         CommandAccepted, CommandResult, DeviceCommand, DeviceControlScope, DeviceId,
-        DeviceManifest, DeviceRuntimeState, DeviceStateDelta, DeviceStateSnapshot, EntityState,
-        RevisionOrder, revision_order,
+        DeviceManifest, DeviceStateSnapshot, RevisionOrder, revision_order,
     },
     device_control_auth::{DeviceControlAuthenticationError, DeviceControlPrincipal},
     device_control_command::CommandRouter,
@@ -35,96 +30,13 @@ use super::{
     transport::{error_response, request_id, retry_after, unauthorized_response, with_request_id},
 };
 
-const MAX_FRAME_BYTES: usize = 65_536;
-const MAX_PAYLOAD_BYTES: usize = 61_440;
+#[path = "control/protocol.rs"]
+mod protocol;
+#[path = "control/state.rs"]
+mod state;
 
-/// Typed client envelope shared by the v1 messages accepted in this lifecycle stage.
-#[derive(Deserialize)]
-struct ClientEnvelope<T> {
-    protocol_version: u8,
-    message_id: Uuid,
-    #[serde(rename = "type")]
-    kind: String,
-    sent_at: String,
-    payload: T,
-}
-
-/// Typed server envelope shared by v1 replies emitted in this lifecycle stage.
-#[derive(Serialize)]
-struct ServerEnvelope<'a, T> {
-    protocol_version: u8,
-    message_id: Uuid,
-    #[serde(rename = "type")]
-    kind: &'a str,
-    sent_at: String,
-    payload: T,
-}
-
-/// Client-supported major protocol versions.
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct HelloPayload {
-    supported_protocol_versions: Vec<u8>,
-}
-
-/// Bounded registration metadata and the first typed manifest declaration.
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct RegisterPayload {
-    device_type: String,
-    app_version: String,
-    manifest: DeviceManifest,
-}
-
-/// Typed manifest replacement after registration.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ManifestPayload {
-    manifest: DeviceManifest,
-}
-
-/// Required full runtime-state observation after every register or reconnect.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FullStatePayload {
-    snapshot: DeviceStateSnapshot,
-}
-
-/// Ordered partial runtime-state observation.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StateDeltaPayload {
-    delta: DeviceStateDelta,
-}
-
-/// Typed latest entity observation.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct EntityStatePayload {
-    state: EntityState,
-}
-
-/// Explicit request to replace a state stream with a full snapshot.
-#[derive(Serialize)]
-struct ResyncRequestedPayload {
-    kind: &'static str,
-    reason: &'static str,
-}
-
-/// Initial controller directory snapshot delivered on the authenticated control socket.
-#[derive(Serialize)]
-struct DirectorySnapshotPayload {
-    event_id: Uuid,
-    directory: super::directory::DirectoryDto,
-}
-
-/// One replacement directory entry delivered after an owned control transition.
-#[derive(Serialize)]
-struct DirectoryUpsertPayload {
-    event_id: Uuid,
-    directory_revision: u64,
-    device: super::directory::DirectoryDeviceDto,
-}
+use protocol::*;
+use state::*;
 
 /// Shared process-local dependencies for one authenticated control socket.
 struct ControlRuntime {
@@ -134,75 +46,6 @@ struct ControlRuntime {
     commands: CommandRouter,
     timing: super::state::ControlTiming,
     directory_state: AppState,
-}
-
-/// Server-owned control-plane limits sent after version negotiation.
-#[derive(Serialize)]
-struct DeviceControlLimits {
-    max_json_frame_bytes: u32,
-    max_payload_bytes: u32,
-    max_capabilities: u8,
-    max_entities: u16,
-    max_surfaces: u8,
-    max_directory_devices: u8,
-    heartbeat_interval_seconds: u8,
-    offline_ttl_seconds: u8,
-    max_in_flight_per_connection: u8,
-    max_in_flight_per_target_device: u8,
-    default_command_timeout_seconds: u8,
-    max_command_timeout_seconds: u8,
-    command_idempotency_window_seconds: u32,
-    max_stream_redirects: u8,
-}
-
-/// Version-negotiation reply.
-#[derive(Serialize)]
-struct WelcomePayload {
-    selected_protocol_version: u8,
-    connection_id: Uuid,
-    registration_deadline_seconds: u8,
-    limits: DeviceControlLimits,
-}
-
-/// Registration acknowledgement with only server-derived identity fields.
-#[derive(Serialize)]
-struct RegisteredPayload {
-    connection_id: Uuid,
-    authenticated_user_id: Uuid,
-    authenticated_device_id: Uuid,
-    granted_scopes: Vec<&'static str>,
-    heartbeat_interval_seconds: u8,
-    offline_ttl_seconds: u8,
-    require_full_state: bool,
-}
-
-/// Client heartbeat payload.
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct HeartbeatPayload {
-    sequence: u64,
-}
-
-/// Server heartbeat acknowledgement.
-#[derive(Serialize)]
-struct HeartbeatAckPayload {
-    sequence: u64,
-    server_time: String,
-}
-
-/// Safe protocol error body.
-#[derive(Serialize)]
-struct ProtocolErrorPayload<'a> {
-    error: ProtocolError<'a>,
-}
-
-/// Safe fixed error details that never include credentials or raw parser errors.
-#[derive(Serialize)]
-struct ProtocolError<'a> {
-    code: &'a str,
-    message: &'a str,
-    request_id: String,
-    details: std::collections::BTreeMap<String, String>,
 }
 
 /// Authenticates then upgrades the canonical device-control WebSocket endpoint.
@@ -618,218 +461,6 @@ async fn send_command_error(socket: &mut WebSocket, code: &'static str) -> Resul
     .await
 }
 
-enum ProtocolParseError {
-    Invalid,
-    TooLarge,
-}
-
-async fn receive_message<T>(
-    socket: &mut WebSocket,
-    timeout: Duration,
-    expected_kind: &str,
-) -> Result<ClientEnvelope<T>, ProtocolParseError>
-where
-    T: DeserializeOwned + Serialize,
-{
-    match tokio::time::timeout(timeout, socket.recv()).await {
-        Ok(Some(Ok(Message::Text(text)))) => parse_message(&text, expected_kind),
-        _ => Err(ProtocolParseError::Invalid),
-    }
-}
-
-fn parse_message<T>(
-    text: &str,
-    expected_kind: &str,
-) -> Result<ClientEnvelope<T>, ProtocolParseError>
-where
-    T: DeserializeOwned + Serialize,
-{
-    if text.len() > MAX_FRAME_BYTES {
-        return Err(ProtocolParseError::TooLarge);
-    }
-    let message: ClientEnvelope<T> =
-        serde_json::from_str(text).map_err(|_| ProtocolParseError::Invalid)?;
-    if message.protocol_version != 1
-        || message.kind != expected_kind
-        || OffsetDateTime::parse(&message.sent_at, &Rfc3339).is_err()
-        || serde_json::to_vec(&message.payload)
-            .map_err(|_| ProtocolParseError::Invalid)?
-            .len()
-            > MAX_PAYLOAD_BYTES
-    {
-        return Err(ProtocolParseError::Invalid);
-    }
-    let _ = message.message_id;
-    Ok(message)
-}
-
-/// Parses a bounded, versioned envelope before dispatching to a typed payload DTO.
-fn parse_any(text: &str) -> Result<ClientEnvelope<Value>, ProtocolParseError> {
-    if text.len() > MAX_FRAME_BYTES {
-        return Err(ProtocolParseError::TooLarge);
-    }
-    let message: ClientEnvelope<Value> =
-        serde_json::from_str(text).map_err(|_| ProtocolParseError::Invalid)?;
-    if message.protocol_version != 1
-        || message.kind.len() > 64
-        || OffsetDateTime::parse(&message.sent_at, &Rfc3339).is_err()
-        || serde_json::to_vec(&message.payload)
-            .map_err(|_| ProtocolParseError::Invalid)?
-            .len()
-            > MAX_PAYLOAD_BYTES
-    {
-        return Err(ProtocolParseError::Invalid);
-    }
-    Ok(message)
-}
-
-/// Rejects impossible or deliberately empty complete runtime observations.
-fn valid_snapshot(snapshot: &DeviceStateSnapshot) -> bool {
-    snapshot.state_revision > 0
-        && (snapshot.state.playback.is_some()
-            || snapshot.state.volume.is_some()
-            || snapshot.state.display.is_some())
-}
-
-/// Rejects a delta that cannot represent the next monotonic device observation.
-fn valid_delta(delta: &DeviceStateDelta) -> bool {
-    delta.base_revision > 0
-        && delta.state_revision > delta.base_revision
-        && (delta.changes.playback.is_some()
-            || delta.changes.volume.is_some()
-            || delta.changes.display.is_some())
-}
-
-/// Applies only fields explicitly included by a typed state delta.
-fn merge_state(current: DeviceRuntimeState, changes: DeviceRuntimeState) -> DeviceRuntimeState {
-    DeviceRuntimeState {
-        playback: changes.playback.or(current.playback),
-        volume: changes.volume.or(current.volume),
-        display: changes.display.or(current.display),
-    }
-}
-
-/// Publishes a full snapshot only when its revision is a legal successor.
-fn accept_snapshot(
-    hub: &StateHub,
-    user_id: Uuid,
-    device_id: Uuid,
-    snapshot: DeviceStateSnapshot,
-) -> RevisionOrder {
-    let device_id = DeviceId(device_id);
-    let result = match hub.device_state(user_id, device_id) {
-        Some(current) => revision_order(
-            current.state_revision,
-            &current.state,
-            snapshot.state_revision,
-            &snapshot.state,
-            None,
-        ),
-        None => RevisionOrder::Next,
-    };
-    if result == RevisionOrder::Next {
-        hub.publish_device_state(user_id, device_id, snapshot);
-    }
-    result
-}
-
-/// Classifies a typed entity observation against the account-scoped latest observation.
-fn entity_revision(
-    hub: &StateHub,
-    user_id: Uuid,
-    device_id: DeviceId,
-    incoming: &EntityState,
-) -> RevisionOrder {
-    match hub.entity_state(user_id, device_id, &incoming.entity_id) {
-        Some(accepted) => revision_order(
-            accepted.entity_revision,
-            &accepted,
-            incoming.entity_revision,
-            incoming,
-            None,
-        ),
-        None => RevisionOrder::Next,
-    }
-}
-
-fn valid_hello(payload: &HelloPayload) -> bool {
-    (1..=4).contains(&payload.supported_protocol_versions.len())
-        && payload.supported_protocol_versions.contains(&1)
-}
-
-fn valid_registration(payload: &RegisterPayload) -> bool {
-    !payload.device_type.is_empty()
-        && payload.device_type.len() <= 64
-        && !payload.app_version.is_empty()
-        && payload.app_version.len() <= 64
-}
-fn now() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .expect("RFC3339 formatter is valid")
-}
-fn limits() -> DeviceControlLimits {
-    DeviceControlLimits {
-        max_json_frame_bytes: 65_536,
-        max_payload_bytes: 61_440,
-        max_capabilities: 32,
-        max_entities: 256,
-        max_surfaces: 16,
-        max_directory_devices: 50,
-        heartbeat_interval_seconds: 20,
-        offline_ttl_seconds: 60,
-        max_in_flight_per_connection: 16,
-        max_in_flight_per_target_device: 8,
-        default_command_timeout_seconds: 10,
-        max_command_timeout_seconds: 30,
-        command_idempotency_window_seconds: 86_400,
-        max_stream_redirects: 5,
-    }
-}
-async fn send_envelope<T: Serialize>(
-    socket: &mut WebSocket,
-    kind: &str,
-    payload: T,
-) -> Result<(), ()> {
-    let message = ServerEnvelope {
-        protocol_version: 1,
-        message_id: Uuid::new_v4(),
-        kind,
-        sent_at: now(),
-        payload,
-    };
-    socket
-        .send(Message::Text(
-            serde_json::to_string(&message)
-                .expect("device-control server DTO serializes")
-                .into(),
-        ))
-        .await
-        .map_err(|_| ())
-}
-async fn protocol_close(socket: &mut WebSocket, code: &str, close_code: u16) -> Result<(), ()> {
-    let _ = send_envelope(
-        socket,
-        "protocol.error",
-        ProtocolErrorPayload {
-            error: ProtocolError {
-                code,
-                message: "Device-control protocol error.",
-                request_id: Uuid::new_v4().to_string(),
-                details: Default::default(),
-            },
-        },
-    )
-    .await;
-    socket
-        .send(Message::Close(Some(CloseFrame {
-            code: close_code,
-            reason: code.into(),
-        })))
-        .await
-        .map_err(|_| ())
-}
-
 #[cfg(test)]
 mod tests {
     use std::{
@@ -840,6 +471,7 @@ mod tests {
     };
 
     use axum::Router;
+    use serde_json::Value;
     use sha2::{Digest, Sha256};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
@@ -849,6 +481,7 @@ mod tests {
     use super::*;
     use crate::{
         auth::{ActiveSession, NativeSessionLookupError, NativeSessionResolver, SecretHash},
+        device_control::{DeviceRuntimeState, DeviceStateSnapshot},
         http::endpoints::{
             build_router,
             state::{AppState, ControlTiming, PublicLimitState},

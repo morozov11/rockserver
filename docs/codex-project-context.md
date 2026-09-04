@@ -272,6 +272,7 @@ changed, verification performed, known limitations, and the next task.
 ## Reference documents
 
 - `C:\repos\rockserver\AGENTS.md`
+- `C:\repos\rockserver\src\ARCHITECTURE.md` — compact source map for cross-module navigation.
 - `C:\repos\rockserver\docs\status.md`
 - `C:\repos\rockserver\docs\tasks.md`
 - `C:\repos\rockserver\docs\architecture.md`
