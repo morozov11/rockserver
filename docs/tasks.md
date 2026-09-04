@@ -1934,3 +1934,26 @@
   `directory_resync_required` close/reload policy. DC-007 replacement closes the prior socket and
   its subscription, preventing duplicate deliveries.
 - Status: **complete.** DC-011 intents/presentation and DC-015 client UI remain out of scope.
+
+## DC-011 — 2026-09-03 — typed intent resolution and presentation builder
+
+- Goal: add a deterministic, non-executing device-control intent layer without introducing a
+  voice/text endpoint, LLM parser, provider/tool dispatch, persistent target preference, client
+  work, or a second command router.
+- Result: added versioned strict `UserIntent` vocabulary and separate typed resolution context,
+  plan, clarification, confirmation and error outcomes. Resolution consumes only a server-derived
+  actor and account-owned directory projection; it verifies owner, scope, online target, role,
+  capability, manifest entity/surface and readable state before creating a DC-009-compatible
+  command plan. Selection is explicit IDs, request-local current target/surface, supplied canonical
+  area mapping, then exactly one candidate. No name guessing, wildcard area, broadcast or offline
+  fallback exists. `show_sensors` makes an explicit `sensor_grid`; stale remains labelled stale,
+  unavailable/missing becomes explicit `null`, and no value is fabricated as zero. `query_sensor`
+  requires one readable entity. Actuator proposals require explicit target and confirmation and
+  cannot dispatch; lock/climate-like or non-allowlisted entities are denied. Added typed volume/mute
+  command support already described by the v1 OpenAPI command union.
+- Scope: no endpoint/OpenAPI operation, CommandInterpreter/LLM change, DC-009 execution change,
+  persistent area/home storage, provider adapter, device firmware, RockCast or Rockmobile code.
+- Checks: focused resolver tests, formatting, strict Clippy, full test suite, OpenAPI fixture tests
+  and `git diff --check` are recorded after final verification. Ignored PostgreSQL tests remain
+  skipped unless a safe disposable `TEST_DATABASE_URL` is supplied.
+- Status: **complete.** DC-020 owns end-to-end display dispatch and DC-025 owns parser/LLM wiring.

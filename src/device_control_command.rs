@@ -400,6 +400,15 @@ fn validate_target(command: &DeviceCommand, manifest: &DeviceManifest) -> Result
             DeviceRole::Player,
             |capability| matches!(capability, DeviceCapability::Playback { actions } if actions.contains(action)),
         ),
+        CommandBody::Volume { command } => {
+            require_role_capability(manifest, DeviceRole::Player, |capability| {
+                matches!(capability, DeviceCapability::Volume { mute, .. } if match command {
+                    crate::device_control::VolumeCommand::SetMute { .. } => *mute,
+                    crate::device_control::VolumeCommand::SetLevel { .. }
+                    | crate::device_control::VolumeCommand::Change { .. } => true,
+                })
+            })
+        }
         CommandBody::Display { presentation } => {
             let Some(surface_id) = &command.target.surface_id else {
                 return Err(CommandError {

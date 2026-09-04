@@ -805,6 +805,10 @@ pub enum CommandBody {
     Playback {
         action: String,
     },
+    /// A bounded media-volume operation supported by the v1 command vocabulary.
+    Volume {
+        command: VolumeCommand,
+    },
     /// An allowlisted actuator action for one explicit entity target.
     Actuator {
         action: ActuatorAction,
@@ -814,6 +818,16 @@ pub enum CommandBody {
         name: String,
         payload: Map<String, Value>,
     },
+}
+/// Typed volume and mute operations accepted by the v1 command vocabulary.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum VolumeCommand {
+    /// Sets the absolute output level between zero and one hundred.
+    SetLevel { level: u8 },
+    /// Adjusts the output level by a non-zero bounded delta.
+    Change { delta: i8 },
+    /// Enables or disables mute explicitly.
+    SetMute { muted: bool },
 }
 /// A command with explicit target and optional bounded deadline.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -846,6 +860,13 @@ impl DeviceCommand {
             {
                 Ok(())
             }
+            CommandBody::Volume { command } => match command {
+                VolumeCommand::SetLevel { .. } | VolumeCommand::SetMute { .. } => Ok(()),
+                VolumeCommand::Change { delta } if *delta != 0 => Ok(()),
+                VolumeCommand::Change { .. } => {
+                    Err(ValidationError::InvalidPayload { field: "command" })
+                }
+            },
             CommandBody::Actuator { action, value } => match (action, value) {
                 (ActuatorAction::SetValue, Some(value)) if value.is_finite() => Ok(()),
                 (ActuatorAction::SetValue, _) | (_, Some(_)) => {
@@ -872,6 +893,17 @@ impl Serialize for CommandBody {
                 serde_json::json!({"name":"station.play_station","station_id":station_id})
             }
             Self::Playback { action } => serde_json::json!({"name":format!("playback.{action}")}),
+            Self::Volume { command } => match command {
+                VolumeCommand::SetLevel { level } => {
+                    serde_json::json!({"name":"volume.set_volume","level":level})
+                }
+                VolumeCommand::Change { delta } => {
+                    serde_json::json!({"name":"volume.change_volume","delta":delta})
+                }
+                VolumeCommand::SetMute { muted } => {
+                    serde_json::json!({"name":"volume.set_mute","muted":muted})
+                }
+            },
             Self::Actuator { action, value } => match action {
                 ActuatorAction::TurnOn | ActuatorAction::TurnOff => {
                     serde_json::json!({"name": action})
@@ -943,6 +975,21 @@ impl<'de> Deserialize<'de> for CommandBody {
             },
             n if n.starts_with("playback.") => Self::Playback {
                 action: n.trim_start_matches("playback.").into(),
+            },
+            "volume.set_volume" => Self::Volume {
+                command: VolumeCommand::SetLevel {
+                    level: serde_json::from_value(get("level")?).map_err(D::Error::custom)?,
+                },
+            },
+            "volume.change_volume" => Self::Volume {
+                command: VolumeCommand::Change {
+                    delta: serde_json::from_value(get("delta")?).map_err(D::Error::custom)?,
+                },
+            },
+            "volume.set_mute" => Self::Volume {
+                command: VolumeCommand::SetMute {
+                    muted: serde_json::from_value(get("muted")?).map_err(D::Error::custom)?,
+                },
             },
             "entity.turn_on" => Self::Actuator {
                 action: ActuatorAction::TurnOn,

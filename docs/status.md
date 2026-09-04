@@ -2,6 +2,34 @@
 
 Last updated: 2026-09-03
 
+## DC-011 — typed intents and presentation builder (complete, 2026-09-03)
+
+`device_control_intent` is a transport-free, versioned typed boundary for future text/voice
+parsers. It accepts only bounded `UserIntent` variants (`play_radio`, sensor reads, media/volume,
+now-playing, and narrow actuator proposals); it contains no raw command, provider call, SQL, URL,
+or direct execution path. A caller supplies a server-derived actor, account-owned DC-010 directory
+projection, server command ID/time, and request-local context. The resolver first validates the
+intent, owner namespace and explicit scopes; it then checks live presence, role, capability,
+manifest allowlist, target/entity/surface existence and state freshness before returning a typed
+plan, clarification, confirmation or error. Roles/capabilities never substitute for scopes.
+
+Resolution ordering is explicit IDs, then request-local current target/surface, then one compatible
+candidate. No persistent preference was added. Directory v1 has no canonical home/area model, so
+an area is rejected unless a caller supplied one explicit canonical mapping for that one request;
+names and IDs are never guessed. There is no broadcast or offline fallback. `show_sensors` builds
+only canonical `sensor_grid` cards and a specific display command. Fresh values remain current;
+stale values preserve their value and `stale` freshness, while unavailable and missing values are
+rendered as explicit `null` with unavailable/unknown state, never zero. `query_sensor` has no
+display command and returns a bounded text presentation only for exactly one readable state.
+`now_playing` requires known active observed playback and shows the truthful station ID because v1
+state has no catalog-title field. Allowed actuator requests require explicit device/entity,
+`actuator.control`, live allowlisted actuator capability and return confirmation only; lock/climate-
+like or non-allowlisted entities are denied. Commands produced for media/display use the existing
+DC-009-compatible typed model, including its declared volume/mute commands, but DC-009 remains the
+sole dispatch/lifecycle router. No voice endpoint, LLM integration, persistent target preference,
+Home Assistant adapter, client work, or public endpoint was added; CommandInterpreter integration
+remains DC-025 and sensor-display delivery remains DC-020.
+
 ## DC-010 — controller directory (complete, 2026-09-03)
 
 `GET /api/v1/device-control/directory` is now a runtime native-control projection, not a

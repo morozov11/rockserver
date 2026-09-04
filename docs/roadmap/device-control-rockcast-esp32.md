@@ -285,7 +285,7 @@ Home Assistant подключается через отдельный provider a
 - [x] DC-002: зафиксировать canonical planned `GET /api/v1/devices/connect` и `GET /api/v1/device-control/directory`; не менять voice WebSocket и inventory `GET /api/v1/devices`.
 - [x] Описать в OpenAPI 3.1 schemas для devices, entities, surfaces, capabilities, state, telemetry, directory events и commands; зафиксировать protocol v1, errors, exact limits, revisions/resync, compatibility и deprecation rules.
 - [x] Утвердить initial namespaced command set и exact semantics `station.play_station`/`station.play_stream`: catalog station резолвит RockServer, direct stream требует capability и строгой URI/redirect validation.
-- [ ] Зафиксировать typed intent vocabulary (`play_radio`, `show_sensors`, `query_sensor`, actuator intents) и правило «LLM интерпретирует, обычный код разрешает и исполняет».
+- [x] Зафиксировать typed intent vocabulary (`play_radio`, `show_sensors`, `query_sensor`, actuator intents) и правило «LLM интерпретирует, обычный код разрешает и исполняет».
 - [x] DC-003: добавить canonical protocol fixtures и negative examples для unknown capability/command, stale revision, invalid sensor unit/value, duplicate command, missing surface и offline target; raw JSON валидируется против OpenAPI component schemas.
 
 **Готово, когда:** schema и примеры reviewable без кода; Rockmobile и RockCast могут начать независимую реализацию против fixtures.
@@ -297,7 +297,7 @@ Home Assistant подключается через отдельный provider a
 - [ ] Интегрировать control WebSocket с существующей native access-session validation и расширить существующий device directory новыми projections online/capabilities/state; текущие list/revoke semantics сохранить.
 - [ ] Реализовать WebSocket registration, entity/surface manifest, heartbeat/TTL, per-user connection registry, state/telemetry fan-out и graceful disconnect handling.
 - [ ] Реализовать command router: capability and authorization check, command correlation, idempotency, timeout and terminal result handling.
-- [ ] Реализовать deterministic intent resolver и presentation builder независимо от LLM/provider.
+- [x] Реализовать deterministic intent resolver и presentation builder независимо от LLM/provider.
 - [ ] Добавить metrics/logging and readiness policy без раскрытия secrets.
 
 **Тесты:** domain unit tests; Axum/real WebSocket tests с fake players; migration/repository tests; OpenAPI contract tests; cross-user isolation; TTL/reconnect; duplicate and out-of-order events; payload/frame/rate limits.

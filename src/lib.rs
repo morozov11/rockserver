@@ -16,6 +16,8 @@ pub mod device_control;
 pub mod device_control_auth;
 /// Bounded authorization, idempotency and lifecycle routing for live device commands.
 pub mod device_control_command;
+/// Deterministic typed intent resolution and presentation planning for device control.
+pub mod device_control_intent;
 /// Process-local live connection registry and owner-scoped presence transitions.
 pub mod device_control_presence;
 /// Bounded owner-scoped latest-state cache and internal event fan-out.

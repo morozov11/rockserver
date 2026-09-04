@@ -203,7 +203,7 @@ deadline/disconnect are its deterministic cancellation policy. DC-010 directory 
 
 **Приёмка:** controller получает согласованный initial snapshot и последующие deltas; reconnect не создаёт дубликаты.
 
-### DC-011 — реализовать typed intents и presentation builder
+### DC-011 — реализовать typed intents и presentation builder — выполнено (2026-09-03)
 
 **Репозиторий:** RockServer.  
 **Зависимости:** DC-004, DC-008, DC-009.
@@ -213,7 +213,15 @@ deadline/disconnect are its deterministic cancellation policy. DC-010 directory 
 - Реализовать `Presentation` views `text`, `now_playing`, `sensor_grid`.
 - LLM разрешить только построение typed intent; routing, permissions, freshness и command payload строятся обычным кодом.
 
-**Приёмка:** «покажи датчики на кухне» создаёт `sensor_grid`, а не radio results; ambiguous target и stale values дают определённый clarification/error result.
+**Приёмка (выполнено):** `src/device_control_intent.rs` вводит versioned schema-valid
+`UserIntent`, server-derived actor/directory/context input и typed plan/clarification/
+confirmation/error result. Resolver использует только owner-scoped directory projection,
+явные scopes, presence, roles, capabilities, manifests и state; он выбирает explicit ID,
+request-local current target, supplied canonical area mapping или единственный candidate и
+никогда не broadcast/fallback. `show_sensors` строит bounded `sensor_grid`; fresh values
+показываются как current, stale сохраняют value с `stale`, unavailable/missing становятся
+явными `null`/unavailable or unknown. Actuator proposal требует explicit entity target и
+возвращает confirmation без command dispatch. LLM/voice integration остаются DC-025.
 
 ## Milestone C — RockCast и Rockmobile
 
