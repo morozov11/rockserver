@@ -1,0 +1,27 @@
+---
+description: Keep RockServer source modular and avoid growing god files
+alwaysApply: true
+---
+
+# RockServer module boundaries
+
+- Keep every source file focused on one cohesive responsibility. Do not grow a mixed
+  transport, protocol, domain, persistence, lifecycle, and test implementation into one
+  large file.
+- When a change adds an independent responsibility, extract it immediately into a clearly
+  named child module. Preserve existing public module paths through thin facades and
+  compatibility re-exports where callers rely on them.
+- Separate protocol DTOs, HTTP/WebSocket transport, domain models and validation,
+  persistence, lifecycle/orchestration, provider adapters, and tests when they are
+  independently readable and testable. Colocate tests with their domain in a `tests.rs`
+  child module when a production file becomes hard to scan.
+- Prefer small structs with explicit ownership. Introduce a trait only at a real boundary
+  with multiple implementations or a necessary fake; do not create a trait, factory, or
+  generic abstraction for one implementation.
+- Before adding substantial code to an already large file, inspect callers and nearby
+  modules, then choose the smallest coherent extraction. Preserve public API, OpenAPI,
+  serialization, error, auth, and persistence behavior during structural refactors.
+- Add a short `//!` comment to a nontrivial module: responsibility, key invariant, and
+  intentional exclusions. Do not duplicate implementation in comments.
+- Keep `src/ARCHITECTURE.md` accurate when module boundaries or reading order materially
+  change.

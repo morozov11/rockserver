@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::{
     device_control::{
         CommandAccepted, CommandResult, DeviceCommand, DeviceControlScope, DeviceId,
-        DeviceManifest, DeviceStateSnapshot, RevisionOrder, revision_order,
+        DeviceManifest, DeviceRole, DeviceStateSnapshot, RevisionOrder, revision_order,
     },
     device_control_auth::{DeviceControlAuthenticationError, DeviceControlPrincipal},
     device_control_command::CommandRouter,
@@ -283,7 +283,9 @@ async fn run(mut socket: WebSocket, principal: DeviceControlPrincipal, runtime: 
     let mut last_seen = tokio::time::Instant::now();
     let mut shutdown = control_shutdown_subscriber();
     let mut manifest = register.payload.manifest;
-    let mut needs_full_state = true;
+    // A controller-only device publishes no runtime facts. A player/controller hybrid still must
+    // establish a full state before heartbeats, exactly like every other fact-publishing device.
+    let mut needs_full_state = requires_full_state(&manifest.roles);
     loop {
         tokio::select! {
             _ = shutdown.recv() => { let _ = socket.send(Message::Close(Some(CloseFrame { code: 1001, reason: "server_shutdown".into() }))).await; break; }
@@ -434,6 +436,10 @@ fn granted_scopes(manifest: &DeviceManifest) -> Vec<DeviceControlScope> {
     super::directory::granted_scopes(manifest)
 }
 
+fn requires_full_state(roles: &[DeviceRole]) -> bool {
+    roles.iter().any(|role| *role != DeviceRole::Controller)
+}
+
 fn scope_name(scope: &DeviceControlScope) -> &'static str {
     match scope {
         DeviceControlScope::DirectoryRead => "device.directory.read",
@@ -491,6 +497,16 @@ mod tests {
     };
 
     static TRANSPORT_TEST_GATE: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+    #[test]
+    fn controller_only_connections_do_not_require_a_runtime_snapshot() {
+        assert!(!requires_full_state(&[DeviceRole::Controller]));
+        assert!(requires_full_state(&[DeviceRole::Player]));
+        assert!(requires_full_state(&[
+            DeviceRole::Controller,
+            DeviceRole::Player
+        ]));
+    }
 
     #[derive(Default)]
     struct FakeResolver {

@@ -1,5 +1,18 @@
 # Task log
 
+## DC-016 E2E controller-state gate — 2026-09-07
+
+- Goal: allow a controller-only RockMobile control connection to stay online without inventing a
+  player runtime state.
+- Scope: narrow WebSocket lifecycle admission change in `http/control.rs`; player and hybrid
+  devices still require their full initial state before heartbeat.
+- Result: a manifest whose sole role is `controller` no longer enters the full-state gate. Any
+  role that publishes facts (`player` included) retains the existing snapshot/resync invariant.
+  Identity, pairing, scopes, directory, command routing and wire schemas are unchanged.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and
+  `cargo test` passed (142 library tests; PostgreSQL and live-provider tests remain opt-in).
+- Status: local implementation complete; no deployment or hardware E2E was performed.
+
 ## Graphify agent policy cleanup — 2026-09-02
 
 - Goal: remove Graphify from agent instructions after deleting the global skill.
