@@ -568,6 +568,7 @@ mod tests {
         resolver: Arc<dyn NativeSessionResolver>,
         registry: ConnectionRegistry,
         ttl: Duration,
+        hub: crate::device_control_state::StateHub,
     ) -> Router {
         build_router(AppState {
             search_service: SearchService::new(Arc::new(
@@ -583,7 +584,7 @@ mod tests {
             public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
             control_registry: registry,
             control_commands: Default::default(),
-            control_state_hub: Default::default(),
+            control_state_hub: hub,
             control_store: None,
             control_session_resolver: Some(resolver),
             control_timing: ControlTiming {
@@ -660,6 +661,18 @@ mod tests {
     }
 
     async fn registered(address: SocketAddr, token: &str) -> (TcpStream, Value) {
+        registered_player(address, token, 1).await
+    }
+
+    /// Registers a fact-publishing player and submits a full snapshot at `revision`.
+    ///
+    /// The snapshot is sent before any heartbeat so the reconnect handshake exercises
+    /// the full-state admission gate rather than the controller-only exemption.
+    async fn registered_player(
+        address: SocketAddr,
+        token: &str,
+        revision: u64,
+    ) -> (TcpStream, Value) {
         let (mut stream, response) = upgrade(address, token).await;
         assert!(response.starts_with("HTTP/1.1 101"));
         write_frame(
@@ -679,7 +692,7 @@ mod tests {
             1,
             envelope(
                 "device.register",
-                json!({"device_type":"rockcast","app_version":"test","manifest":{"manifest_revision":1,"roles":[],"capabilities":{"revision":1,"items":[]},"entities":[],"surfaces":[]}}),
+                json!({"device_type":"rockcast","app_version":"test","manifest":{"manifest_revision":1,"roles":["player"],"capabilities":{"revision":1,"items":[]},"entities":[],"surfaces":[]}}),
             )
             .as_bytes(),
         )
@@ -689,8 +702,9 @@ mod tests {
         write_frame(
             &mut stream,
             1,
-            envelope("device.state_full", json!({"snapshot":{"state_revision":1,"observed_at":"2026-09-02T12:00:00Z","state":{"playback":{"status":"idle","station_id":null}}}})).as_bytes(),
-        ).await;
+            envelope("device.state_full", json!({"snapshot":{"state_revision":revision,"observed_at":"2026-09-02T12:00:00Z","state":{"playback":{"status":"idle","station_id":null}}}})).as_bytes(),
+        )
+        .await;
         tokio::time::sleep(Duration::from_millis(10)).await;
         assert_eq!(registered["type"], "device.registered");
         (stream, registered)
@@ -719,7 +733,13 @@ mod tests {
         };
         let registry = ConnectionRegistry::default();
         let resolver = resolver("native", principal);
-        let (address, task) = server(app(resolver, registry.clone(), Duration::from_secs(1))).await;
+        let (address, task) = server(app(
+            resolver,
+            registry.clone(),
+            Duration::from_secs(1),
+            Default::default(),
+        ))
+        .await;
         let (_, denied) = upgrade(address, "invalid").await;
         assert!(denied.starts_with("HTTP/1.1 401"));
         let (stream, response) = registered(address, "native").await;
@@ -743,6 +763,7 @@ mod tests {
             unavailable,
             ConnectionRegistry::default(),
             Duration::from_secs(1),
+            Default::default(),
         ))
         .await;
         let (_, unavailable) = upgrade(address, "native").await;
@@ -763,8 +784,13 @@ mod tests {
         };
         let registry = ConnectionRegistry::default();
         let resolver = resolver("native", principal);
-        let (address, task) =
-            server(app(resolver, registry.clone(), Duration::from_millis(70))).await;
+        let (address, task) = server(app(
+            resolver,
+            registry.clone(),
+            Duration::from_millis(70),
+            Default::default(),
+        ))
+        .await;
         let (mut old, old_registered) = registered(address, "native").await;
         let old_id = old_registered["payload"]["connection_id"]
             .as_str()
@@ -823,6 +849,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn forward_full_state_revision_on_reconnect_keeps_the_player_online() {
+        let _gate = TRANSPORT_TEST_GATE
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await;
+        let principal = ActiveSession {
+            session_id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            device_id: Uuid::new_v4(),
+        };
+        let registry = ConnectionRegistry::default();
+        let hub = StateHub::default();
+        let resolver = resolver("native", principal);
+        let (address, task) = server(app(
+            resolver,
+            registry.clone(),
+            Duration::from_secs(5),
+            hub.clone(),
+        ))
+        .await;
+        let (mut first, _) = registered_player(address, "native", 1).await;
+        write_frame(
+            &mut first,
+            1,
+            envelope("device.heartbeat", json!({"sequence":1})).as_bytes(),
+        )
+        .await;
+        let (_, ack) = read_frame(&mut first).await;
+        assert_eq!(
+            serde_json::from_slice::<Value>(&ack).unwrap()["type"],
+            "device.heartbeat_ack"
+        );
+        drop(first);
+        wait_until(|| registry.snapshot_for(principal.user_id).is_empty()).await;
+        // While disconnected the player kept publishing facts, so its monotonic counter
+        // legitimately runs ahead of the server projection. Replaying the same +1-bound
+        // successor would be impossible; the full snapshot must overwrite instead.
+        let (mut second, second_registered) = registered_player(address, "native", 19).await;
+        assert_eq!(
+            hub.device_state(principal.user_id, DeviceId(principal.device_id))
+                .expect("forward snapshot overwrites the projection")
+                .state_revision,
+            19
+        );
+        write_frame(
+            &mut second,
+            1,
+            envelope("device.heartbeat", json!({"sequence":0})).as_bytes(),
+        )
+        .await;
+        let (opcode, ack) = read_frame(&mut second).await;
+        assert_eq!(opcode, 1);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&ack).unwrap()["type"],
+            "device.heartbeat_ack"
+        );
+        assert_eq!(
+            registry.snapshot_for(principal.user_id).len(),
+            1,
+            "the forward-revision connection stays the single active generation"
+        );
+        let _ = second_registered;
+        drop(second);
+        task.abort();
+    }
+
+    #[tokio::test]
     async fn wrong_first_frame_binary_and_registration_timeout_close_without_presence() {
         let _gate = TRANSPORT_TEST_GATE
             .get_or_init(|| tokio::sync::Mutex::new(()))
@@ -835,7 +928,13 @@ mod tests {
         };
         let registry = ConnectionRegistry::default();
         let resolver = resolver("native", principal);
-        let (address, task) = server(app(resolver, registry.clone(), Duration::from_secs(1))).await;
+        let (address, task) = server(app(
+            resolver,
+            registry.clone(),
+            Duration::from_secs(1),
+            Default::default(),
+        ))
+        .await;
         let (mut wrong, _) = upgrade(address, "native").await;
         write_frame(
             &mut wrong,
@@ -900,6 +999,7 @@ mod tests {
                 resolver("native", principal),
                 registry.clone(),
                 Duration::from_secs(1),
+                Default::default(),
             ),
             async move {
                 let _ = shutdown_rx.await;
@@ -917,7 +1017,7 @@ mod tests {
     }
 
     #[test]
-    fn full_state_replay_is_idempotent_and_gap_requires_resync() {
+    fn full_state_replay_is_idempotent_and_forward_revision_resyncs() {
         let hub = StateHub::default();
         let user = Uuid::new_v4();
         let device = Uuid::new_v4();
@@ -942,10 +1042,45 @@ mod tests {
             accept_snapshot(&hub, user, device, snapshot.clone()),
             RevisionOrder::Replay
         );
-        let gap = DeviceStateSnapshot {
+        // A device may publish revisions while disconnected; the reconnecting full
+        // snapshot runs ahead of the projection and overwrites it as a resync.
+        let forward = DeviceStateSnapshot {
             state_revision: 3,
+            ..snapshot.clone()
+        };
+        assert_eq!(
+            accept_snapshot(&hub, user, device, forward),
+            RevisionOrder::Next
+        );
+        assert_eq!(
+            hub.device_state(user, crate::device_control::DeviceId(device))
+                .expect("forward resync is published")
+                .state_revision,
+            3
+        );
+        let stale = DeviceStateSnapshot {
+            state_revision: 2,
+            ..snapshot.clone()
+        };
+        assert_eq!(
+            accept_snapshot(&hub, user, device, stale),
+            RevisionOrder::Stale
+        );
+        let conflict = DeviceStateSnapshot {
+            state_revision: 3,
+            state: DeviceRuntimeState {
+                playback: Some(crate::device_control::PlaybackState {
+                    status: "playing".into(),
+                    station_id: None,
+                }),
+                volume: None,
+                display: None,
+            },
             ..snapshot
         };
-        assert_eq!(accept_snapshot(&hub, user, device, gap), RevisionOrder::Gap);
+        assert_eq!(
+            accept_snapshot(&hub, user, device, conflict),
+            RevisionOrder::Conflict
+        );
     }
 }

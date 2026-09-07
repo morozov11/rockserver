@@ -2,6 +2,21 @@
 
 Last updated: 2026-09-07
 
+## DC-016 forward full-state revision resync (2026-09-07)
+
+Staging evidence showed RockCast trapped in a non-converging reconnect loop (one
+`devices/connect` upgrade every ~51 s): the player's monotonic state counter had run ahead
+of the server projection (client 19, stored 4) because facts may be published while the
+socket is down, and both admission layers classified the reconnecting full snapshot as a
+revision gap. A complete snapshot is the protocol's resync primitive, so a forward revision
+now overwrites the stored projection in the in-memory state hub and in the PostgreSQL
+latest-snapshot upsert instead of requesting another resync the client cannot satisfy.
+Stale/replay/conflict handling, strictly ordered deltas, entity telemetry, manifests,
+authentication, scopes and commands are unchanged; `api/openapi.yaml` documents the rule.
+Verification passed: `cargo fmt --check`, strict all-target/all-feature Clippy, `cargo test`
+(146 library tests, 22 suites; PostgreSQL integration remains opt-in). Staging deployment
+and the physical RockCast/RockMobile retest are recorded below after they complete.
+
 ## DC-016 stale full-state reconnect gate (2026-09-07)
 
 A player reconnect may submit a syntactically valid but stale full snapshot after an earlier

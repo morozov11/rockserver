@@ -1,5 +1,28 @@
 # Task log
 
+## DC-016 — forward full-state revision reconnect resync (2026-09-07)
+
+- Goal: stop the permanent RockCast reconnect flap observed on staging (one
+  `devices/connect` upgrade every ~51 s, device stuck offline in RockMobile).
+- Root cause: the player may publish state revisions while its socket is down, so its
+  monotonic counter legitimately runs ahead of the server projection (staging showed
+  client revision 19 against stored revision 4). Both the in-memory hub
+  (`accept_snapshot`) and PostgreSQL `store_device_state` classified such a full snapshot
+  as `Gap`/`Resync`, the client resent the identical snapshot, and the first heartbeat
+  closed the connection as `full_state_required`; capped reconnect backoff turned this
+  into a non-converging 20 s + 30 s loop.
+- Scope: a complete snapshot is the protocol's resync primitive, so a forward revision now
+  overwrites the stored projection in both the state hub and the PostgreSQL latest-snapshot
+  upsert. Stale/replay/conflict classification, strictly ordered deltas
+  (`base_revision`), entities, manifests, authentication, scopes, commands and wire
+  schemas are unchanged; `api/openapi.yaml` now documents the forward-overwrite rule.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`
+  and `cargo test` passed (146 library tests, 22 suites; PostgreSQL integration remains
+  opt-in). New transport test reproduces the forward-revision reconnect and asserts the
+  heartbeat stays acked and the projection is overwritten.
+- Status: implemented; staging deployment and physical RockCast/RockMobile retest follow
+  in this task.
+
 ## DC-016 — stale full-state reconnect gate (2026-09-07)
 
 - Fixed a player reconnect loop: a stale full snapshot retains the last accepted server state but

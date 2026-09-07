@@ -1556,7 +1556,11 @@ components:
         observed_at: { type: string, format: date-time }
         received_at: { type: string, format: date-time, readOnly: true }
         state: { $ref: "#/components/schemas/DeviceRuntimeState" }
-      description: Full state after registration/reconnect. Equal revision is idempotent only with identical content; lower is stale.
+      description: >-
+        Full state after registration/reconnect. Equal revision is idempotent only with
+        identical content; lower is stale; higher overwrites the stored projection as a
+        reconnect resync, because the device may publish revisions while disconnected.
+        Deltas remain strictly ordered and never carry these semantics.
     DeviceStateDelta:
       type: object
       additionalProperties: false

@@ -39,7 +39,13 @@ pub(super) fn merge_state(
     }
 }
 
-/// Publishes a full snapshot only when its revision is a legal successor.
+/// Publishes a full snapshot when its revision is a legal successor or a forward resync.
+///
+/// A complete snapshot is the protocol's resync primitive: the device may publish new
+/// revisions while its socket is down, so with no base requirement a gap can only be a
+/// forward revision that legitimately overwrites the older projection. Rejecting it would
+/// demand an impossible `accepted + 1` successor and drop the device forever. Deltas keep
+/// the strictly ordered `base_revision` semantics and never take this path.
 pub(super) fn accept_snapshot(
     hub: &StateHub,
     user_id: Uuid,
@@ -57,10 +63,13 @@ pub(super) fn accept_snapshot(
         ),
         None => RevisionOrder::Next,
     };
-    if result == RevisionOrder::Next {
-        hub.publish_device_state(user_id, device_id, snapshot);
+    match result {
+        RevisionOrder::Next | RevisionOrder::Gap => {
+            hub.publish_device_state(user_id, device_id, snapshot);
+            RevisionOrder::Next
+        }
+        order => order,
     }
-    result
 }
 
 /// Classifies a typed entity observation against the account-scoped latest observation.

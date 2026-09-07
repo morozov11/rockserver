@@ -182,7 +182,7 @@ impl DeviceControlStore for PostgresDeviceControlStore {
         state.received_at = Some(now(&mut tx).await?);
         let payload = json(&state)?;
         if let Some((r,current))=sqlx::query_as::<_,(i64,Value)>("SELECT revision,payload FROM device_control_state_snapshots WHERE device_id=$1 FOR UPDATE").bind(device.0).fetch_optional(&mut *tx).await.map_err(StoreError::database)?
-            && let Some(x)=state_outcome(r as u64,current,state.state_revision,&payload) { return Ok(x); }
+            && let Some(x)=full_state_outcome(r as u64,current,state.state_revision,&payload) { return Ok(x); }
         sqlx::query("INSERT INTO device_control_state_snapshots(device_id,revision,payload,observed_at) VALUES($1,$2,$3,$4::timestamptz) ON CONFLICT(device_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload,observed_at=EXCLUDED.observed_at,received_at=now()").bind(device.0).bind(state.state_revision as i64).bind(payload).bind(state.observed_at.as_str()).execute(&mut *tx).await.map_err(StoreError::database)?;
         tx.commit().await.map_err(StoreError::database)?;
         Ok(StoreOutcome::Accepted)
@@ -371,6 +371,25 @@ fn state_outcome(
         .and_then(|value| value.remove("received_at"));
     outcome(accepted_revision, &accepted, incoming_revision, &incoming)
 }
+
+/// Full-snapshot admission for the latest device-state projection.
+///
+/// `state_outcome` maps a forward revision gap to `Resync`, which is correct for ordered
+/// deltas and entity telemetry. A complete snapshot is itself the resync primitive: the
+/// device may have published revisions while disconnected, so a forward gap must overwrite
+/// the stored projection (falling through to the upsert) instead of requesting another
+/// resync the client can never satisfy with its monotonic counter.
+fn full_state_outcome(
+    accepted_revision: u64,
+    accepted: Value,
+    incoming_revision: u64,
+    incoming: &Value,
+) -> Option<StoreOutcome> {
+    match state_outcome(accepted_revision, accepted, incoming_revision, incoming) {
+        Some(StoreOutcome::Resync) => None,
+        other => other,
+    }
+}
 async fn projection(
     tx: &mut Transaction<'_, Postgres>,
     table: &str,
@@ -440,4 +459,38 @@ fn json<T: Serialize>(value: &T) -> Result<Value, StoreError> {
 }
 fn decode<T: DeserializeOwned>(value: Value) -> Result<T, StoreError> {
     serde_json::from_value(value).map_err(StoreError::database)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn payload(level: i64) -> Value {
+        serde_json::json!({"state_revision": 4, "state": {"volume": {"level": level, "muted": false}}})
+    }
+
+    #[test]
+    fn full_state_forward_revision_overwrites_the_projection() {
+        // A revision ahead of the stored one (facts published while disconnected) must
+        // fall through to the upsert instead of returning Resync and deadlocking the
+        // reconnecting device behind an unreachable `accepted + 1` successor.
+        assert_eq!(full_state_outcome(4, payload(30), 19, &payload(30)), None);
+    }
+
+    #[test]
+    fn full_state_stale_replay_and_conflict_classification_is_unchanged() {
+        assert_eq!(
+            full_state_outcome(4, payload(30), 3, &payload(30)),
+            Some(StoreOutcome::Stale)
+        );
+        assert_eq!(
+            full_state_outcome(4, payload(30), 4, &payload(30)),
+            Some(StoreOutcome::Replay)
+        );
+        assert_eq!(
+            full_state_outcome(4, payload(30), 4, &payload(80)),
+            Some(StoreOutcome::Conflict)
+        );
+        assert_eq!(full_state_outcome(4, payload(30), 5, &payload(30)), None);
+    }
 }
