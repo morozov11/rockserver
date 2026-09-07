@@ -2,6 +2,17 @@
 
 Last updated: 2026-09-07
 
+## DC-016 stale full-state reconnect gate (2026-09-07)
+
+A player reconnect may submit a syntactically valid but stale full snapshot after an earlier
+connection has already advanced the server projection. The snapshot still cannot replace that
+projection, but it now satisfies the reconnect state gate; otherwise the first heartbeat closes a
+healthy player roughly 20 seconds later. Revision gaps and conflicts still request a resync, and
+no authentication, scope, command, directory or wire-schema behavior changed.
+
+Focused control-plane tests passed locally. Staging deployment and physical retest are recorded
+only after they complete.
+
 ## DC-016 E2E controller-state gate (deployed, 2026-09-07)
 
 The control WebSocket now distinguishes a controller-only manifest from a device that publishes

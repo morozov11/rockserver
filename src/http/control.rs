@@ -343,8 +343,10 @@ async fn run(mut socket: WebSocket, principal: DeviceControlPrincipal, runtime: 
                                 };
                                 if !persisted { needs_full_state = true; let _ = send_envelope(&mut socket, "device.resync_requested", ResyncRequestedPayload { kind: "device_state", reason: "revision_gap" }).await; continue; }
                                 match accept_snapshot(&state_hub, principal.user_id, principal.device_id, payload.snapshot) {
-                                    RevisionOrder::Next | RevisionOrder::Replay => needs_full_state = false,
-                                    RevisionOrder::Stale => {},
+                                    // A stale full snapshot never replaces the latest server projection, but it is
+                                    // still a valid reconnect handshake. Blocking its heartbeat would drop an
+                                    // otherwise healthy player every heartbeat interval.
+                                    RevisionOrder::Next | RevisionOrder::Replay | RevisionOrder::Stale => needs_full_state = false,
                                     RevisionOrder::Conflict | RevisionOrder::Gap => { needs_full_state = true; let _ = send_envelope(&mut socket, "device.resync_requested", ResyncRequestedPayload { kind: "device_state", reason: "revision_gap" }).await; }
                                 }
                             }
