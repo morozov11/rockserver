@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-07
 
-## DC-016 E2E controller-state gate (local implementation, 2026-09-07)
+## DC-016 E2E controller-state gate (deployed, 2026-09-07)
 
 The control WebSocket now distinguishes a controller-only manifest from a device that publishes
 runtime facts. A role set containing only `controller` can heartbeat immediately after registration;
@@ -10,7 +10,9 @@ it has no playback/volume/output state to fabricate. Player and hybrid manifests
 existing complete state snapshot and retain the resync gate. This is a lifecycle-only correction:
 no public schema, authentication, pairing, scope, directory, command or persistence contract
 changed. Verification passed with formatter, strict all-target/all-feature Clippy and `cargo test`;
-PostgreSQL/live-provider suites remain opt-in. Deployment and physical E2E remain pending.
+PostgreSQL/live-provider suites remain opt-in. Staging commit `5c4698b` deployed successfully and
+its external HTTPS readiness returned 200. Server WebSocket lifecycle tests, RockCast device-control
+tests and RockMobile unit tests passed. Physical paired-device E2E remains pending.
 
 ## DOCS-001 — source navigation map (complete, 2026-09-04)
 

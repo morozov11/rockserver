@@ -11,7 +11,11 @@
   Identity, pairing, scopes, directory, command routing and wire schemas are unchanged.
 - Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and
   `cargo test` passed (142 library tests; PostgreSQL and live-provider tests remain opt-in).
-- Status: local implementation complete; no deployment or hardware E2E was performed.
+- Deployment: staging commit `5c4698b` succeeded; external HTTPS readiness returned 200.
+- Post-deploy checks: all 6 RockServer WebSocket lifecycle tests, 15 RockCast device-control tests
+  and 101 RockMobile unit tests passed.
+- Status: deployed and automatic cross-component coverage passed. Hardware E2E remains pending
+  because no paired RockMobile/RockCast player was available to dispatch an actual command.
 
 ## Graphify agent policy cleanup — 2026-09-02
 
