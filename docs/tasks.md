@@ -3,11 +3,12 @@
 ## DC-016 — stale full-state reconnect gate (2026-09-07)
 
 - Fixed a player reconnect loop: a stale full snapshot retains the last accepted server state but
-  satisfies the connection's mandatory initial-state gate. Previously the next heartbeat closed
-  that healthy connection as `full_state_required`.
+  satisfies the connection's mandatory initial-state gate, including PostgreSQL's `Stale` store
+  outcome. Previously the next heartbeat closed that healthy connection as
+  `full_state_required`.
 - Revision gaps and conflicts remain resync-only; the patch neither changes the v1 schema nor
   relaxes authentication, ownership, scopes, command admission or persistence writes.
-- Checks: `cargo test control --lib` (30 passed). Deployment and physical retest remain pending.
+- Checks: `cargo test control --lib` (31 passed). Deployment and physical retest remain pending.
 
 ## DC-016 E2E controller-state gate — 2026-09-07
 

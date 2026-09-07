@@ -6,9 +6,10 @@ Last updated: 2026-09-07
 
 A player reconnect may submit a syntactically valid but stale full snapshot after an earlier
 connection has already advanced the server projection. The snapshot still cannot replace that
-projection, but it now satisfies the reconnect state gate; otherwise the first heartbeat closes a
-healthy player roughly 20 seconds later. Revision gaps and conflicts still request a resync, and
-no authentication, scope, command, directory or wire-schema behavior changed.
+projection, but it now satisfies the reconnect state gate; both the in-memory and PostgreSQL
+`Stale` outcomes are valid acknowledgements. Otherwise the first heartbeat closes a healthy
+player roughly 20 seconds later. Revision gaps and conflicts still request a resync, and no
+authentication, scope, command, directory or wire-schema behavior changed.
 
 Focused control-plane tests passed locally. Staging deployment and physical retest are recorded
 only after they complete.

@@ -338,7 +338,7 @@ async fn run(mut socket: WebSocket, principal: DeviceControlPrincipal, runtime: 
                         "device.state_full" => match serde_json::from_value::<FullStatePayload>(envelope.payload) {
                             Ok(payload) if valid_snapshot(&payload.snapshot) => {
                                 let persisted = match &store {
-                                    Some(store) => matches!(store.store_device_state(principal.user_id, DeviceId(principal.device_id), payload.snapshot.clone()).await, Ok(crate::device_control::StoreOutcome::Accepted | crate::device_control::StoreOutcome::Replay)),
+                                    Some(store) => accepted_full_snapshot(store.store_device_state(principal.user_id, DeviceId(principal.device_id), payload.snapshot.clone()).await),
                                     None => true,
                                 };
                                 if !persisted { needs_full_state = true; let _ = send_envelope(&mut socket, "device.resync_requested", ResyncRequestedPayload { kind: "device_state", reason: "revision_gap" }).await; continue; }
@@ -469,6 +469,19 @@ async fn send_command_error(socket: &mut WebSocket, code: &'static str) -> Resul
     .await
 }
 
+/// A stale full snapshot never mutates persistence, but it proves the reconnecting player still
+/// has a valid base state and may continue sending heartbeats.
+fn accepted_full_snapshot(
+    outcome: Result<crate::device_control::StoreOutcome, crate::device_control::StoreError>,
+) -> bool {
+    matches!(
+        outcome,
+        Ok(crate::device_control::StoreOutcome::Accepted
+            | crate::device_control::StoreOutcome::Replay
+            | crate::device_control::StoreOutcome::Stale)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -508,6 +521,13 @@ mod tests {
             DeviceRole::Controller,
             DeviceRole::Player
         ]));
+    }
+
+    #[test]
+    fn stale_persisted_full_snapshot_is_a_valid_reconnect_handshake() {
+        assert!(accepted_full_snapshot(Ok(
+            crate::device_control::StoreOutcome::Stale
+        )));
     }
 
     #[derive(Default)]
