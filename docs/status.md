@@ -1,6 +1,63 @@
 # Project status
 
-Last updated: 2026-09-07
+Last updated: 2026-09-08
+
+## DC-018 GUI stack confirmed: LVGL v9 via esp_lvgl_port (2026-09-08)
+
+The owner confirmed the DC-018 display-stack decision: LVGL v9 through the C `esp_lvgl_port`
+component. MIT licensing, ESP32-P4 PPA hardware acceleration, built-in kinetic lists/scrolling
+and ESP-IDF 6.1 Component Registry availability outweigh Slint's Rust-first developer
+experience; Slint remains a documented fallback only if the cost of the owned thin binding
+layer exceeds the paid embedded license. Rust owns protocol, state and presentation mapping;
+the binding layer is owned firmware code, with the immature third-party v9 binding crates used
+as references only. embedded-graphics stays limited to the DC-017 provisioning screen. The
+decision is recorded in the roadmap task list (DC-018), the architecture roadmap Phase 5, and
+the rock-esp32 `docs/rust-direction.md`. Documentation-only change; no runtime, OpenAPI,
+migration or client behavior changed.
+
+## External delegation via Antigravity CLI and first GUI-stack comparison (2026-09-08)
+
+`docs/codex-project-context.md` now records a standing convention for delegating bounded
+subtasks to Google Antigravity through the local headless CLI (`agy`, `%LOCALAPPDATA%\agy\bin`),
+including allowed/forbidden task classes, secret-exclusion rules, model selection per call,
+and the requirement that every load-bearing fact from an external answer is re-verified against
+an independent source before any decision uses it.
+
+The first delegated run compared LVGL v9 (esp_lvgl_port + Rust bindings), Slint, and
+embedded-graphics as the DC-018 GUI stack for the JC4880P443C_I_W display, executed on
+Gemini 3.1 Pro with a JSON-schema-bounded response. The external answer ranked Slint 8.5,
+LVGL 7, embedded-graphics 4, and flagged Slint's embedded licensing as the deciding risk.
+Independent verification confirmed and sharpened the three load-bearing claims: Slint's
+royalty-free license excludes embedded devices, so a proprietary ESP32 product needs the paid
+commercial plan (about $72 per developer seat per year) or GPLv3; LVGL v9 Rust bindings exist
+but are new and API-unstable (`oxivgl`, `lightvgl-sys`), while the classic `lvgl` crate tracks
+v8; Slint is officially distributed in the Espressif Component Registry with working ESP32-P4
+demos but renders in software. The synthesized recommendation for DC-018: LVGL v9 through the
+C `esp_lvgl_port` component with the Rust side owning protocol/state and a thin owned binding
+layer, with Slint as the fallback if FFI friction proves costlier than the license; the final
+stack decision stays with the owner as DC-018 requires. No runtime, OpenAPI, migration or
+client behavior changed.
+
+## Roadmap audit — Milestone D realigned with the connected ESP32 hardware (2026-09-08)
+
+The device-control roadmap was audited from Milestone D onward against the live rock-esp32
+checkout (JC4880P443C_I_W: ESP32-P4 v1.3 with no radio, ESP32-C6 Wi-Fi over ESP-Hosted/SDIO,
+4.3-inch display, 16 MB flash; Rust hosted by ESP-IDF 6.1). The task list now matches verified
+state: DC-010 and DC-012–DC-016 are marked complete with pointers to the client-side logs
+(RockMobile → RockServer → RockCast physical command E2E accepted 2026-09-07; the Chromecast
+hardware smoke remains unperformed). DC-017 records the board bring-up preconditions
+(ESP-Hosted/SDIO Wi-Fi, SNTP, one HTTPS request), the minimal pairing screen (short code,
+verification phrase, QR), the WSS transport decision under ESP-IDF 6.1, the RockCast code-reuse
+strategy (transport-agnostic protocol layer and pairing state machine as future shared-crate
+candidates in a separate repository; the egui GUI is not portable), and board-specific
+acceptance (ESP32-C6 reset via GPIO54, SDIO power-cycle recovery, secret-free logs). DC-018 now
+requires an explicit GUI-stack decision (LVGL, Slint or embedded-graphics) and bounds the v1 GUI
+scope to `text`/`now_playing`/`sensor_grid` in a RockCast-like theme. A new product-gated
+Milestone D2 records the deferred decisions: DC-039 interactive on-device station browse and
+DC-040 local audio output; neither blocks Milestones E–G. The architecture roadmap's Phase 5,
+repository-boundary and ordering sections were aligned with this order. This is a Markdown-only
+planning change: no runtime, OpenAPI schema, migration or client behavior changed, so no build
+or test run was needed.
 
 ## DC-016 forward full-state revision resync (2026-09-07)
 

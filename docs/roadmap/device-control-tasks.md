@@ -192,7 +192,7 @@ produce a terminal failure without an offline queue. v1 не содержит ex
 deadline/disconnect are its deterministic cancellation policy. DC-010 directory API и DC-011 intents
 остаются не реализованы.
 
-### DC-010 — реализовать directory/controller API
+### DC-010 — реализовать directory/controller API — выполнено (2026-09-03)
 
 **Репозиторий:** RockServer.  
 **Зависимости:** DC-008, DC-009.
@@ -202,6 +202,11 @@ deadline/disconnect are its deterministic cancellation policy. DC-010 directory 
 - Поддержать фильтры home, area, domain и device class без раскрытия чужих сущностей.
 
 **Приёмка:** controller получает согласованный initial snapshot и последующие deltas; reconnect не создаёт дубликаты.
+
+Выполнено: `GET /api/v1/device-control/directory` отдаёт owner-scoped snapshot с presence,
+capabilities и state freshness, а зарегистрированный controller получает `directory.upsert`
+события; отстающий subscriber закрывается `directory_resync_required` и перезагружает HTTP
+snapshot. Подробности — в логе задач RockServer за 2026-09-03.
 
 ### DC-011 — реализовать typed intents и presentation builder — выполнено (2026-09-03)
 
@@ -225,7 +230,7 @@ request-local current target, supplied canonical area mapping или единс�
 
 ## Milestone C — RockCast и Rockmobile
 
-### DC-012 — подключить RockCast как зарегистрированный player
+### DC-012 — подключить RockCast как зарегистрированный player — выполнено (2026-09-04, локально)
 
 **Репозиторий:** RockCast.  
 **Зависимости:** DC-007, DC-003.
@@ -236,7 +241,10 @@ request-local current target, supplied canonical area mapping или единс�
 
 **Приёмка:** RockCast появляется online, переживает restart/server loss и после reconnect отправляет корректный snapshot.
 
-### DC-013 — связать RockCast playback и volume commands
+Выполнено локально: `DeviceControlClient` на блокирующем tungstenite-транспорте с registration/
+state resync покрыт wire/lifecycle-тестами; лог — в репозитории RockCast за 2026-09-04.
+
+### DC-013 — связать RockCast playback и volume commands — выполнено (2026-09-04, локально)
 
 **Репозиторий:** RockCast.  
 **Зависимости:** DC-012, DC-009.
@@ -247,7 +255,11 @@ request-local current target, supplied canonical area mapping или единс�
 
 **Приёмка:** fake Rockmobile управляет RockCast через RockServer; команда не считается успешной до результата RockCast.
 
-### DC-014 — добавить Chromecast и relay adapters
+Выполнено локально: `play_station`, media и volume/mute команды адаптированы к `PlaybackController`
+с ровно одним terminal result и публикацией фактического state; лог — в репозитории RockCast за
+2026-09-04.
+
+### DC-014 — добавить Chromecast и relay adapters — выполнено (2026-09-06, локально)
 
 **Репозиторий:** RockCast.  
 **Зависимости:** DC-013.
@@ -258,7 +270,11 @@ request-local current target, supplied canonical area mapping или единс�
 
 **Приёмка:** controller видит только поддерживаемые действия; state соответствует реальному output mode; timeout/failure не выглядит как success.
 
-### DC-015 — встроить target selector в существующий Rockmobile account flow
+Выполнено локально: `media.chromecast`/`media.relay` capabilities, opaque receiver-хендлы и
+взаимоисключающий output state покрыты тестами без живого LAN-ресивера; live Chromecast smoke не
+проводился и остаётся отдельной проверкой. Лог — в репозитории RockCast за 2026-09-06.
+
+### DC-015 — встроить target selector в существующий Rockmobile account flow — выполнено (2026-09-06, локально)
 
 **Репозиторий:** Rockmobile.  
 **Зависимости:** DC-006, DC-010.
@@ -269,7 +285,10 @@ request-local current target, supplied canonical area mapping или единс�
 
 **Приёмка:** пользователь может выбрать RockCast; offline/revoked target обрабатывается без зависшего UI.
 
-### DC-016 — реализовать capability-driven controls
+Выполнено локально: revision-safe selector поверх directory REST/WSS с явной персистентностью
+выбора и видимой обработкой недоступных целей; лог — в репозитории RockMobile за 2026-09-06.
+
+### DC-016 — реализовать capability-driven controls — выполнено (2026-09-07, live E2E)
 
 **Репозиторий:** Rockmobile.  
 **Зависимости:** DC-015, DC-013.
@@ -280,27 +299,72 @@ request-local current target, supplied canonical area mapping или единс�
 
 **Приёмка:** Rockmobile управляет RockCast end-to-end; double tap не дублирует действие; unsupported controls отсутствуют.
 
+Выполнено: controls строятся только по свежим capabilities выбранного target, lifecycle
+pending/received/accepted/terminal отображается, дубликаты подавляются. Физический E2E
+RockMobile → RockServer → RockCast подтверждён 2026-09-07 (команда `Stop`, terminal `succeeded`
+менее чем за секунду через deployed staging). Логи — в репозиториях RockMobile и RockCast за
+2026-09-07.
+
 ## Milestone D — ESP32 display и sensors
 
 ### DC-017 — реализовать ESP32 provisioning и transport core
 
-**Репозиторий:** ESP32 firmware.  
-**Зависимости:** DC-003, DC-006, DC-007.
+**Репозиторий:** ESP32 firmware (rock-esp32).  
+**Зависимости:** DC-003, DC-006, DC-007; предусловия bring-up из rock-esp32.
 
-- Реализовать ESP32 UI/provisioning поверх существующих RockServer pairing endpoints, безопасно сохранить выданные `device_id`/device secret, получать access token через `/api/v1/auth/device-session`, затем использовать WSS, bounded messages, heartbeat и reconnect jitter.
-- Задать memory/task/watchdog limits и safe firmware version reporting.
-- Реализовать generic capability/manifest/state/command dispatch core.
+Целевое железо зафиксировано: плата JC4880P443C_I_W (ESP32-P4 v1.3 без радио, Wi-Fi через
+ESP32-C6 по ESP-Hosted/SDIO, 4.3" дисплей, 16 MB flash), ESP-IDF 6.1 и Rust через vendored
+`esp-idf-sys`.
 
-**Приёмка:** power cycle, Wi-Fi loss и server restart не теряют identity; malformed/oversized message не перезапускает устройство.
+- Предусловия bring-up (до любого control-трафика): поднять Wi-Fi через ESP32-C6 (ESP-Hosted по
+  SDIO), синхронизировать время по SNTP и выполнить один HTTPS-запрос; без корректного времени не
+  работают TLS-валидация, `sent_at` и экспирация access-токенов. Перед тестами
+  производительности/надёжности flash включить dedicated Boya flash driver.
+- Реализовать provisioning поверх существующих RockServer pairing endpoints с минимальным
+  экраном pairing на дисплее: short code, verification phrase и QR (матрица через pure-Rust crate
+  `qrcode`, рендер в фреймбуфер — локальная задача). Безопасно сохранить выданные
+  `device_id`/device secret (NVS), получать access token через `/api/v1/auth/device-session`,
+  затем использовать WSS, bounded messages, heartbeat и reconnect jitter.
+- Выбрать WSS-транспорт с учётом ESP-IDF 6.1 и vendored `esp-idf-sys` (`esp_websocket_client`
+  либо собственный слой на Rust TLS) и зафиксировать решение вместе с memory/task/watchdog limits
+  и safe firmware version reporting.
+- Реализовать generic capability/manifest/state/command dispatch core; контрактные тесты прошивки
+  читают канонические `tests/fixtures/device-control/v1/` RockServer без создания копий.
+- Стратегия переиспользования кода RockCast: transport-agnostic часть `device_control/protocol.rs`
+  и pairing state machine RockCast — кандидаты на общий crate после стабилизации протокольного
+  слоя на обеих платформах; до этого ESP32 реализует минимальный сабсет против канонических
+  fixtures. Общий crate живёт в отдельном репозитории (правила rockserver запрещают комбинировать
+  серверный и клиентский код). egui-код RockCast на ESP32 не переносится: переносится только
+  визуальная тема как дизайн-референс.
+
+**Приёмка:** power cycle, Wi-Fi loss и server restart не теряют identity; malformed/oversized
+message не перезапускает устройство; молчание/зависание ESP32-C6 восстанавливается reset-линией
+(GPIO54) без ручного вмешательства; SDIO-соединение переживает power cycle; pairing-секреты и
+токены не появляются в серийных логах.
 
 ### DC-018 — реализовать ESP32 display surface
 
 **Репозиторий:** ESP32 firmware.  
 **Зависимости:** DC-017, DC-011.
 
-- Зарегистрировать `display.main` и поддержать `text`, `now_playing`, `sensor_grid` в пределах hardware profile.
+- GUI-стек выбран и подтверждён владельцем (2026-09-08, сравнение через agy + независимая
+  проверка фактов): **LVGL v9 через C-компонент `esp_lvgl_port`**. Обоснование: лицензия MIT
+  (бесплатно для проприетарного продукта), аппаратное ускорение ESP32-P4 (PPA), кинетические
+  списки/скроллы и theming из коробки, совместимость с ESP-IDF 6.1 через Component Registry.
+  Rust-сторона владеет протоколом, состоянием и маппингом presentation → view; тонкий слой
+  биндингов к LVGL пишется в rock-esp32 самостоятельно, без зависимости от незрелых сторонних
+  v9-биндингов (`oxivgl`, `lightvgl-sys` — только как референс). Slint исключён: royalty-free
+  лицензия не покрывает embedded, проприетарный продукт требует платного плана, рендер
+  программный; остаётся fallback-вариантом, если стоимость собственного FFI-слоя превысит
+  стоимость лицензии. embedded-graphics — только provisioning-экран DC-017, для полноценных
+  view исключён. Минимальный provisioning-экран DC-017 от финального стека не зависит.
+- Зарегистрировать `display.main` и поддержать `text`, `now_playing`, `sensor_grid` в пределах
+  hardware profile. Визуальная тема — RockCast-подобная (палитра, шрифты, композиция now_playing)
+  как дизайн-референс; egui-код RockCast не переносится и не переиспользуется.
 - Рендерить presentation локально; не принимать произвольный HTML/script.
 - Публиковать текущий view и terminal command result.
+- Граница v1-скоупа: интерактивный browse каталога и аудиовыход на самом устройстве не входят в
+  эту задачу — они за явными продуктовыми решениями DC-039/DC-040.
 
 **Приёмка:** golden presentations стабильно рисуются на целевом дисплее; неизвестный view даёт `capability_not_supported`.
 
@@ -325,6 +389,50 @@ request-local current target, supplied canonical area mapping или единс�
 - Отобразить stale/unavailable явно и подтвердить показанный view state.
 
 **Приёмка:** команда «покажи датчики» рисует температуру/влажность, а не список радио; тест покрывает no sensors, stale value и ambiguous area.
+
+## Milestone D2 — интерактивный GUI и аудио на ESP32 (продуктовые расширения)
+
+Обе задачи строятся на проверенном transport/display core из Milestone D, но не входят в
+protocol v1 MVP. Каждая начинается отдельным решением владельца продукта; при выборе расширения
+контракта изменения `api/openapi.yaml` и fixtures идут до реализации. Ни одна из них не блокирует
+Milestone E–G.
+
+### DC-039 — спроектировать и реализовать интерактивный browse GUI на ESP32
+
+**Репозитории:** RockServer (только при контрактном расширении) и ESP32 firmware.  
+**Зависимости:** DC-018; явное продуктовое решение о скоупе on-device GUI.
+
+- Зафиксировать продуктовое решение: интерактивный выбор станции на самом устройстве
+  (browse/search/play с touch) против управления только с controller.
+- При положительном решении определить контрактный путь: новые bounded presentation types
+  (например, `station_list`/`menu`) с подтверждаемым view state либо ESP32-роль `controller` с
+  локальным каталогом и явными scopes; обновить OpenAPI и канонические fixtures до реализации.
+- Реализовать UI в выбранном на DC-018 стеке: список/поиск станций, now_playing, подтверждение
+  команды; touch-ввод остаётся локальным и не создаёт второй API или прямой мобильный протокол.
+- Синхронизировать визуальную тему с RockCast (палитра, шрифты, композиция) как дизайн-референс.
+
+**Приёмка:** выбор станции на устройстве проходит через RockServer intent/command путь с явным
+target; неизвестные/oversized presentations отвергаются; при offline-сервере UI показывает явный
+offline state, а не устаревший или фиктивный список.
+
+### DC-040 — решить и при необходимости реализовать аудиовыход на ESP32
+
+**Репозитории:** ESP32 firmware; RockServer только при контрактных изменениях.  
+**Зависимости:** DC-017; явное продуктовое решение о необходимости локального звука.
+
+- Зафиксировать продуктовое решение: является ли ESP32 самостоятельным player (I2S-выход,
+  декодер MP3/AAC, буферизация сетевого стрима) или остаётся display/sensor/voice-устройством при
+  воспроизведении на RockCast/Chromecast.
+- При положительном решении: определить hardware profile (I2S-кодек/ЦАП, RAM-ограничения
+  декодера), truthful `media.playback`/`media.volume` capabilities в пределах железа и поэтапный
+  план (stream client → декодер → вывод → soak); playback state подтверждается только фактом.
+- При отрицательном решении: зафиксировать в документации, что реальная прошивка не публикует
+  `media.playback`/`media.volume` (контрактный fixture multi-role ESP32 остаётся примером
+  протокола, а не описанием этой платы); скоуп Milestone D при этом полный без аудио.
+
+**Приёмка:** манифест реальной прошивки декларирует только физически доступные функции;
+реализованный звук проходит power cycle/reconnect soak, а нереализованный — явно исключён без
+молчаливого обещания capability.
 
 ## Milestone E — Home Assistant
 

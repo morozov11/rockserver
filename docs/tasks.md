@@ -1,5 +1,64 @@
 # Task log
 
+## 2026-09-08 — DC-018 GUI stack decision: LVGL v9 via esp_lvgl_port (owner confirmed)
+
+- Goal: record the owner's confirmation of LVGL v9 through the C `esp_lvgl_port` component as
+  the DC-018 display stack, following the delegated comparison and independent verification
+  from the entry above.
+- Scope: `docs/roadmap/device-control-tasks.md` DC-018 now carries the decision with rationale
+  and exclusions (Slint: paid embedded license and software rendering, kept as documented
+  fallback; embedded-graphics: DC-017 provisioning screen only; third-party LVGL v9 binding
+  crates: reference only, the binding layer is owned firmware code).
+  `docs/roadmap/device-control-rockcast-esp32.md` Phase 5 reflects the confirmed stack. The
+  rock-esp32 repository's `docs/rust-direction.md` records the same decision for firmware work
+  (C-side `esp_lcd`/GT911 init, owned thin binding layer). RockServer runtime, OpenAPI,
+  migrations and clients unchanged.
+- Checks: documentation-only; no build or test run needed.
+- Status: complete.
+
+## 2026-09-08 — agy delegation convention and DC-018 GUI-stack comparison
+
+- Goal: record external-agent delegation as standard practice, and run the first delegated
+  analysis: LVGL v9 vs Slint vs embedded-graphics for the DC-018 display surface on the
+  JC4880P443C_I_W (ESP32-P4, 800x480 RGB, GT911 touch, ESP-IDF 6.1, vendored `esp-idf-sys`).
+- Scope: added the standing `agy` delegation convention (task classes, invocation flags,
+  secret-exclusion, quota care, local verification duty) to `docs/codex-project-context.md`.
+  The comparison itself ran headless on Gemini 3.1 Pro with a JSON-schema-bounded response
+  from a temp workspace; no repository file was exposed to the external agent.
+- Result: external ranking Slint 8.5 / LVGL 7 / embedded-graphics 4. Independent verification:
+  Slint's royalty-free license excludes embedded (paid commercial ~$72/seat/year or GPLv3 for a
+  proprietary ESP32 product — [pricing](https://slint.dev/pricing),
+  [LICENSE.md](https://github.com/slint-ui/slint/blob/master/LICENSE.md)); LVGL v9 Rust
+  bindings are new and unstable (`oxivgl`, `lightvgl-sys` 9.5.2; the classic `lvgl` crate
+  tracks v8); Slint is officially in the
+  [Espressif Component Registry](https://components.espressif.com/components/slint/slint/versions/1.7.1)
+  with [ESP32-P4 demos](https://slint.dev/esp32) but software-rendered.
+- Recommendation recorded for the DC-018 decision: LVGL v9 via the C `esp_lvgl_port` component
+  (MIT, PPA hardware acceleration, proven on this board class) with Rust owning protocol/state
+  and a thin owned binding layer; Slint as fallback if FFI friction exceeds the license cost.
+  Final choice remains an owner decision per DC-018.
+- Checks: documentation-only change to this repository; no build or test run needed.
+- Status: complete.
+
+## 2026-09-08 — Milestone D roadmap audit and realignment
+
+- Goal: audit the device-control roadmap and task list from Milestone D onward now that real
+  ESP32 hardware is connected, and record the plan-order and code-reuse decisions.
+- Scope: documentation only. `docs/roadmap/device-control-tasks.md` marks DC-010 and
+  DC-012–DC-016 complete (evidence in the RockCast/RockMobile logs; live command E2E accepted
+  2026-09-07, the Chromecast hardware smoke remains unperformed), rewrites DC-017 with bring-up
+  preconditions (ESP-Hosted/SDIO Wi-Fi, SNTP, one HTTPS request), the minimal pairing screen
+  (short code, verification phrase, QR), the WSS transport choice under ESP-IDF 6.1, the
+  RockCast code-reuse strategy and board-specific acceptance (ESP32-C6 reset via GPIO54, SDIO
+  power-cycle recovery, secret-free logs), and adds a GUI-stack decision plus the v1 scope bound
+  to DC-018. A new product-gated Milestone D2 adds DC-039 (interactive on-device station
+  browse) and DC-040 (local audio output). `docs/roadmap/device-control-rockcast-esp32.md`
+  aligns Phase 5 with the verified hardware and task order and updates the ESP32
+  repository-boundary paragraph and execution-order note.
+- Checks: Markdown-only change; completion claims cross-checked against the RockCast/RockMobile
+  task logs and the rock-esp32 README/bring-up notes. No build or test run was needed.
+- Status: complete.
+
 ## DC-016 — forward full-state revision reconnect resync (2026-09-07)
 
 - Goal: stop the permanent RockCast reconnect flap observed on staging (one

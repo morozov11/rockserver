@@ -274,7 +274,7 @@ Home Assistant подключается через отдельный provider a
 - RockServer повторно использует реализованные account/device pairing, sessions, list/revoke и реализует только control-plane domain DTO/validation, связанные с существующим `devices.id` capabilities/entities/surfaces, connection registry, state/telemetry normalization, intent routing, presentation building, server-side executor registry, durable scheduler/operations, TTS/audio delivery, command routing, idempotency/audit и contract/integration tests.
 - RockCast реализует persistent device ID, reconnect/backoff, capabilities/state adapters и исполнение поддерживаемых команд через существующий playback/Chromecast/relay код. Он сохраняет локальный каталог как offline fallback.
 - Rockmobile повторно использует существующие login/pairing/device-list/session flows и добавляет selector target device, capability-driven controls, optimistic-but-pending command UI, список/cancel долгоживущих operations и отображение online/stale/error state.
-- ESP32 реализует совместимый multi-role device после стабилизации protocol v1: сначала player/display, затем sensors, voice input и `speech_output`. Firmware не создаёт второй API или прямой мобильный протокол.
+- ESP32 реализует совместимый multi-role device после стабилизации protocol v1: сначала provisioning/transport core, display surface и sensors (DC-017–DC-020), затем voice input и `speech_output`; локальный player и интерактивный browse — только за явными продуктовыми решениями DC-039/DC-040. Firmware не создаёт второй API или прямой мобильный протокол. Транспортно-агностичный протокольный слой RockCast (`device_control/protocol.rs`) и pairing state machine — кандидаты на общий клиентский crate в отдельном репозитории после стабилизации; десктоповый egui-GUI RockCast на ESP32 не переиспользуется, переносится только визуальная тема как дизайн-референс.
 - Home Assistant adapter остаётся изолированным provider boundary: credentials, native entity IDs, websocket/event subscriptions и service calls не протекают в публичный device protocol.
 
 ## Этапы реализации
@@ -327,13 +327,22 @@ Home Assistant подключается через отдельный provider a
 - [ ] Проверить relay modes, interruption, network loss, multiple controller conflicts и actual state confirmation.
 - [ ] Добавить telemetry/operational dashboards for command latency, failures, reconnects and stale state.
 
-### Phase 5 — ESP32 player и display surface
+### Phase 5 — ESP32 provisioning, display и sensors
 
-- [ ] Выбрать hardware/firmware limits и capability profile; не обещать unsupported streaming/Chromecast.
-- [ ] Подключить ESP32 к существующему pairing/device-session flow, безопасно хранить выданные `device_id`/device secret и реализовать WSS reconnect/heartbeat/state resync с bounded memory.
-- [ ] Поддержать минимальные `playback`/`volume` и `display.show_view` commands, включая `now_playing`, `text` и `sensor_grid`; command handler должен быть идемпотентным.
-- [ ] Провести soak tests для Wi-Fi loss, power cycle, server restart, firmware update и malformed/unknown messages.
-- [ ] Добавить ESP32 profile to contract fixtures so Rockmobile works unchanged.
+Железо зафиксировано: плата JC4880P443C_I_W (ESP32-P4 v1.3 без радио, Wi-Fi через ESP32-C6 по
+ESP-Hosted/SDIO, 4.3" дисплей, 16 MB flash); прошивка — Rust поверх ESP-IDF 6.1 в репозитории
+rock-esp32. Исполнимый порядок задач — DC-017–DC-020 в [`device-control-tasks.md`](device-control-tasks.md).
+
+- [ ] Bring-up предусловия: Wi-Fi через ESP32-C6 (ESP-Hosted/SDIO), SNTP-синхронизация времени и один HTTPS-запрос до любого control-трафика.
+- [ ] Подключить ESP32 к существующему pairing/device-session flow с provisioning-экраном (short code, verification phrase, QR), безопасно хранить выданные `device_id`/device secret и реализовать WSS reconnect/heartbeat/state resync с bounded memory.
+- [ ] GUI-стек зафиксирован владельцем 2026-09-08: LVGL v9 через C-компонент `esp_lvgl_port` (MIT, аппаратное ускорение PPA, списки/скроллы из коробки; Rust владеет протоколом/состоянием, тонкий слой биндингов — собственный). Поддержать `display.show_view` commands, включая `now_playing`, `text` и `sensor_grid`, в RockCast-подобной визуальной теме; command handler должен быть идемпотентным.
+- [ ] Провести soak tests для Wi-Fi loss, power cycle, server restart, firmware update, malformed/unknown messages и восстановления ESP32-C6.
+- [ ] ESP32 profile уже присутствует в канонических contract fixtures (`tests/fixtures/device-control/v1/`); Rockmobile работает без изменений.
+
+Локальный `playback`/`volume` на самом ESP32 и интерактивный browse каталога не входят в v1:
+они отложены в продуктовые расширения DC-039/DC-040 (Milestone D2 в
+[`device-control-tasks.md`](device-control-tasks.md)). Прошивка обязана публиковать только
+физически доступные capabilities.
 
 ### Phase 6 — ESP32 sensors и entity telemetry
 
@@ -376,7 +385,7 @@ Home Assistant подключается через отдельный provider a
 
 ## Порядок выполнения
 
-Сначала завершить текущий Windows-first voice/search roadmap. Затем выполнять Phase 0 → 1 → 2 → 3; после устойчивого RockCast end-to-end — Phase 4 → 5 → 6. Home Assistant read-only integration (Phase 7) может идти после общей entity/state модели, но actuator-команды — только после permission/audit foundation. Голос ESP32 (Phase 8) опирается на готовые sensors, display, intents и существующий STT путь. Durable operations и асинхронная speech delivery (Phase 9) опираются на готовые surfaces, permissions и command routing, но не требуют активного controller connection. Исполнимый порядок отдельных работ записан в [`device-control-tasks.md`](device-control-tasks.md).
+Сначала завершить текущий Windows-first voice/search roadmap. Затем выполнять Phase 0 → 1 → 2 → 3; после устойчивого RockCast end-to-end — Phase 4 → 5 → 6. Home Assistant read-only integration (Phase 7) может идти после общей entity/state модели, но actuator-команды — только после permission/audit foundation. Голос ESP32 (Phase 8) опирается на готовые sensors, display, intents и существующий STT путь. Durable operations и асинхронная speech delivery (Phase 9) опираются на готовые surfaces, permissions и command routing, но не требуют активного controller connection. Продуктовые расширения Milestone D2 (DC-039 browse GUI, DC-040 аудиовыход) опираются на DC-018/DC-017 соответственно, требуют явного решения владельца и не блокируют Phase 7–9. Исполнимый порядок отдельных работ записан в [`device-control-tasks.md`](device-control-tasks.md).
 
 ## Definition of Done для protocol v1
 
