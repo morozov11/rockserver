@@ -470,9 +470,12 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         "VoiceCommandResponse",
         "VoiceStreamStart",
         "VoiceStreamCommit",
+        "VoiceStreamCancel",
         "VoiceStreamReady",
         "VoiceStreamTranscript",
         "VoiceStreamResult",
+        "VoiceDeviceCommandResult",
+        "VoiceStreamErrorCode",
         "VoiceStreamError",
         "NormalizedQuery",
         "StationResult",
@@ -1207,12 +1210,11 @@ fn station_play_stream_and_volume_bounds_are_enforceable() {
         Some("implemented"),
         "the server-resolved play_stream dispatch is implemented since RS-3"
     );
-    assert_eq!(
+    assert!(
         document
             .pointer("/components/schemas/VoiceStreamCancel/x-rockserver-status")
-            .and_then(JsonValue::as_str),
-        Some("planned"),
-        "the voice cancel frame stays planned until RS-4"
+            .is_none(),
+        "the voice cancel frame is implemented by RS-4"
     );
 
     let honest_volume = json!({
@@ -1279,7 +1281,7 @@ fn station_play_stream_and_volume_bounds_are_enforceable() {
 }
 
 #[test]
-fn voice_stream_contract_matches_runtime_and_adds_planned_cancel() {
+fn voice_stream_contract_matches_runtime_and_implemented_device_flow() {
     let document: JsonValue = serde_yaml::from_str(OPENAPI)
         .map(|value: Value| serde_json::to_value(value).expect("OpenAPI must convert to JSON"))
         .expect("OpenAPI YAML must parse");
@@ -1323,7 +1325,13 @@ fn voice_stream_contract_matches_runtime_and_adds_planned_cancel() {
                 .and_then(JsonValue::as_str)
                 .is_some_and(|reference| reference.ends_with("VoiceStreamCancel"))
         }),
-        "the planned cancel frame must be part of the client message set"
+        "the implemented cancel frame must be part of the client message set"
+    );
+    assert!(
+        document["components"]["schemas"]["VoiceStreamCancel"]
+            .get("x-rockserver-status")
+            .is_none(),
+        "implemented cancel must not remain planned"
     );
     assert_component_valid(
         &document,
@@ -1374,6 +1382,38 @@ fn voice_stream_contract_matches_runtime_and_adds_planned_cancel() {
             "source_device_id": "40000000-0000-4000-8000-000000000002",
             "surface_id": "voice.main"
         }),
+    );
+    assert_component_valid(
+        &document,
+        "VoiceDeviceCommandResult",
+        &json!({
+            "type": "result",
+            "request_id": "req_01VOICE",
+            "status": "succeeded"
+        }),
+    );
+    assert_component_valid(
+        &document,
+        "VoiceStreamError",
+        &json!({
+            "type": "error",
+            "code": "clarification_required",
+            "message": "The voice command needs clarification.",
+            "request_id": "req_01VOICE",
+            "details": {}
+        }),
+    );
+    assert_component_invalid(
+        &document,
+        "VoiceStreamError",
+        &json!({
+            "type": "error",
+            "code": "unfrozen_error",
+            "message": "No.",
+            "request_id": "req_01VOICE",
+            "details": {}
+        }),
+        "voice errors must use the frozen code vocabulary",
     );
 }
 

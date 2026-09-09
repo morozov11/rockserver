@@ -584,6 +584,7 @@ impl SearchService {
             constraints,
             embedding.as_ref(),
             embedding_started_at.elapsed().as_millis(),
+            true,
         )
         .await
     }
@@ -595,6 +596,7 @@ impl SearchService {
         constraints: &SearchConstraints,
         embedding: Option<&Embedding>,
         embedding_elapsed_ms: u128,
+        log_input: bool,
     ) -> Result<Vec<RankedStation>, RepositoryError> {
         let repository_started_at = Instant::now();
         let mut stations = self
@@ -627,17 +629,19 @@ impl SearchService {
                 .cloned()
                 .collect();
             if !with_parents.is_empty() {
-                tracing::info!(
-                    original_tags = ?query.tags,
-                    broadened_tags = ?parent_tags,
-                    "genre fallback: broadened to parent tags"
-                );
+                if log_input {
+                    tracing::info!(
+                        original_tags = ?query.tags,
+                        broadened_tags = ?parent_tags,
+                        "genre fallback: broadened to parent tags"
+                    );
+                }
                 return Ok(with_parents);
             }
         }
 
         // Last resort: drop genre filter, keep only MIN_RELEVANCE_SCORE gate.
-        if !stations.is_empty() {
+        if !stations.is_empty() && log_input {
             tracing::info!(
                 original_tags = ?query.tags,
                 "genre fallback: dropped genre filter entirely"
@@ -651,6 +655,26 @@ impl SearchService {
         &self,
         input: QueryParserInput,
         constraints: &SearchConstraints,
+    ) -> Result<SearchOutcome, RepositoryError> {
+        self.interpret_and_search_with_input_logs(input, constraints, true)
+            .await
+    }
+
+    /// Interprets and searches without recording user-supplied text or derived terms.
+    pub async fn interpret_and_search_private(
+        &self,
+        input: QueryParserInput,
+        constraints: &SearchConstraints,
+    ) -> Result<SearchOutcome, RepositoryError> {
+        self.interpret_and_search_with_input_logs(input, constraints, false)
+            .await
+    }
+
+    async fn interpret_and_search_with_input_logs(
+        &self,
+        input: QueryParserInput,
+        constraints: &SearchConstraints,
+        log_input: bool,
     ) -> Result<SearchOutcome, RepositoryError> {
         let parser_started_at = Instant::now();
         let intent = match self
@@ -714,27 +738,32 @@ impl SearchService {
         }
 
         let query = SearchQuery::from_intent(input.query, input.locale, intent);
-        tracing::debug!(
-            parser_elapsed_ms = parser_started_at.elapsed().as_millis(),
-            original = %query.original,
-            terms = ?query.terms,
-            tags = ?query.tags,
-            core_term_count = query.core_term_count,
-            language = ?query.language,
-            country_code = ?query.country_code,
-            "search query parsed"
-        );
+        if log_input {
+            tracing::debug!(
+                parser_elapsed_ms = parser_started_at.elapsed().as_millis(),
+                original = %query.original,
+                terms = ?query.terms,
+                tags = ?query.tags,
+                core_term_count = query.core_term_count,
+                language = ?query.language,
+                country_code = ?query.country_code,
+                "search query parsed"
+            );
+        }
         let stations = self
             .search_with_embedding(
                 &query,
                 constraints,
                 embedding.as_ref(),
                 embedding_started_at.elapsed().as_millis(),
+                log_input,
             )
             .await?;
         if stations.is_empty() {
-            tracing::debug!(original = %query.original, "search returned zero results");
-        } else {
+            if log_input {
+                tracing::debug!(original = %query.original, "search returned zero results");
+            }
+        } else if log_input {
             for (i, s) in stations.iter().take(5).enumerate() {
                 tracing::debug!(
                     rank = i + 1,

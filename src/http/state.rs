@@ -13,10 +13,15 @@ use axum::{
 use serde_json::json;
 
 use crate::{
-    admin::AdminStore, auth::NativeSessionResolver, device_control::DeviceControlStore,
-    device_control_command::CommandRouter, device_control_presence::ConnectionRegistry,
-    device_control_state::StateHub, persistence::PostgresAccountStore, search::SearchService,
-    voice::SpeechRecognizers,
+    admin::AdminStore,
+    auth::NativeSessionResolver,
+    device_control::DeviceControlStore,
+    device_control_command::CommandRouter,
+    device_control_presence::ConnectionRegistry,
+    device_control_state::StateHub,
+    persistence::PostgresAccountStore,
+    search::SearchService,
+    voice::{CommandInterpreter, SpeechRecognizers},
 };
 
 use super::{
@@ -56,6 +61,7 @@ pub(super) struct PublicLimit {
 pub(super) struct AppState {
     pub(super) search_service: SearchService,
     pub(super) speech_recognizers: SpeechRecognizers,
+    pub(super) voice_command_interpreter: Arc<dyn CommandInterpreter>,
     pub(super) voice_command_timeout: Duration,
     pub(super) api_bearer_token: String,
     pub(super) account_store: Option<PostgresAccountStore>,

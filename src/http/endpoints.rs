@@ -16,7 +16,10 @@ use crate::{
     search::{
         InMemoryStationRepository, SearchService, StationRepository, UnavailableStationRepository,
     },
-    voice::{SpeechRecognizers, UnavailableSpeechRecognizer},
+    voice::{
+        CommandInterpreter, DeterministicCommandInterpreter, SpeechRecognizers,
+        UnavailableSpeechRecognizer,
+    },
 };
 
 #[path = "account.rs"]
@@ -146,6 +149,7 @@ pub fn router_with_speech_recognizers_and_bearer_token(
     build_router(AppState {
         search_service,
         speech_recognizers,
+        voice_command_interpreter: Arc::new(DeterministicCommandInterpreter),
         voice_command_timeout,
         api_bearer_token: api_bearer_token.into(),
         account_store: None,
@@ -176,6 +180,7 @@ pub fn router_with_search_service_and_native_session_resolver(
     build_router(AppState {
         search_service,
         speech_recognizers: SpeechRecognizers::same(Arc::new(UnavailableSpeechRecognizer)),
+        voice_command_interpreter: Arc::new(DeterministicCommandInterpreter),
         voice_command_timeout,
         api_bearer_token: TEST_API_BEARER_TOKEN.to_owned(),
         account_store: None,
@@ -227,6 +232,7 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
     build_router(AppState {
         search_service,
         speech_recognizers,
+        voice_command_interpreter: Arc::new(DeterministicCommandInterpreter),
         voice_command_timeout,
         api_bearer_token: api_bearer_token.into(),
         account_store: Some(account_store),
@@ -253,6 +259,31 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_and_proxy(
     admin_store: PostgresAdminStore,
     trusted_proxy_token: impl Into<String>,
 ) -> Router {
+    router_with_speech_recognizers_bearer_account_admin_store_proxy_and_voice_interpreter(
+        search_service,
+        (
+            speech_recognizers,
+            Arc::new(DeterministicCommandInterpreter),
+        ),
+        voice_command_timeout,
+        api_bearer_token,
+        account_store,
+        admin_store,
+        trusted_proxy_token,
+    )
+}
+
+/// Creates the production router with an explicit typed voice-command interpreter.
+pub fn router_with_speech_recognizers_bearer_account_admin_store_proxy_and_voice_interpreter(
+    search_service: SearchService,
+    voice_services: (SpeechRecognizers, Arc<dyn CommandInterpreter>),
+    voice_command_timeout: Duration,
+    api_bearer_token: impl Into<String>,
+    account_store: PostgresAccountStore,
+    admin_store: PostgresAdminStore,
+    trusted_proxy_token: impl Into<String>,
+) -> Router {
+    let (speech_recognizers, voice_command_interpreter) = voice_services;
     let control_session_resolver: Arc<dyn crate::auth::NativeSessionResolver> =
         Arc::new(account_store.clone());
     let control_store: Arc<dyn crate::device_control::DeviceControlStore> =
@@ -261,6 +292,7 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_and_proxy(
     build_router(AppState {
         search_service,
         speech_recognizers,
+        voice_command_interpreter,
         voice_command_timeout,
         api_bearer_token: api_bearer_token.into(),
         account_store: Some(account_store),
@@ -273,6 +305,40 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_and_proxy(
         control_state_hub: Default::default(),
         control_store: Some(control_store),
         control_session_resolver: Some(control_session_resolver),
+        control_timing: Default::default(),
+    })
+}
+
+/// Creates a deterministic device-voice harness over explicit control-plane dependencies.
+pub fn router_with_device_voice_services(
+    search_service: SearchService,
+    speech_recognizer: Arc<dyn crate::voice::StreamingSpeechRecognizer>,
+    voice_command_interpreter: Arc<dyn CommandInterpreter>,
+    voice_command_timeout: Duration,
+    session_resolver: Arc<dyn crate::auth::NativeSessionResolver>,
+    control: (
+        crate::device_control_presence::ConnectionRegistry,
+        CommandRouter,
+        Arc<dyn crate::device_control::DeviceControlStore>,
+    ),
+) -> Router {
+    let (control_registry, control_commands, control_store) = control;
+    build_router(AppState {
+        search_service,
+        speech_recognizers: SpeechRecognizers::same(speech_recognizer),
+        voice_command_interpreter,
+        voice_command_timeout,
+        api_bearer_token: TEST_API_BEARER_TOKEN.to_owned(),
+        account_store: None,
+        admin_store: None,
+        trusted_proxy_token: None,
+        local_admin_origin: local_admin_origin_from_env(),
+        public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
+        control_registry,
+        control_commands,
+        control_state_hub: Default::default(),
+        control_store: Some(control_store),
+        control_session_resolver: Some(session_resolver),
         control_timing: Default::default(),
     })
 }
@@ -514,6 +580,7 @@ mod tests {
                 InMemoryStationRepository::with_builtin_catalog().unwrap(),
             )),
             speech_recognizers: SpeechRecognizers::same(Arc::new(UnavailableSpeechRecognizer)),
+            voice_command_interpreter: Arc::new(crate::voice::DeterministicCommandInterpreter),
             voice_command_timeout: Duration::from_secs(5),
             api_bearer_token: "unrelated".to_owned(),
             account_store: None,
@@ -586,6 +653,7 @@ mod tests {
                 InMemoryStationRepository::with_builtin_catalog().unwrap(),
             )),
             speech_recognizers: SpeechRecognizers::same(Arc::new(UnavailableSpeechRecognizer)),
+            voice_command_interpreter: Arc::new(crate::voice::DeterministicCommandInterpreter),
             voice_command_timeout: Duration::from_secs(5),
             api_bearer_token: "unrelated".to_owned(),
             account_store: None,
@@ -672,6 +740,7 @@ mod tests {
                 InMemoryStationRepository::with_builtin_catalog().unwrap(),
             )),
             speech_recognizers: SpeechRecognizers::same(Arc::new(UnavailableSpeechRecognizer)),
+            voice_command_interpreter: Arc::new(crate::voice::DeterministicCommandInterpreter),
             voice_command_timeout: Duration::from_secs(5),
             api_bearer_token: "unrelated".to_owned(),
             account_store: None,

@@ -639,12 +639,33 @@ planned-статусы других операций не тронуты; firmwa
 `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings` и полный
 `cargo test` зелёные; поведение прямых playback/volume команд не изменилось.
 
-#### RS-4 — реализовать voice device-session, cancel и UserIntent-роутинг — ожидает
+#### RS-4 — реализовать voice device-session, cancel и UserIntent-роутинг — выполнено (2026-09-09)
 
-Аутентифицировать device-сессии на `/voice/stream`, прокинуть `source_device_id`,
-`voice.main` и locale через сессию, реализовать `VoiceStreamCancel`; маршрут распознанного
-транскрипта через типизированный `UserIntent` в существующий командный роутер (радио-intents);
-снять planned-маркеры с voice-расширения.
+- `/api/v1/voice/stream` различает неизменённый anonymous/legacy station-search flow и
+  native device-session flow через общий session resolver. Device flow требует объявленный
+  `voice.main`, возвращает серверный `source_device_id` в `ready` и не принимает identity от
+  клиента.
+- `VoiceStreamCancel` принимается после start до commit: recognition session освобождается до
+  единственного терминального `error(cancelled)`, без последующего transcript/result.
+- Финальный распознанный текст классифицируется в bounded radio command, затем переводится в
+  существующий `UserIntent`. `play_radio` выбирает единственный top-ranked station ID,
+  `stop` и абсолютная громкость строят media-intents; resolver формирует команду с явным
+  target = source device. Исполнение идёт только через `CommandRouter.submit`, включая обычные
+  role/capability, fingerprint, idempotency и terminal lifecycle checks. `play_radio` поступает
+  в роутер как `station.play_station`; только роутер разрешает его в `station.play_stream`.
+- По разрешению центра минимально расширен RS-1: добавлен отдельный закрытый
+  `VoiceDeviceCommandResult` со status `succeeded|failed`, а `VoiceStreamErrorCode` фиксирует
+  полный runtime vocabulary, включая `clarification_required`. Legacy result не изменён.
+- Логи voice/search intent path не содержат raw media или распознанный текст; диагностические
+  request/response bodies structured-intent boundary редактируются. Новых persistent session
+  records нет: voice ждёт terminal result из существующего command store.
+
+Приёмка: `tests/voice_stream_api.rs` — 9/9 (play/stop/volume target и routed body, succeeded и
+failed status, cancel и release, native 401 + anonymous compatibility, ambiguity, unsupported,
+surface/sample-rate limits, silence/recognition failure, offline/search timeout, captured logs);
+`tests/openapi_contract.rs` — 8/8 с implemented cancel и обеими закрытыми result-схемами.
+`cargo fmt --check` и `cargo clippy --all-targets --all-features -- -D warnings` зелёные; полный
+`cargo test` — 206 passed, 15 ignored external integration/live tests.
 
 Примечание (Rockmobile, план шаг 2.8): изменения протокола Rockmobile не требуются —
 «Играть на устройстве» (RM-1) строит `station.play_station` через существующую модель

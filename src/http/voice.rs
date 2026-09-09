@@ -19,19 +19,32 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use uuid::Uuid;
 
 use crate::{
-    search::{QueryParserInput, SearchConstraints},
-    voice::{SpeechProviderError, SpeechRecognizerMode, SpeechStreamConfig, TranscriptUpdate},
+    device_control::{CommandStatus, Device, DeviceId, Timestamp},
+    device_control_auth::{DeviceControlAuthenticationError, DeviceControlPrincipal},
+    device_control_intent::{
+        CurrentTarget, DirectoryDevice, DirectoryProjection, IntentErrorCode, IntentTarget,
+        MediaIntentAction, ResolutionActor, ResolutionContext, ResolutionRequest, ResolutionResult,
+        UserIntent,
+    },
+    search::{QueryParserInput, SearchConstraints, normalize_query},
+    voice::{
+        Intent as VoiceIntent, SpeechProviderError, SpeechRecognizerMode, SpeechStreamConfig,
+        TranscriptUpdate, VoiceCommand,
+    },
 };
 
 use super::{
     account,
+    control_auth::authenticate_control_ingress,
     search::{SearchRequestDto, ValidatedSearchRequest},
     state::{AppState, PublicLimit, PublicLimitState},
     transport::{
         NormalizedQueryDto, StationResultDto, VoiceCommandResponseDto, error_response,
-        parse_json_request, request_id, unauthorized_response, with_request_id,
+        parse_json_request, request_id, retry_after, unauthorized_response, with_request_id,
     },
 };
 
@@ -70,6 +83,8 @@ enum VoiceStreamStartDto {
         locale: Option<String>,
         sample_rate_hz: u32,
         #[serde(default)]
+        surface_id: Option<String>,
+        #[serde(default)]
         recognizer_mode: Option<String>,
         #[serde(default)]
         limit: Option<u8>,
@@ -84,9 +99,16 @@ enum VoiceStreamCommitDto {
     Commit,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum VoiceStreamCancelDto {
+    Cancel,
+}
+
 struct ValidatedVoiceStreamStart {
     pub(super) locale: String,
     pub(super) sample_rate_hz: u32,
+    pub(super) surface_id: Option<String>,
     pub(super) recognizer_mode: SpeechRecognizerMode,
     pub(super) limit: usize,
     pub(super) exclude_station_ids: BTreeSet<String>,
@@ -99,6 +121,7 @@ impl TryFrom<VoiceStreamStartDto> for ValidatedVoiceStreamStart {
         let VoiceStreamStartDto::Start {
             locale,
             sample_rate_hz,
+            surface_id,
             recognizer_mode,
             limit,
             exclude_station_ids,
@@ -118,6 +141,12 @@ impl TryFrom<VoiceStreamStartDto> for ValidatedVoiceStreamStart {
         if sample_rate_hz != 16_000 {
             details.insert("sample_rate_hz".to_owned(), json!("must equal 16000"));
         }
+        if surface_id
+            .as_deref()
+            .is_some_and(|value| value != "voice.main")
+        {
+            details.insert("surface_id".to_owned(), json!("must equal voice.main"));
+        }
         let validated = ValidatedSearchRequest::try_from(SearchRequestDto {
             query: "stream".to_owned(),
             locale,
@@ -128,6 +157,7 @@ impl TryFrom<VoiceStreamStartDto> for ValidatedVoiceStreamStart {
             Ok(validated) if details.is_empty() => Ok(Self {
                 locale: validated.locale,
                 sample_rate_hz,
+                surface_id,
                 recognizer_mode,
                 limit: validated.limit.min(10),
                 exclude_station_ids: validated.exclude_station_ids,
@@ -154,6 +184,10 @@ enum VoiceStreamServerEvent {
         request_id: String,
         audio_format: String,
         sample_rate_hz: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_device_id: Option<Uuid>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        surface_id: Option<String>,
     },
     Transcript {
         request_id: String,
@@ -164,12 +198,47 @@ enum VoiceStreamServerEvent {
         #[serde(flatten)]
         result: Box<VoiceStreamResultPayload>,
     },
+    #[serde(rename = "result")]
+    DeviceResult {
+        request_id: String,
+        status: CommandStatus,
+    },
     Error {
-        code: String,
+        code: VoiceStreamErrorCode,
         message: String,
         request_id: String,
         details: Value,
     },
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum VoiceStreamErrorCode {
+    ProtocolError,
+    ValidationFailed,
+    SpeechProviderUnavailable,
+    SpeechProviderError,
+    SpeechTimeout,
+    SpeechNotRecognized,
+    VoiceTimeout,
+    AudioChunkInvalid,
+    AudioTooLarge,
+    Cancelled,
+    IntentResolutionFailed,
+    UnsupportedIntent,
+    ClarificationRequired,
+    StationNotFound,
+    SearchTimeout,
+    SearchUnavailable,
+    TargetOffline,
+    CapabilityNotSupported,
+    Forbidden,
+    InvalidPayload,
+    CommandTimeout,
+    DuplicateCommand,
+    TooManyInFlight,
+    PersistenceUnavailable,
+    InternalError,
 }
 
 #[derive(Serialize)]
@@ -238,14 +307,31 @@ pub(super) async fn voice_stream(
         return public_voice_stream(State(state), headers, upgrade).await;
     }
     let request_id = request_id(&headers);
-    if !state.is_authorized(&headers)
-        && account::match_native_session(&state, &headers, &request_id)
-            .await
-            .is_none()
-    {
-        return unauthorized_response(&request_id);
+    if state.is_authorized(&headers) {
+        return voice_stream_impl(state, headers, upgrade, request_id, None, None).await;
     }
-    voice_stream_impl(state, headers, upgrade, request_id, None).await
+    let Some(resolver) = state.control_session_resolver.as_ref() else {
+        return unauthorized_response(&request_id);
+    };
+    let principal = match authenticate_control_ingress(&headers, resolver.as_ref()).await {
+        Ok(principal) => principal,
+        Err(DeviceControlAuthenticationError::InvalidCredential) => {
+            return unauthorized_response(&request_id);
+        }
+        Err(DeviceControlAuthenticationError::Unavailable) => {
+            return retry_after(
+                error_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "control_auth_unavailable",
+                    "Device authentication is temporarily unavailable.",
+                    &request_id,
+                    json!({}),
+                ),
+                1,
+            );
+        }
+    };
+    voice_stream_impl(state, headers, upgrade, request_id, None, Some(principal)).await
 }
 
 /// Admits the approved anonymous WebSocket voice session without trusting forwarded headers.
@@ -264,7 +350,7 @@ pub(super) async fn public_voice_stream(
         Ok(slot) => slot,
         Err(response) => return *response,
     };
-    voice_stream_impl(state, headers, upgrade, request_id, Some(slot)).await
+    voice_stream_impl(state, headers, upgrade, request_id, Some(slot), None).await
 }
 
 /// Runs one authenticated or anonymous voice WebSocket session.
@@ -274,19 +360,25 @@ async fn voice_stream_impl(
     upgrade: WebSocketUpgrade,
     request_id: String,
     slot: Option<VoiceSlot>,
+    principal: Option<DeviceControlPrincipal>,
 ) -> Response {
     let socket_request_id = request_id.clone();
     let response = upgrade
         .max_message_size(MAX_STREAM_AUDIO_CHUNK_BYTES + 1024)
         .on_upgrade(move |socket| async move {
             let _slot = slot;
-            run_voice_stream(socket, state, socket_request_id).await
+            run_voice_stream(socket, state, socket_request_id, principal).await
         });
     with_request_id(response, &request_id)
 }
 
 /// Processes audio, transcript updates, and the final station search.
-async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: String) {
+async fn run_voice_stream(
+    mut socket: WebSocket,
+    state: AppState,
+    request_id: String,
+    principal: Option<DeviceControlPrincipal>,
+) {
     let Some(Ok(Message::Text(start_message))) =
         tokio::time::timeout(STREAM_IDLE_TIMEOUT, socket.recv())
             .await
@@ -296,7 +388,7 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
         let _ = send_stream_error(
             &mut socket,
             &request_id,
-            "protocol_error",
+            VoiceStreamErrorCode::ProtocolError,
             "The first WebSocket message must be a JSON start event.",
             json!({}),
         )
@@ -309,7 +401,7 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
             let _ = send_stream_error(
                 &mut socket,
                 &request_id,
-                "validation_failed",
+                VoiceStreamErrorCode::ValidationFailed,
                 "Streaming session validation failed.",
                 details,
             )
@@ -317,6 +409,12 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
             return;
         }
     };
+    if let Some(principal) = principal
+        && let Err((code, message)) = validate_device_voice_start(&state, principal, &start)
+    {
+        let _ = send_stream_error(&mut socket, &request_id, code, message, json!({})).await;
+        return;
+    }
 
     let mut session = match tokio::time::timeout(
         DEFAULT_STREAM_OPERATION_TIMEOUT,
@@ -336,7 +434,7 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
             let _ = send_stream_error(
                 &mut socket,
                 &request_id,
-                "speech_provider_unavailable",
+                VoiceStreamErrorCode::SpeechProviderUnavailable,
                 "Streaming speech recognition is unavailable.",
                 json!({}),
             )
@@ -347,7 +445,7 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
             let _ = send_stream_error(
                 &mut socket,
                 &request_id,
-                "speech_timeout",
+                VoiceStreamErrorCode::SpeechTimeout,
                 "Streaming speech provider timed out.",
                 json!({"timeout_ms": DEFAULT_STREAM_OPERATION_TIMEOUT.as_millis()}),
             )
@@ -361,6 +459,8 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
             request_id: request_id.clone(),
             audio_format: "pcm_s16le".to_owned(),
             sample_rate_hz: start.sample_rate_hz,
+            source_device_id: principal.map(|principal| principal.device_id),
+            surface_id: principal.and_then(|_| start.surface_id.clone()),
         },
     )
     .await
@@ -381,7 +481,7 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
             let _ = send_stream_error(
                 &mut socket,
                 &request_id,
-                "voice_timeout",
+                VoiceStreamErrorCode::VoiceTimeout,
                 "Voice session timed out.",
                 json!({"timeout_ms": STREAM_IDLE_TIMEOUT.as_millis()}),
             )
@@ -397,7 +497,7 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
                     let _ = send_stream_error(
                         &mut socket,
                         &request_id,
-                        "audio_chunk_invalid",
+                        VoiceStreamErrorCode::AudioChunkInvalid,
                         "Audio frames must be bounded PCM16 data.",
                         json!({"max_chunk_bytes": MAX_STREAM_AUDIO_CHUNK_BYTES}),
                     )
@@ -411,7 +511,7 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
                     let _ = send_stream_error(
                         &mut socket,
                         &request_id,
-                        "audio_too_large",
+                        VoiceStreamErrorCode::AudioTooLarge,
                         "Streaming session audio limit was exceeded.",
                         json!({"max_bytes": MAX_STREAM_AUDIO_BYTES}),
                     )
@@ -436,6 +536,18 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
                     }
                 }
             }
+            Ok(Message::Text(text)) if is_cancel_event(&text) => {
+                drop(session);
+                let _ = send_stream_error(
+                    &mut socket,
+                    &request_id,
+                    VoiceStreamErrorCode::Cancelled,
+                    "Voice session was cancelled.",
+                    json!({}),
+                )
+                .await;
+                return;
+            }
             Ok(Message::Text(text)) if is_commit_event(&text) => {
                 let updates = match speech_operation(session.finish()).await {
                     Ok(updates) => updates,
@@ -455,14 +567,27 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
                     let _ = send_stream_error(
                         &mut socket,
                         &request_id,
-                        "speech_not_recognized",
+                        VoiceStreamErrorCode::SpeechNotRecognized,
                         "No final speech transcript was recognized.",
                         json!({}),
                     )
                     .await;
                     return;
                 };
-                finish_stream_search(&mut socket, &state, &request_id, &start, transcript).await;
+                if let Some(principal) = principal {
+                    finish_device_voice(
+                        &mut socket,
+                        &state,
+                        &request_id,
+                        &start,
+                        principal,
+                        transcript,
+                    )
+                    .await;
+                } else {
+                    finish_stream_search(&mut socket, &state, &request_id, &start, transcript)
+                        .await;
+                }
                 return;
             }
             Ok(Message::Close(_)) | Err(_) => return,
@@ -476,7 +601,7 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
                 let _ = send_stream_error(
                     &mut socket,
                     &request_id,
-                    "protocol_error",
+                    VoiceStreamErrorCode::ProtocolError,
                     "Expected a binary audio chunk or JSON commit event.",
                     json!({}),
                 )
@@ -488,7 +613,7 @@ async fn run_voice_stream(mut socket: WebSocket, state: AppState, request_id: St
     let _ = send_stream_error(
         &mut socket,
         &request_id,
-        "voice_timeout",
+        VoiceStreamErrorCode::VoiceTimeout,
         "Voice session timed out.",
         json!({"timeout_ms": STREAM_WALL_TIMEOUT.as_millis()}),
     )
@@ -581,7 +706,7 @@ async fn voice_command_impl(
     };
     let outcome = match tokio::time::timeout(
         state.voice_command_timeout,
-        state.search_service.interpret_and_search(
+        state.search_service.interpret_and_search_private(
             QueryParserInput {
                 query: validated.transcript.clone(),
                 locale: validated.locale,
@@ -643,6 +768,415 @@ fn is_commit_event(text: &str) -> bool {
     serde_json::from_str::<VoiceStreamCommitDto>(text).is_ok()
 }
 
+fn is_cancel_event(text: &str) -> bool {
+    serde_json::from_str::<VoiceStreamCancelDto>(text).is_ok()
+}
+
+fn validate_device_voice_start(
+    state: &AppState,
+    principal: DeviceControlPrincipal,
+    start: &ValidatedVoiceStreamStart,
+) -> Result<(), (VoiceStreamErrorCode, &'static str)> {
+    if start.surface_id.as_deref() != Some("voice.main") {
+        return Err((
+            VoiceStreamErrorCode::ValidationFailed,
+            "A device voice session requires the voice.main surface.",
+        ));
+    }
+    let active = state
+        .control_registry
+        .active_for(principal.user_id, principal.device_id)
+        .ok_or((
+            VoiceStreamErrorCode::TargetOffline,
+            "The source device is offline.",
+        ))?;
+    let manifest = &active.manifest;
+    let voice_surface = manifest.surfaces.iter().any(|surface| {
+        surface.surface_id == "voice.main"
+            && surface.kind == crate::device_control::SurfaceKind::Voice
+    });
+    let voice_input = manifest.capabilities.items.iter().any(|capability| {
+        matches!(capability, crate::device_control::DeviceCapability::VoiceInput { formats }
+            if formats.iter().any(|format| format == "pcm16_mono_16000"))
+    });
+    if !manifest
+        .roles
+        .contains(&crate::device_control::DeviceRole::VoiceEndpoint)
+        || !voice_surface
+        || !voice_input
+    {
+        return Err((
+            VoiceStreamErrorCode::CapabilityNotSupported,
+            "The source device does not support this voice surface.",
+        ));
+    }
+    Ok(())
+}
+
+async fn finish_device_voice(
+    socket: &mut WebSocket,
+    state: &AppState,
+    request_id: &str,
+    start: &ValidatedVoiceStreamStart,
+    principal: DeviceControlPrincipal,
+    transcript: String,
+) {
+    let voice_command = match tokio::time::timeout(
+        DEFAULT_STREAM_OPERATION_TIMEOUT,
+        state
+            .voice_command_interpreter
+            .interpret(&transcript, &start.locale),
+    )
+    .await
+    {
+        Ok(Ok(command)) => command,
+        Ok(Err(_)) | Err(_) => {
+            let _ = send_stream_error(
+                socket,
+                request_id,
+                VoiceStreamErrorCode::IntentResolutionFailed,
+                "The voice intent could not be resolved.",
+                json!({}),
+            )
+            .await;
+            return;
+        }
+    };
+    let intent = match device_user_intent(state, start, principal, transcript, voice_command).await
+    {
+        Ok(intent) => intent,
+        Err((code, message)) => {
+            let _ = send_stream_error(socket, request_id, code, message, json!({})).await;
+            return;
+        }
+    };
+    let Some(active) = state
+        .control_registry
+        .active_for(principal.user_id, principal.device_id)
+    else {
+        let _ = send_stream_error(
+            socket,
+            request_id,
+            VoiceStreamErrorCode::TargetOffline,
+            "The target device is offline.",
+            json!({}),
+        )
+        .await;
+        return;
+    };
+    let target = DeviceId(principal.device_id);
+    let command_id = crate::device_control::CommandId(Uuid::new_v4());
+    let resolution = crate::device_control_intent::resolve(
+        &ResolutionRequest {
+            actor: ResolutionActor {
+                user_id: principal.user_id,
+                scopes: active.scopes.clone(),
+            },
+            directory: DirectoryProjection {
+                owner_id: principal.user_id,
+                devices: vec![DirectoryDevice {
+                    device: Device {
+                        device_id: target,
+                        display_name: "Voice device".to_owned(),
+                        device_type: "device".to_owned(),
+                    },
+                    manifest: active.manifest.clone(),
+                    online: true,
+                    runtime_state: state
+                        .control_state_hub
+                        .device_state(principal.user_id, target)
+                        .map(|snapshot| snapshot.state),
+                    entity_states: Vec::new(),
+                }],
+            },
+            command_id,
+            received_at: timestamp_now(),
+            context: ResolutionContext {
+                current_target: Some(CurrentTarget {
+                    device_id: Some(target),
+                    surface_id: start.surface_id.clone(),
+                }),
+                canonical_areas: Vec::new(),
+            },
+        },
+        &intent,
+    );
+    let command = match resolution {
+        ResolutionResult::Plan(mut plan) if plan.commands.len() == 1 => plan.commands.remove(0),
+        ResolutionResult::Clarification(_) => {
+            let _ = send_stream_error(
+                socket,
+                request_id,
+                VoiceStreamErrorCode::ClarificationRequired,
+                "The voice command needs clarification.",
+                json!({}),
+            )
+            .await;
+            return;
+        }
+        ResolutionResult::Confirmation(_) => {
+            let _ = send_stream_error(
+                socket,
+                request_id,
+                VoiceStreamErrorCode::UnsupportedIntent,
+                "This voice intent is not supported.",
+                json!({}),
+            )
+            .await;
+            return;
+        }
+        ResolutionResult::Error(error) => {
+            let (code, message) = map_intent_error(error.code);
+            let _ = send_stream_error(socket, request_id, code, message, json!({})).await;
+            return;
+        }
+        ResolutionResult::Plan(_) => {
+            let _ = send_stream_error(
+                socket,
+                request_id,
+                VoiceStreamErrorCode::InternalError,
+                "The voice command could not be executed.",
+                json!({}),
+            )
+            .await;
+            return;
+        }
+    };
+    let target_device_id = command.target.device_id;
+    if let Err(error) = state
+        .control_commands
+        .submit(
+            &state.control_registry,
+            state.control_store.as_ref(),
+            principal.user_id,
+            principal.device_id,
+            active.connection_id,
+            command,
+        )
+        .await
+    {
+        let (code, message) = map_command_error(error.code);
+        let _ = send_stream_error(socket, request_id, code, message, json!({})).await;
+        return;
+    }
+    let Some(store) = state.control_store.as_ref() else {
+        let _ = send_stream_error(
+            socket,
+            request_id,
+            VoiceStreamErrorCode::PersistenceUnavailable,
+            "Voice command state is temporarily unavailable.",
+            json!({}),
+        )
+        .await;
+        return;
+    };
+    let result = tokio::time::timeout(Duration::from_secs(31), async {
+        loop {
+            match store
+                .load_command(principal.user_id, target_device_id, command_id)
+                .await
+            {
+                Ok(Some(lifecycle)) => {
+                    if let Some(result) = lifecycle.result {
+                        break Ok(result);
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                Ok(_) => tokio::time::sleep(Duration::from_millis(20)).await,
+                Err(_) => break Err(VoiceStreamErrorCode::PersistenceUnavailable),
+            }
+        }
+    })
+    .await;
+    match result {
+        Ok(Ok(result)) => {
+            let _ = send_stream_event(
+                socket,
+                &VoiceStreamServerEvent::DeviceResult {
+                    request_id: request_id.to_owned(),
+                    status: result.status,
+                },
+            )
+            .await;
+        }
+        Ok(Err(code)) => {
+            let _ = send_stream_error(
+                socket,
+                request_id,
+                code,
+                "Voice command state is temporarily unavailable.",
+                json!({}),
+            )
+            .await;
+        }
+        Err(_) => {
+            let _ = send_stream_error(
+                socket,
+                request_id,
+                VoiceStreamErrorCode::CommandTimeout,
+                "The device command timed out.",
+                json!({}),
+            )
+            .await;
+        }
+    }
+}
+
+async fn device_user_intent(
+    state: &AppState,
+    start: &ValidatedVoiceStreamStart,
+    principal: DeviceControlPrincipal,
+    transcript: String,
+    command: VoiceCommand,
+) -> Result<UserIntent, (VoiceStreamErrorCode, &'static str)> {
+    let target = Some(IntentTarget {
+        device_id: Some(DeviceId(principal.device_id)),
+        surface_id: None,
+        area_id: None,
+    });
+    match command.intent {
+        VoiceIntent::PlayRadio => {
+            let query = normalize_query(transcript, start.locale.clone());
+            let constraints = SearchConstraints {
+                limit: 2,
+                excluded_station_ids: start.exclude_station_ids.clone(),
+            };
+            let stations = match tokio::time::timeout(
+                state.voice_command_timeout,
+                state.search_service.search(&query, &constraints),
+            )
+            .await
+            {
+                Ok(Ok(stations)) => stations,
+                Ok(Err(_)) => {
+                    return Err((
+                        VoiceStreamErrorCode::SearchUnavailable,
+                        "Station search is temporarily unavailable.",
+                    ));
+                }
+                Err(_) => {
+                    return Err((
+                        VoiceStreamErrorCode::SearchTimeout,
+                        "Station search timed out.",
+                    ));
+                }
+            };
+            let Some(first) = stations.first() else {
+                return Err((
+                    VoiceStreamErrorCode::StationNotFound,
+                    "No matching station was found.",
+                ));
+            };
+            if stations
+                .get(1)
+                .is_some_and(|second| first.score == second.score)
+            {
+                return Err((
+                    VoiceStreamErrorCode::ClarificationRequired,
+                    "The station request needs clarification.",
+                ));
+            }
+            Ok(UserIntent::PlayRadio {
+                station_id: first.station.id.clone(),
+                target,
+            })
+        }
+        VoiceIntent::Stop => Ok(UserIntent::Media {
+            action: MediaIntentAction::Stop,
+            target,
+        }),
+        VoiceIntent::SetVolume => match command.volume_level {
+            Some(level) => Ok(UserIntent::Media {
+                action: MediaIntentAction::SetVolume { level },
+                target,
+            }),
+            None => Err((
+                VoiceStreamErrorCode::InvalidPayload,
+                "The volume command is invalid.",
+            )),
+        },
+        VoiceIntent::NextStation
+        | VoiceIntent::PreviousStation
+        | VoiceIntent::VolumeChange
+        | VoiceIntent::Unknown => Err((
+            VoiceStreamErrorCode::UnsupportedIntent,
+            "This voice intent is not supported.",
+        )),
+    }
+}
+
+fn map_intent_error(code: IntentErrorCode) -> (VoiceStreamErrorCode, &'static str) {
+    match code {
+        IntentErrorCode::TargetOffline => (
+            VoiceStreamErrorCode::TargetOffline,
+            "The target device is offline.",
+        ),
+        IntentErrorCode::CapabilityNotSupported => (
+            VoiceStreamErrorCode::CapabilityNotSupported,
+            "The target does not support this command.",
+        ),
+        IntentErrorCode::Forbidden => (
+            VoiceStreamErrorCode::Forbidden,
+            "The voice command is not permitted.",
+        ),
+        IntentErrorCode::InvalidIntent => (
+            VoiceStreamErrorCode::InvalidPayload,
+            "The voice command is invalid.",
+        ),
+        IntentErrorCode::StateUnavailable | IntentErrorCode::UnsupportedSelector => (
+            VoiceStreamErrorCode::UnsupportedIntent,
+            "This voice intent is not supported.",
+        ),
+    }
+}
+
+fn map_command_error(code: &str) -> (VoiceStreamErrorCode, &'static str) {
+    match code {
+        "target_offline" => (
+            VoiceStreamErrorCode::TargetOffline,
+            "The target device is offline.",
+        ),
+        "capability_not_supported" => (
+            VoiceStreamErrorCode::CapabilityNotSupported,
+            "The target does not support this command.",
+        ),
+        "forbidden" => (
+            VoiceStreamErrorCode::Forbidden,
+            "The voice command is not permitted.",
+        ),
+        "invalid_payload" => (
+            VoiceStreamErrorCode::InvalidPayload,
+            "The device command is invalid.",
+        ),
+        "command_timeout" => (
+            VoiceStreamErrorCode::CommandTimeout,
+            "The device command timed out.",
+        ),
+        "duplicate_command" => (
+            VoiceStreamErrorCode::DuplicateCommand,
+            "The device command could not be admitted.",
+        ),
+        "too_many_in_flight" => (VoiceStreamErrorCode::TooManyInFlight, "The device is busy."),
+        "persistence_unavailable" => (
+            VoiceStreamErrorCode::PersistenceUnavailable,
+            "Voice command state is temporarily unavailable.",
+        ),
+        _ => (
+            VoiceStreamErrorCode::InternalError,
+            "The voice command could not be executed.",
+        ),
+    }
+}
+
+fn timestamp_now() -> Timestamp {
+    Timestamp::parse(
+        OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .expect("RFC3339 format is valid"),
+    )
+    .expect("server timestamp is valid")
+}
+
 async fn speech_operation<T>(
     operation: impl Future<Output = Result<T, SpeechProviderError>>,
 ) -> Result<T, StreamOperationError> {
@@ -683,7 +1217,7 @@ async fn send_speech_failure(
             let _ = send_stream_error(
                 socket,
                 request_id,
-                "speech_provider_error",
+                VoiceStreamErrorCode::SpeechProviderError,
                 "Streaming speech recognition failed.",
                 json!({}),
             )
@@ -693,7 +1227,7 @@ async fn send_speech_failure(
             let _ = send_stream_error(
                 socket,
                 request_id,
-                "speech_timeout",
+                VoiceStreamErrorCode::SpeechTimeout,
                 "Streaming speech provider timed out.",
                 json!({"timeout_ms": DEFAULT_STREAM_OPERATION_TIMEOUT.as_millis()}),
             )
@@ -702,8 +1236,8 @@ async fn send_speech_failure(
     }
 }
 
-fn log_speech_error(request_id: &str, error: &SpeechProviderError) {
-    tracing::warn!(%request_id, %error, "streaming speech provider failed");
+fn log_speech_error(request_id: &str, _error: &SpeechProviderError) {
+    tracing::warn!(%request_id, "streaming speech recognition failed");
 }
 
 async fn finish_stream_search(
@@ -715,7 +1249,6 @@ async fn finish_stream_search(
 ) {
     tracing::info!(
         %request_id,
-        transcript = %transcript,
         locale = %start.locale,
         limit = start.limit,
         audio_search = true,
@@ -727,7 +1260,7 @@ async fn finish_stream_search(
     };
     let outcome = match tokio::time::timeout(
         state.voice_command_timeout,
-        state.search_service.interpret_and_search(
+        state.search_service.interpret_and_search_private(
             QueryParserInput {
                 query: transcript.clone(),
                 locale: start.locale.clone(),
@@ -738,12 +1271,12 @@ async fn finish_stream_search(
     .await
     {
         Ok(Ok(outcome)) => outcome,
-        Ok(Err(error)) => {
-            tracing::error!(%error, %request_id, "streaming voice search failed");
+        Ok(Err(_)) => {
+            tracing::error!(%request_id, "streaming voice search failed");
             let _ = send_stream_error(
                 socket,
                 request_id,
-                "internal_error",
+                VoiceStreamErrorCode::InternalError,
                 "An unexpected server error occurred.",
                 json!({}),
             )
@@ -754,7 +1287,7 @@ async fn finish_stream_search(
             let _ = send_stream_error(
                 socket,
                 request_id,
-                "search_timeout",
+                VoiceStreamErrorCode::SearchTimeout,
                 "Voice command search timed out.",
                 json!({"timeout_ms": state.voice_command_timeout.as_millis()}),
             )
@@ -768,28 +1301,7 @@ async fn finish_stream_search(
         .map(StationResultDto::from)
         .collect::<Vec<_>>();
     let selected_station = stations.first().cloned();
-    tracing::info!(
-        %request_id,
-        transcript = %transcript,
-        terms = ?outcome.query.terms,
-        tags = ?outcome.query.tags,
-        language = ?outcome.query.language,
-        country_code = ?outcome.query.country_code,
-        stations = stations.len(),
-        selected_station = ?selected_station.as_ref().map(|station| station.name.as_str()),
-        "voice transcript search completed"
-    );
-    for (rank, station) in stations.iter().enumerate() {
-        tracing::info!(
-            %request_id,
-            rank,
-            station_id = %station.id,
-            station = %station.name,
-            country_code = ?station.country_code,
-            stream_url = %station.stream_url,
-            "voice station candidate"
-        );
-    }
+    tracing::info!(%request_id, stations = stations.len(), "voice transcript search completed");
     let _ = send_stream_event(
         socket,
         &VoiceStreamServerEvent::Result {
@@ -808,14 +1320,14 @@ async fn finish_stream_search(
 async fn send_stream_error(
     socket: &mut WebSocket,
     request_id: &str,
-    code: &str,
+    code: VoiceStreamErrorCode,
     message: &str,
     details: Value,
 ) -> Result<(), axum::Error> {
     send_stream_event(
         socket,
         &VoiceStreamServerEvent::Error {
-            code: code.to_owned(),
+            code,
             message: message.to_owned(),
             request_id: request_id.to_owned(),
             details,

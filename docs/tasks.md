@@ -1,5 +1,31 @@
 # Task log
 
+## 2026-09-09 — RS-4: route authenticated device voice through typed intents and CommandRouter
+
+- Goal: implement Step 3.3 of the RockCast-radio plan: native device session and `voice.main`
+  identity on the existing stream, explicit cancel, radio-only `UserIntent` resolution, and
+  lifecycle execution on the source player through the normal device command router.
+- Scope: native auth is resolved before upgrade without client-claimed identity; the device start
+  is checked against the active `voice_endpoint` role, declared voice surface and bounded input
+  capability. Play search accepts only a unique top-ranked station, then creates
+  `UserIntent::PlayRadio`; stop and absolute volume create typed media intents. The existing
+  resolver fixes target to `source_device_id`, and all commands use `CommandRouter.submit` plus the
+  existing command store for terminal status. Anonymous/legacy search is unchanged. Cancel drops
+  recognition before one terminal `cancelled` frame. Logs omit raw media, recognized text and
+  structured-intent bodies; no new persistence was added.
+- Contract: with explicit control-center approval, the minimal RS-1 amendment adds closed
+  `VoiceDeviceCommandResult {type, request_id, status}` and frozen `VoiceStreamErrorCode` including
+  `clarification_required`; legacy `VoiceStreamResult` remains unchanged. The planned marker was
+  removed only from `VoiceStreamCancel`, and planned wording was removed from the implemented
+  device voice fields.
+- Checks: `voice_stream_api` 9/9 and `openapi_contract` 8/8 pass. Cases cover play/stop/volume routed
+  to the authenticated source, original play_station persistence plus router-only play_stream
+  delivery, succeeded/failed results, cancel/release/one-terminal invariant, invalid native 401 and
+  anonymous compatibility, ambiguity, unsupported intent, bounds, silence/recognition failure,
+  offline/search timeout and captured-log privacy. Format and strict clippy checks pass; full
+  `cargo test` reports 206 passed and 15 ignored external integration/live tests.
+- Status: **complete.**
+
 ## 2026-09-09 — RS-3: resolve station.play_station to server-validated play_stream dispatch
 
 - Goal: implement the Step-3.2 command-router resolution frozen by RS-1 (openapi 0.5.0):

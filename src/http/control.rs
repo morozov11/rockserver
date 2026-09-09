@@ -576,6 +576,7 @@ mod tests {
         build_router(AppState {
             search_service: search_service.clone(),
             speech_recognizers: SpeechRecognizers::same(Arc::new(UnavailableSpeechRecognizer)),
+            voice_command_interpreter: Arc::new(crate::voice::DeterministicCommandInterpreter),
             voice_command_timeout: Duration::from_secs(5),
             api_bearer_token: "unrelated".to_owned(),
             account_store: None,

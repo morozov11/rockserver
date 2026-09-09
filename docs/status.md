@@ -2,6 +2,37 @@
 
 Last updated: 2026-09-09
 
+## RS-4: device voice sessions route typed radio intents through device control (2026-09-09)
+
+`/api/v1/voice/stream` now authenticates native device sessions with the same server-derived
+principal boundary as control ingress. A device session must announce its declared `voice.main`
+surface; `ready` echoes that surface and the server-derived `source_device_id`. Missing or invalid
+device credentials fail before upgrade, while the anonymous and legacy station-search behavior and
+result shape remain unchanged.
+
+After final recognition, the device branch classifies only the bounded radio operations, converts
+them to the existing `UserIntent` model, resolves an explicit current target equal to the source
+device, and submits the resulting command through `CommandRouter.submit`. Play selects a unique
+top-ranked station and submits `station.play_station`; RS-3 alone performs the
+`play_station -> play_stream` resolution. Stop submits `playback.stop`; absolute volume submits
+`volume.set_volume`. Other intents fail as `unsupported_intent`, tied top stations as
+`clarification_required`, and target/capability/lifecycle failures retain deterministic frozen
+codes. Terminal command status returns through the device-only voice result.
+
+Cancel is implemented from start until commit and emits exactly one terminal `cancelled` error
+after releasing recognition state. The frozen transport limits remain unchanged. The authorized
+minimal RS-1 amendment adds the closed `VoiceDeviceCommandResult` and a complete
+`VoiceStreamErrorCode`; only the cancel planned marker and planned wording for RS-4 fields were
+removed. No session tail is persisted, and raw media or recognized text is absent from logs.
+
+Verification: `tests/voice_stream_api.rs` 9/9 and `tests/openapi_contract.rs` 8/8 pass. The voice
+suite covers routed play/stop/volume commands on the authenticated source target, router-only
+play-stream resolution, succeeded/failed terminal status, cancel/resource release, invalid native
+401 plus anonymous compatibility, ambiguity, unsupported intent, unchanged bounds, silence,
+recognition failure, offline target, search timeout, and captured-log privacy.
+`cargo fmt --check` and strict all-target/all-feature clippy pass; full `cargo test` reports 206
+passed and 15 ignored external integration/live tests.
+
 ## RS-3: station.play_station resolves to server-validated play_stream (2026-09-09)
 
 Task RS-3 of the rockcast-device-plan (coordinated from `rock-esp32/docs/plan-control.md`)

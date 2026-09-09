@@ -206,9 +206,11 @@ impl YandexLlmProvider {
         Ok(Self { config, client })
     }
 
-    /// Returns a diagnostic request body with the folder identifier redacted.
+    /// Returns a diagnostic request body with identity and user text redacted.
     pub fn safe_request_body(&self, request: &LlmRequest) -> Value {
-        self.request_body(request, true)
+        let mut body = self.request_body(request, true);
+        body["messages"][1]["text"] = Value::String("[REDACTED]".to_owned());
+        body
     }
 
     /// Returns the non-secret official endpoint used by this provider.
@@ -243,13 +245,7 @@ impl YandexLlmProvider {
 impl LlmProvider for YandexLlmProvider {
     async fn generate_json(&self, request: &LlmRequest) -> Result<String, LlmProviderError> {
         let body = self.request_body(request, false);
-        tracing::debug!(
-            method = "POST",
-            endpoint = %self.config.endpoint,
-            authorization = "Api-Key [REDACTED]",
-            request_body = %self.safe_request_body(request),
-            "Yandex LLM request"
-        );
+        tracing::debug!(method = "POST", "structured intent request started");
         let response = self
             .client
             .post(self.config.endpoint.clone())
@@ -262,38 +258,28 @@ impl LlmProvider for YandexLlmProvider {
             .await
             .map_err(|error| {
                 if error.is_timeout() {
-                    LlmProviderError::safe("Yandex LLM request timed out")
+                    LlmProviderError::safe("structured intent request timed out")
                 } else {
-                    LlmProviderError::safe("Yandex LLM request failed")
+                    LlmProviderError::safe("structured intent request failed")
                 }
             })?;
         let status = response.status();
         if !status.is_success() {
-            let bytes = read_bounded(response).await?;
-            let safe_response = String::from_utf8_lossy(&bytes)
-                .replace(&self.config.api_key, "[REDACTED]")
-                .replace(&self.config.folder_id, "[REDACTED]");
-            tracing::debug!(
-                status = status.as_u16(),
-                response_body = %safe_response,
-                "Yandex LLM error response"
-            );
+            let _bytes = read_bounded(response).await?;
+            tracing::debug!(status = status.as_u16(), "structured intent request failed");
             return Err(LlmProviderError::safe(format!(
-                "Yandex LLM returned HTTP {}",
+                "structured intent service returned HTTP {}",
                 status.as_u16()
             )));
         }
         let bytes = read_bounded(response).await?;
-        let safe_response = String::from_utf8_lossy(&bytes)
-            .replace(&self.config.api_key, "[REDACTED]")
-            .replace(&self.config.folder_id, "[REDACTED]");
         tracing::debug!(
             status = status.as_u16(),
-            response_body = %safe_response,
-            "Yandex LLM response"
+            "structured intent request completed"
         );
-        let envelope = serde_json::from_slice::<CompletionEnvelope>(&bytes)
-            .map_err(|_| LlmProviderError::safe("Yandex LLM returned a malformed response"))?;
+        let envelope = serde_json::from_slice::<CompletionEnvelope>(&bytes).map_err(|_| {
+            LlmProviderError::safe("structured intent service returned a malformed response")
+        })?;
         let text = envelope
             .result
             .alternatives
@@ -301,10 +287,12 @@ impl LlmProvider for YandexLlmProvider {
             .next()
             .map(|alternative| alternative.message.text)
             .filter(|text| !text.is_empty())
-            .ok_or_else(|| LlmProviderError::safe("Yandex LLM returned no completion text"))?;
+            .ok_or_else(|| {
+                LlmProviderError::safe("structured intent service returned no completion text")
+            })?;
         if text.len() > MAX_LLM_INTENT_JSON_BYTES {
             return Err(LlmProviderError::safe(
-                "Yandex LLM returned an oversized intent response",
+                "structured intent service returned an oversized intent response",
             ));
         }
         Ok(text)
@@ -317,18 +305,18 @@ async fn read_bounded(mut response: reqwest::Response) -> Result<Vec<u8>, LlmPro
         .is_some_and(|length| length > MAX_PROVIDER_RESPONSE_BYTES as u64)
     {
         return Err(LlmProviderError::safe(
-            "Yandex LLM returned an oversized response",
+            "structured intent service returned an oversized response",
         ));
     }
     let mut body = Vec::new();
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|_| LlmProviderError::safe("Yandex LLM response read failed"))?
+        .map_err(|_| LlmProviderError::safe("structured intent service response read failed"))?
     {
         if body.len().saturating_add(chunk.len()) > MAX_PROVIDER_RESPONSE_BYTES {
             return Err(LlmProviderError::safe(
-                "Yandex LLM returned an oversized response",
+                "structured intent service returned an oversized response",
             ));
         }
         body.extend_from_slice(&chunk);
@@ -463,7 +451,10 @@ mod tests {
             .await
             .unwrap_err();
         server.abort();
-        assert_eq!(error.to_string(), "Yandex LLM returned HTTP 502");
+        assert_eq!(
+            error.to_string(),
+            "structured intent service returned HTTP 502"
+        );
         assert!(!error.to_string().contains("secret"));
 
         let (endpoint, server) =
@@ -475,7 +466,7 @@ mod tests {
         server.abort();
         assert_eq!(
             error.to_string(),
-            "Yandex LLM returned a malformed response"
+            "structured intent service returned a malformed response"
         );
 
         let oversized = completion(&format!(
@@ -502,7 +493,7 @@ mod tests {
             .await
             .unwrap_err();
         server.abort();
-        assert_eq!(error.to_string(), "Yandex LLM request timed out");
+        assert_eq!(error.to_string(), "structured intent request timed out");
     }
 
     fn input() -> QueryParserInput {

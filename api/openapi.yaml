@@ -10,8 +10,8 @@ info:
     PostgreSQL may use provenance-compatible semantic ranking; metadata fallback preserves
     the same schemas when embeddings are absent or unavailable. Operations marked
     `x-rockserver-status: planned` are contract-first device-control designs and are not yet
-    registered by the runtime; this currently includes the voice device-session/cancel
-    extension. The server-resolved `station.play_stream` dispatch and the two device-facing
+    registered by the runtime. The server-resolved `station.play_stream` dispatch, device voice
+    sessions, and the two device-facing
     catalog paths (`GET /api/v1/device-control/catalog/stations` and
     `GET /api/v1/device-control/catalog/search`) are implemented behind the RockserverBearer
     device session.
@@ -1071,11 +1071,13 @@ paths:
         and the whole session to a 10-second idle timeout, a 75-second wall timeout, and a
         15-second provider-operation timeout; final station search retains the five-second
         voice-command boundary. These enforced limits are also published machine-readably in
-        `x-voice-stream-limits`. Planned device-session extension (not yet enforced by the
-        runtime): an ESP32 voice endpoint authenticates with its RockserverBearer device
-        session, announces its `voice.main` surface in the start frame, and RockServer derives
-        `source_device_id` server-side and echoes it in `ready`; the client may send one
-        `VoiceStreamCancel` text frame to cancel a session deterministically.
+        `x-voice-stream-limits`. A device voice endpoint authenticates with its RockserverBearer
+        device session, announces its required `voice.main` surface in the start frame, and
+        RockServer derives `source_device_id` server-side and echoes it in `ready`. Its recognized
+        radio intent is submitted through the normal device command router to that explicit
+        source device. The client may send one `VoiceStreamCancel` text frame before commit to
+        cancel a session deterministically. Anonymous and legacy sessions retain the established
+        station-search result shape.
       parameters:
         - name: X-Request-Id
           in: header
@@ -1119,6 +1121,7 @@ paths:
           - $ref: "#/components/schemas/VoiceStreamReady"
           - $ref: "#/components/schemas/VoiceStreamTranscript"
           - $ref: "#/components/schemas/VoiceStreamResult"
+          - $ref: "#/components/schemas/VoiceDeviceCommandResult"
           - $ref: "#/components/schemas/VoiceStreamError"
 components:
   parameters:
@@ -2676,9 +2679,8 @@ components:
           default: voice.main
           enum: [voice.main]
           description: >-
-            Planned device-session field: the voice surface speaking. Only surfaces of kind
-            `voice` declared in the device manifest are accepted; identity itself is derived
-            from the authenticated device session, never from this frame.
+            Voice surface speaking. Required as `voice.main` for a device-session flow and
+            ignored as an identity claim: device identity is derived from authentication.
         recognizer_mode:
           type: string
           enum: [buffered_v1, streaming_v3]
@@ -2713,12 +2715,10 @@ components:
       properties:
         type:
           const: cancel
-      x-rockserver-status: planned
       description: >-
-        Planned explicit cancellation frame. A client may send it after `start` instead of
-        `commit`; RockServer stops the provider session immediately and answers with exactly
-        one terminal `error` event with code `cancelled`, preserving the one-terminal-event
-        invariant. It is not yet enforced by the runtime.
+        A client may send this after `start` instead of `commit`; RockServer stops recognition
+        immediately and answers with exactly one terminal `error` event with code `cancelled`,
+        preserving the one-terminal-event invariant.
     VoiceStreamReady:
       type: object
       additionalProperties: false
@@ -2737,14 +2737,13 @@ components:
           format: uuid
           readOnly: true
           description: >-
-            Planned device-session field: server-derived identity of the authenticated voice
-            device, added only for device-session voice sessions and never accepted from the
-            client.
+            Server-derived identity of the authenticated voice device, added only for
+            device-session voice sessions and never accepted from the client.
         surface_id:
           type: string
           enum: [voice.main]
           readOnly: true
-          description: Planned device-session echo of the announced voice surface.
+          description: Device-session echo of the announced voice surface.
     VoiceStreamTranscript:
       type: object
       additionalProperties: false
@@ -2761,6 +2760,7 @@ components:
     VoiceStreamResult:
       type: object
       additionalProperties: false
+      description: Established anonymous and legacy station-search result.
       required: [type, request_id, transcript, normalized_query, selected_station, stations]
       properties:
         type:
@@ -2779,6 +2779,47 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/StationResult"
+    VoiceDeviceCommandResult:
+      type: object
+      additionalProperties: false
+      description: Terminal lifecycle status for a device-session voice command.
+      required: [type, request_id, status]
+      properties:
+        type:
+          const: result
+        request_id:
+          type: string
+        status:
+          type: string
+          enum: [succeeded, failed]
+    VoiceStreamErrorCode:
+      type: string
+      enum:
+        - protocol_error
+        - validation_failed
+        - speech_provider_unavailable
+        - speech_provider_error
+        - speech_timeout
+        - speech_not_recognized
+        - voice_timeout
+        - audio_chunk_invalid
+        - audio_too_large
+        - cancelled
+        - intent_resolution_failed
+        - unsupported_intent
+        - clarification_required
+        - station_not_found
+        - search_timeout
+        - search_unavailable
+        - target_offline
+        - capability_not_supported
+        - forbidden
+        - invalid_payload
+        - command_timeout
+        - duplicate_command
+        - too_many_in_flight
+        - persistence_unavailable
+        - internal_error
     VoiceStreamError:
       type: object
       additionalProperties: false
@@ -2787,7 +2828,7 @@ components:
         type:
           const: error
         code:
-          type: string
+          $ref: "#/components/schemas/VoiceStreamErrorCode"
         message:
           type: string
         request_id:

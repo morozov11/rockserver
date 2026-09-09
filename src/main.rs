@@ -15,6 +15,7 @@ use rockserver::{
         SemanticLanguageClassifier, semantic_language_filters_enabled,
     },
     serve, shutdown_signal, telemetry,
+    voice::{CommandInterpreter, DeterministicCommandInterpreter, LlmCommandInterpreter},
 };
 use tokio::net::TcpListener;
 
@@ -54,11 +55,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
         (None, true) => None,
     };
-    let query_parser: Arc<dyn QueryParser> = match YandexLlmProvider::optional_from_env()? {
-        Some(provider) => Arc::new(LlmQueryParser::new(
-            Arc::new(provider) as Arc<dyn LlmProvider>
-        )),
+    let structured_provider = YandexLlmProvider::optional_from_env()?
+        .map(|provider| Arc::new(provider) as Arc<dyn LlmProvider>);
+    let query_parser: Arc<dyn QueryParser> = match &structured_provider {
+        Some(provider) => Arc::new(LlmQueryParser::new(Arc::clone(provider))),
         None => Arc::new(DeterministicQueryParser),
+    };
+    let voice_command_interpreter: Arc<dyn CommandInterpreter> = match structured_provider {
+        Some(provider) => Arc::new(LlmCommandInterpreter::new(provider)),
+        None => Arc::new(DeterministicCommandInterpreter),
     };
     let search_service = SearchService::with_providers_and_language_classifier(
         repository,
@@ -79,11 +84,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .unwrap_or(unavailable);
     serve(
         listener,
-        rockserver::http::router_with_speech_recognizers_bearer_account_admin_store_and_proxy(
+        rockserver::http::router_with_speech_recognizers_bearer_account_admin_store_proxy_and_voice_interpreter(
             search_service,
-            rockserver::voice::SpeechRecognizers::new(
-                buffered_speech_recognizer,
-                streaming_speech_recognizer,
+            (
+                rockserver::voice::SpeechRecognizers::new(
+                    buffered_speech_recognizer,
+                    streaming_speech_recognizer,
+                ),
+                voice_command_interpreter,
             ),
             rockserver::http::DEFAULT_VOICE_COMMAND_TIMEOUT,
             config.api_bearer_token,
