@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: RockServer API
-  version: 0.4.0
+  version: 0.5.0
   description: >-
     Contract for RockServer operational health checks, deterministic station search, and the
     Windows voice-command JSON and streaming boundaries. `POST /api/v1/voice/command` resolves
@@ -10,7 +10,10 @@ info:
     PostgreSQL may use provenance-compatible semantic ranking; metadata fallback preserves
     the same schemas when embeddings are absent or unavailable. Operations marked
     `x-rockserver-status: planned` are contract-first device-control designs and are not yet
-    registered by the runtime.
+    registered by the runtime; this includes the two device-facing catalog paths
+    (`GET /api/v1/device-control/catalog/stations` and
+    `GET /api/v1/device-control/catalog/search`), the server-resolved `station.play_stream`
+    dispatch, and the voice device-session/cancel extension.
 servers:
   - url: https://alex.vault57.ru
   - url: http://localhost
@@ -339,6 +342,136 @@ paths:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
         "503":
           description: The planned device-control projection is unavailable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /api/v1/device-control/catalog/stations:
+    get:
+      operationId: browseDeviceCatalog
+      summary: Browse one bounded device-facing catalog page of station metadata
+      x-rockserver-status: planned
+      description: >-
+        Device-facing catalog browse for paired native devices that render a station list
+        locally (ESP32 display/controller roles). Authentication is the short-lived
+        RockserverBearer device session from `POST /api/v1/auth/device-session`; the server
+        derives user and device identity from it and never trusts identity from parameters.
+        Station metadata is account-independent, so v1 requires only a valid non-revoked
+        device session and no additional device-control scope. The cursor model matches the
+        public catalog: the cursor is the stable station ID of the last item of the previous
+        page, at most 512 ASCII letters, digits or hyphens, and `next_cursor` is null exactly
+        when no further page may exist. At most 20 stations are returned per page. Unknown or
+        oversized parameters are rejected deterministically with 400. Responses never contain
+        `stream_url`: a device starts playback only through server-resolved
+        `station.play_station` dispatch, never through a catalog URL.
+      security:
+        - RockserverBearer: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 20, default: 20 }
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 512
+            pattern: "^[A-Za-z0-9-]+$"
+      responses:
+        "200":
+          description: One bounded station-metadata page without stream URLs.
+          headers:
+            Cache-Control: { schema: { type: string, example: no-store } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceCatalogPage" }
+        "400":
+          description: An unknown, malformed, or oversized pagination parameter was supplied.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401": { $ref: "#/components/responses/AuthenticationRequired" }
+        "403":
+          description: The authenticated device is revoked or forbidden without disclosing another target.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "429":
+          description: The caller exceeded the bounded device-catalog rate.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: The station catalog is temporarily unavailable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /api/v1/device-control/catalog/search:
+    get:
+      operationId: searchDeviceCatalog
+      summary: Run one bounded ranked station search for a device session
+      x-rockserver-status: planned
+      description: >-
+        Device-facing ranked search reusing the existing deterministic station-search service
+        (hard filters, deterministic ranking, semantic-provider failures degrade to metadata
+        search). Authentication is the same RockserverBearer device session as catalog browse;
+        the server derives identity from it. `q` is at most 128 characters, at most 20 ranked
+        stations are returned, and the result is exactly one page: ranked search is not
+        cursorable in the existing service, so no cursor parameter or `next_cursor` field
+        exists on this path (two-path decision, 2026-09-09). Rank order is the array order.
+        Unknown or oversized parameters are rejected deterministically with 400. Responses
+        never contain `stream_url`.
+      security:
+        - RockserverBearer: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+          description: Natural-language station query; whitespace-only values are invalid.
+        - name: locale
+          in: query
+          required: false
+          schema:
+            type: string
+            default: en-US
+            pattern: "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 20, default: 20 }
+      responses:
+        "200":
+          description: One ranked station-metadata page without stream URLs and without a cursor.
+          headers:
+            Cache-Control: { schema: { type: string, example: no-store } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceSearchPage" }
+        "400":
+          description: An unknown, malformed, oversized, or whitespace-only query parameter was supplied.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401": { $ref: "#/components/responses/AuthenticationRequired" }
+        "403":
+          description: The authenticated device is revoked or forbidden without disclosing another target.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "429":
+          description: The caller exceeded the bounded device-catalog rate.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: An unexpected catalog or search failure occurred.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: The station catalog is temporarily unavailable.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
@@ -931,9 +1064,17 @@ paths:
         `VoiceStreamStart` text frame, then binary PCM signed 16-bit little-endian mono chunks,
         and finally one JSON `VoiceStreamCommit` text frame. `recognizer_mode` selects either the
         compatible buffered v1 provider (default) or v3 upstream streaming. RockServer emits `ready`, zero or
-        more `transcript`, and one terminal `result` or `error` event. Each binary message is
-        limited to 65,536 bytes and the session to 10 MiB. Provider operations time out after
-        ten seconds; final station search retains the five-second voice-command boundary.
+        more `transcript`, and one terminal `result` or `error` event. The only accepted audio
+        format is `pcm_s16le` mono at exactly 16,000 Hz. Each binary message is limited to
+        32,768 bytes, the session to 2 MiB or 60 seconds of audio, whichever is reached first,
+        and the whole session to a 10-second idle timeout, a 75-second wall timeout, and a
+        15-second provider-operation timeout; final station search retains the five-second
+        voice-command boundary. These enforced limits are also published machine-readably in
+        `x-voice-stream-limits`. Planned device-session extension (not yet enforced by the
+        runtime): an ESP32 voice endpoint authenticates with its RockserverBearer device
+        session, announces its `voice.main` surface in the start frame, and RockServer derives
+        `source_device_id` server-side and echoes it in `ready`; the client may send one
+        `VoiceStreamCancel` text frame to cancel a session deterministically.
       parameters:
         - name: X-Request-Id
           in: header
@@ -956,10 +1097,22 @@ paths:
                 type: string
         "400":
           description: The HTTP request is not a valid WebSocket upgrade request.
+      x-voice-stream-limits:
+        audio_format: pcm_s16le
+        channels: 1
+        sample_rate_hz: 16000
+        max_chunk_bytes: 32768
+        max_session_bytes: 2097152
+        max_session_audio_seconds: 60
+        idle_timeout_seconds: 10
+        wall_timeout_seconds: 75
+        provider_timeout_seconds: 15
+        search_timeout_ms: 5000
       x-websocket-client-messages:
         oneOf:
           - $ref: "#/components/schemas/VoiceStreamStart"
           - $ref: "#/components/schemas/VoiceStreamCommit"
+          - $ref: "#/components/schemas/VoiceStreamCancel"
       x-websocket-server-messages:
         oneOf:
           - $ref: "#/components/schemas/VoiceStreamReady"
@@ -1356,6 +1509,12 @@ components:
           items: { type: string, enum: [text, now_playing, sensor_grid] }
         max_items: { type: integer, minimum: 1, maximum: 32 }
         max_text_length: { type: integer, minimum: 1, maximum: 1024 }
+      description: >-
+        Remote presentation views are exactly `text`, `now_playing` and `sensor_grid`
+        (decision 2026-09-09). `station_list`, `search`, `loading`, `offline` and
+        `playback_error` are local device UI states rendered by the device itself; they are
+        not presentation types, are never commanded remotely, and v1 adds no view beyond the
+        three listed here.
     SensorCapability:
       type: object
       additionalProperties: false
@@ -1697,26 +1856,51 @@ components:
           description: >-
             Controller supplies only the stable RockServer station_id. RockServer resolves the
             current catalog stream and dispatches a validated station.play_stream under the same
-            command_id; the controller never chooses a catalog stream URL.
+            command_id; the controller never chooses a catalog stream URL. The transformation
+            preserves the command_id end to end: the controller observes the ordinary
+            received -> accepted -> terminal result lifecycle, the target acknowledges with
+            command.accepted as soon as it begins handling the request, and exactly one
+            command.result arrives within the 30-second deadline cap (10 s when no deadline_at
+            is supplied). A controller result may legally arrive after the controller's own
+            shorter client expiry; that is expected, not an error.
+        - type: object
+          additionalProperties: false
+          required: [name, source, station_id, stream_uri]
+          properties:
+            name: { const: station.play_stream }
+            source: { const: rockserver_catalog }
+            station_id: { type: string, minLength: 1, maxLength: 128 }
+            stream_uri: { $ref: "#/components/schemas/StationStreamUri" }
+          description: >-
+            Server-resolved playback dispatched by RockServer only, under the same command_id
+            as the originating station.play_station, after validating the target's player role
+            and media.station capability. station_id echoes the resolved station so the target
+            can publish truthful playback state and now_playing presentations. Controllers
+            must not send this variant; a controller-supplied source=rockserver_catalog is
+            rejected as invalid_payload.
         - type: object
           additionalProperties: false
           required: [name, source, stream_uri]
           properties:
             name: { const: station.play_stream }
-            source: { type: string, enum: [rockserver_catalog, direct_stream] }
-            stream_uri:
-              type: string
-              format: uri
-              pattern: "^https?://"
-              maxLength: 2048
-              description: >-
-                Allowed only when media.station advertises direct_stream. The absolute HTTP(S) URI
-                must have a host, no userinfo or fragment, and a TCP port in 1..65535 (including the
-                scheme default). RockServer and the target validate every DNS result and at most five
-                redirects and reject loopback, private, link-local, multicast and reserved
-                destinations; the URI must not be logged. Controllers may send only
-                source=direct_stream. RockServer transforms station.play_station into
-                source=rockserver_catalog under the same command_id after catalog resolution.
+            source: { const: direct_stream }
+            stream_uri: { $ref: "#/components/schemas/StationStreamUri" }
+          description: >-
+            Controller-supplied direct stream. Allowed only when the target's media.station
+            capability advertises direct_stream; a target without it rejects the command with
+            capability_not_supported.
+    StationStreamUri:
+      type: string
+      format: uri
+      pattern: "^https?://"
+      maxLength: 2048
+      description: >-
+        Absolute HTTP(S) stream URI. It must have a host, no userinfo or fragment, and a TCP
+        port in 1..65535 (including the scheme default). RockServer and the target validate
+        every DNS result and at most five redirects (max_stream_redirects) and reject loopback,
+        private, link-local, multicast and reserved destinations. The URI is never logged and
+        never appears in fixtures, documents, or audit output.
+      x-rockserver-status: planned
     VolumeCommand:
       oneOf:
         - type: object
@@ -2484,8 +2668,16 @@ components:
           default: en-US
           pattern: "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
         sample_rate_hz:
-          type: integer
-          enum: [8000, 16000, 24000, 48000]
+          const: 16000
+          description: The runtime accepts exactly 16,000 Hz mono signed 16-bit little-endian PCM.
+        surface_id:
+          type: string
+          default: voice.main
+          enum: [voice.main]
+          description: >-
+            Planned device-session field: the voice surface speaking. Only surfaces of kind
+            `voice` declared in the device manifest are accepted; identity itself is derived
+            from the authenticated device session, never from this frame.
         recognizer_mode:
           type: string
           enum: [buffered_v1, streaming_v3]
@@ -2494,8 +2686,9 @@ components:
         limit:
           type: integer
           minimum: 1
-          maximum: 50
+          maximum: 10
           default: 10
+          description: Maximum number of ranked stations; the stream path caps this at 10.
         exclude_station_ids:
           type: array
           default: []
@@ -2512,6 +2705,19 @@ components:
       properties:
         type:
           const: commit
+    VoiceStreamCancel:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: cancel
+      x-rockserver-status: planned
+      description: >-
+        Planned explicit cancellation frame. A client may send it after `start` instead of
+        `commit`; RockServer stops the provider session immediately and answers with exactly
+        one terminal `error` event with code `cancelled`, preserving the one-terminal-event
+        invariant. It is not yet enforced by the runtime.
     VoiceStreamReady:
       type: object
       additionalProperties: false
@@ -2524,7 +2730,20 @@ components:
         audio_format:
           const: pcm_s16le
         sample_rate_hz:
-          type: integer
+          const: 16000
+        source_device_id:
+          type: string
+          format: uuid
+          readOnly: true
+          description: >-
+            Planned device-session field: server-derived identity of the authenticated voice
+            device, added only for device-session voice sessions and never accepted from the
+            client.
+        surface_id:
+          type: string
+          enum: [voice.main]
+          readOnly: true
+          description: Planned device-session echo of the announced voice surface.
     VoiceStreamTranscript:
       type: object
       additionalProperties: false
@@ -2655,6 +2874,82 @@ components:
         health:
           type: string
           enum: [healthy, degraded, unknown]
+    DeviceStationDto:
+      type: object
+      additionalProperties: false
+      required: [id, name, homepage_url, tags, language, country_code, codec, bitrate_kbps, health]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Stable RockServer station identifier usable in `station.play_station`.
+        name:
+          type: string
+          minLength: 1
+        homepage_url:
+          type: [string, "null"]
+          format: uri
+        tags:
+          type: array
+          items: { type: string }
+        language:
+          type: [string, "null"]
+          description: ISO 639 language code when known.
+        country_code:
+          type: [string, "null"]
+          pattern: "^[A-Z]{2}$"
+        codec:
+          type: [string, "null"]
+        bitrate_kbps:
+          type: [integer, "null"]
+          minimum: 1
+        health:
+          type: string
+          enum: [healthy, degraded, unknown]
+      description: >-
+        Station metadata for device-facing catalog pages. It deliberately has no `stream_url`,
+        no ranking fields, and no provider or persistence identifiers: devices select a
+        station by stable ID and playback is resolved server-side through
+        `station.play_station` dispatch.
+    DeviceCatalogPage:
+      type: object
+      additionalProperties: false
+      required: [request_id, stations, next_cursor]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+        stations:
+          type: array
+          maxItems: 20
+          items: { $ref: "#/components/schemas/DeviceStationDto" }
+        next_cursor:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 512
+              pattern: "^[A-Za-z0-9-]+$"
+            - type: "null"
+          description: Stable ID of the last returned station, or null when no further page may exist.
+      description: >-
+        Exactly one bounded browse page. The cursor is the last stable station ID of the
+        previous page; the next page starts strictly after it in stable-ID order.
+    DeviceSearchPage:
+      type: object
+      additionalProperties: false
+      required: [request_id, stations]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+        stations:
+          type: array
+          maxItems: 20
+          items: { $ref: "#/components/schemas/DeviceStationDto" }
+      description: >-
+        Exactly one ranked search page; array order is the ranking. Ranked search is not
+        cursorable in the existing service, so this page intentionally has no cursor field.
     ErrorResponse:
       type: object
       additionalProperties: false

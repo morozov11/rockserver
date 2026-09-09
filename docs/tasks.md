@@ -1,5 +1,54 @@
 # Task log
 
+## 2026-09-09 — RS-1: freeze RockCast-radio contracts before implementation
+
+- Goal: freeze the Step-2 contracts of `rock-esp32/docs/rockcast-device-plan.md` in RockServer
+  before any implementation (unblocks RS-2/RS-3/RS-4).
+- Scope: `api/openapi.yaml` 0.5.0 — two planned device-facing catalog paths
+  (cursor browse ≤20/page and one-page ranked search, both behind the RockserverBearer device
+  session, both returning a new `DeviceStationDto` without `stream_url`); enforceable
+  `station.play_stream` variants (server `rockserver_catalog` with required `station_id`,
+  controller `direct_stream`) with SSRF bounds in `StationStreamUri`; voice stream contract
+  realigned with the enforced runtime (16 kHz mono, 32 KiB chunks, 2 MiB/60 s, idle 10 s,
+  wall 75 s, provider 15 s, machine-readable in `x-voice-stream-limits`) plus the planned
+  device-session/cancel extension (`VoiceStreamCancel`, `voice.main`, server-derived
+  `source_device_id`); decision that `station_list`/`search`/`loading`/`offline`/
+  `playback_error` are local UI states with no new remote presentation types. Fixtures:
+  truthful final ESP32 radio register manifest (controller role added, `media.station`
+  rockserver_catalog only, `voice.main` surface, no sensors), coherent manifest-rev-2 and
+  directory snapshot, new `device-catalog-response.json`, README semantics for
+  accepted/result ≤30 s and the Rockmobile volume rule. Tests: `tests/openapi_contract.rs`
+  extended with structural, positive and negative schema assertions and a runtime check that
+  the planned catalog paths answer 404. Roadmap RS-task section added in
+  `docs/roadmap/device-control-tasks.md`.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
+  `cargo test` — all pass; contract suite 8/8. No runtime code changed; all
+  `x-rockserver-status: planned` markers preserved.
+- Status: complete.
+
+## 2026-09-09 — DC-019/DC-020 deferred; DC-039 selected for execution
+
+- Goal: record the owner's current hardware constraint and executable product priority.
+- Scope: deferred DC-019 sensor modules and dependent DC-020 sensor-display end-to-end because
+  physical sensors are not yet available. Their definitions remain intact for later resumption.
+  The owner selected DC-039, thereby making the required product decision to pursue on-device
+  interactive station browse on ESP32. The roadmap preserves the requirement to define any
+  contract extension before implementation.
+- Checks: documentation-only update; no runtime, protocol contract, or sensor behavior changed.
+- Status: complete.
+
+## 2026-09-09 — DC-017 completion and DC-018 roadmap synchronization
+
+- Goal: align RockServer's device-control roadmap with the verified ESP32 firmware state.
+- Scope: marked DC-017 complete with its hardware and contract-test evidence; Phase 5 now
+  records the completed C6/SDIO, provisioning, NVS, and WSS work. DC-018 remains the next
+  executable milestone: `display.main`, protocol presentation views, GT911 touch, and
+  idempotent display commands. Interactive station browsing and local audio remain product-gated
+  DC-039/DC-040 work.
+- Checks: documentation-only comparison against `rock-esp32` commit `813a544` and its
+  `docs/dc-017-progress.md` / `docs/device-control.md`; no runtime or protocol contract changed.
+- Status: complete.
+
 ## 2026-09-08 — DC-018 GUI stack decision: LVGL v9 via esp_lvgl_port (owner confirmed)
 
 - Goal: record the owner's confirmation of LVGL v9 through the C `esp_lvgl_port` component as

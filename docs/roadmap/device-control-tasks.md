@@ -307,7 +307,7 @@ RockMobile → RockServer → RockCast подтверждён 2026-09-07 (ком
 
 ## Milestone D — ESP32 display и sensors
 
-### DC-017 — реализовать ESP32 provisioning и transport core
+### DC-017 — реализовать ESP32 provisioning и transport core — выполнено (2026-09-09)
 
 **Репозиторий:** ESP32 firmware (rock-esp32).  
 **Зависимости:** DC-003, DC-006, DC-007; предусловия bring-up из rock-esp32.
@@ -337,10 +337,13 @@ ESP32-C6 по ESP-Hosted/SDIO, 4.3" дисплей, 16 MB flash), ESP-IDF 6.1 и
   серверный и клиентский код). egui-код RockCast на ESP32 не переносится: переносится только
   визуальная тема как дизайн-референс.
 
-**Приёмка:** power cycle, Wi-Fi loss и server restart не теряют identity; malformed/oversized
-message не перезапускает устройство; молчание/зависание ESP32-C6 восстанавливается reset-линией
-(GPIO54) без ручного вмешательства; SDIO-соединение переживает power cycle; pairing-секреты и
-токены не появляются в серийных логах.
+**Приёмка (выполнено):** на JC4880P443C_I_W подтверждены ESP32-P4 v1.3, ESP-IDF 6.1,
+ESP-Hosted 3.0.7 на P4 и C6, SDIO 4-bit и живое сканирование Wi-Fi на ST7701/LVGL-дисплее.
+Прошивка реализует pairing, обычное NVS-хранилище `rock_auth` для `device_id`/`device_secret`,
+renewal device session, bounded WSS transport, heartbeat/reconnect и generic
+manifest/state/command dispatch. Контрактные тесты против канонических RockServer fixtures
+прошли 6/6; P4-образ собран и прошит без стирания NVS. Детали и ограничения — в
+`rock-esp32/docs/dc-017-progress.md` и `rock-esp32/docs/device-control.md`.
 
 ### DC-018 — реализовать ESP32 display surface
 
@@ -362,16 +365,24 @@ message не перезапускает устройство; молчание/�
   hardware profile. Визуальная тема — RockCast-подобная (палитра, шрифты, композиция now_playing)
   как дизайн-референс; egui-код RockCast не переносится и не переиспользуется.
 - Рендерить presentation локально; не принимать произвольный HTML/script.
+- Инициализировать и проверить GT911; touch допускается для локального подтверждения,
+  повторной попытки и навигации внутри уже показанного view, но не создаёт browse/search
+  protocol и не расширяет v1-контракт.
 - Публиковать текущий view и terminal command result.
 - Граница v1-скоупа: интерактивный browse каталога и аудиовыход на самом устройстве не входят в
   эту задачу — они за явными продуктовыми решениями DC-039/DC-040.
 
-**Приёмка:** golden presentations стабильно рисуются на целевом дисплее; неизвестный view даёт `capability_not_supported`.
+**Приёмка:** golden presentations стабильно рисуются на целевом дисплее; touch корректно
+обрабатывается после power cycle; неизвестный view даёт `capability_not_supported`; повторная
+`display.show_view` не создаёт новый побочный эффект.
 
 ### DC-019 — реализовать ESP32 sensor modules
 
 **Репозиторий:** ESP32 firmware.  
 **Зависимости:** DC-017, DC-008.
+
+**Статус:** отложена владельцем 2026-09-09: физические датчики пока отсутствуют. Возобновить
+после появления hardware; задача не отменена.
 
 - Добавить драйверы первых temperature/humidity sensors за внутренним provider interface.
 - Публиковать entity manifest и telemetry с unit, observed time, quality и configurable stale interval.
@@ -383,6 +394,9 @@ message не перезапускает устройство; молчание/�
 
 **Репозитории:** RockServer и ESP32 firmware.  
 **Зависимости:** DC-011, DC-018, DC-019.
+
+**Статус:** отложена владельцем 2026-09-09 вместе с DC-019: без доступных физических датчиков
+невозможно подтвердить end-to-end приёмку. Возобновить после DC-019 и появления hardware.
 
 - Провести typed intent `show_sensors` через entity resolution и presentation builder.
 - Отправить `display.show_view(sensor_grid)` на нужную surface.
@@ -401,6 +415,10 @@ Milestone E–G.
 
 **Репозитории:** RockServer (только при контрактном расширении) и ESP32 firmware.  
 **Зависимости:** DC-018; явное продуктовое решение о скоупе on-device GUI.
+
+**Статус:** выбрана владельцем для выполнения 2026-09-09; продуктовое решение — реализовать
+интерактивный выбор станции на устройстве. Любое требуемое контрактное расширение должно быть
+зафиксировано в OpenAPI и fixtures до реализации.
 
 - Зафиксировать продуктовое решение: интерактивный выбор станции на самом устройстве
   (browse/search/play с touch) против управления только с controller.
@@ -433,6 +451,93 @@ offline state, а не устаревший или фиктивный списо
 **Приёмка:** манифест реальной прошивки декларирует только физически доступные функции;
 реализованный звук проходит power cycle/reconnect soak, а нереализованный — явно исключён без
 молчаливого обещания capability.
+
+### RS-задачи — контракты и серверная реализация плана RockCast-радио (2026-09-09)
+
+Выполняются по плану `rock-esp32/docs/rockcast-device-plan.md` (шаги 2–3), координация —
+`rock-esp32/docs/plan-control.md`. Порядок жёсткий: контракты (RS-1) закрываются до любой
+реализации (RS-2/RS-3/RS-4). Находки аудита 2026-09-09: F1 (play_stream только planned),
+F2 (catalog не в OpenAPI, анонимный, отдаёт stream_url), F3 (voice без device-auth/cancel,
+дрейф лимитов), F4 (Rockmobile жёстко валидирует media.volume), F10 (ranked search
+не курсоруется).
+
+#### RS-1 — зафиксировать контракты до реализации — выполнено (2026-09-09)
+
+**Репозиторий:** RockServer (только контракты, fixtures, документация и контрактные тесты).
+
+Сделано:
+
+- `api/openapi.yaml` 0.5.0: два `x-rockserver-status: planned` device-facing пути каталога с
+  аутентификацией RockserverBearer — `GET /api/v1/device-control/catalog/stations`
+  (browse: явный курсор = последний стабильный station id, ≤512 ASCII, ≤20 на страницу) и
+  `GET /api/v1/device-control/catalog/search` (query ≤128, ≤20 результатов, одна страница,
+  без курсора — решение F10). Оба возвращают новый `DeviceStationDto` БЕЗ `stream_url`
+  (и без score/reason/provider-полей); `PublicStationDto` не переиспользуется.
+- `station.play_stream` переведён из свободного enum в структурно-исполнимую схему: вариант
+  `source=rockserver_catalog` (только серверный, обязателен `station_id` — эхо разрешённой
+  станции) и вариант `source=direct_stream` (контроллерский, только при объявленной
+  capability). Переход `play_station → play_stream` сохраняет `command_id` и lifecycle
+  accepted/result ≤30 с; SSRF-ограничения (http/https, ≤2048, запрет приватных диапазонов,
+  ≤5 редиректов, never logged) сохранены в общей схеме `StationStreamUri`.
+- Voice: устранён дрейф `/api/v1/voice/stream` с рантаймом (ровно 16000 Гц mono pcm_s16le,
+  чанк ≤32 КиБ, сессия ≤2 МиБ/60 с, idle 10 с, wall 75 с, provider 15 с — машиночитаемо в
+  `x-voice-stream-limits`; лимит результатов потока ≤10); задокументировано planned-расширение
+  RS-4: device-session аутентификация, `surface_id=voice.main`, серверный `source_device_id`,
+  явный cancel-фрейм `VoiceStreamCancel` (marked planned).
+- Зафиксировано решение: `station_list`, `search`, `loading`, `offline`, `playback_error` —
+  локальные UI-состояния устройства; remote presentation types остаются ровно
+  `text`/`now_playing`/`sensor_grid` (описано в `DisplayCapability`).
+- Fixtures: `esp32-register-client.json` переведён в финальную правдивую форму радио
+  (roles player/controller/display_surface/voice_endpoint; `media.station` только
+  `rockserver_catalog`; volume 0/100/step 1/mute; surfaces `display.main` + `voice.main`;
+  без сенсоров — DC-019 отложен); `esp32-manifest-client.json` (rev 2) и
+  `directory-snapshot-server.json` синхронизированы (rev 2 добавляет sensor-часть как пример
+  возобновления DC-019); добавлен `device-catalog-response.json` (`DeviceCatalogPage` без
+  stream_url). В README fixtures зафиксированы семантика «accepted немедленно, result
+  асинхронно ≤30 с (10 с expiry в Rockmobile — норма)» и правило Rockmobile-совместимости
+  media.volume (0..100, step 1..100, нарушение валидно отвергается схемой).
+- Контрактные тесты `tests/openapi_contract.rs` расширены: структурные проверки обоих путей
+  каталога, положительная и отрицательная валидация `DeviceStationDto` (в т.ч. с stream_url —
+  invalid), страницы >20 станций, кривого курсора; play_stream-варианты (отрицательные:
+  rockserver_catalog без station_id, direct_stream с station_id, ftp://, >2048); volume
+  (negative: min/max вне 0..100, step 0/101, level вне 0..100); display views (station_list
+  и др. — schema-invalid); voice (значения `x-voice-stream-limits`, 8000/24000/44100 Гц и
+  limit 50 — invalid, cancel-фрейм); runtime-проверка, что planned-пути каталога не
+  зарегистрированы роутером (404).
+
+**Приёмка (выполнено):** OpenAPI и все канонические fixtures валидируются
+(`cargo test --test openapi_contract`, 8/8); planned-маркеры не сняты ни с одной операции
+(снимаются только в RS-2/RS-3/RS-4 по мере реализации); выбор станции всегда несёт явный
+player `device_id` (target обязателен в схеме команды); ни один контракт не раскрывает
+секреты, провайдерные идентификаторы или невалидированные stream URL; runtime-код не изменён.
+
+#### RS-2 — реализовать device-facing каталог — ожидает
+
+Реализовать оба planned-пути каталога (RS-1 контракт) на существующих catalog/search-сервисах
+с их rate limits, device-session аутентификацией и `DeviceStationDto` без stream_url; снять
+`x-rockserver-status: planned` с обеих операций; покрыть runtime-тестами.
+
+Примечание (bounds, план шаг 2.2): firmware удерживает ровно одну страницу каталога;
+неизвестные и oversized-запросы/ответы отвергаются детерминированно и не мутируют видимую
+модель.
+
+#### RS-3 — реализовать резолюцию play_station → play_stream — ожидает
+
+Резолвить каталог-стрим на сервере и диспатчить валидированный `station.play_stream`
+(тот же `command_id`, `source=rockserver_catalog` + `station_id`) на явный player-target
+после проверки роли `player` и capability `media.station`; снять planned-маркер со схемы.
+
+#### RS-4 — реализовать voice device-session, cancel и UserIntent-роутинг — ожидает
+
+Аутентифицировать device-сессии на `/voice/stream`, прокинуть `source_device_id`,
+`voice.main` и locale через сессию, реализовать `VoiceStreamCancel`; маршрут распознанного
+транскрипта через типизированный `UserIntent` в существующий командный роутер (радио-intents);
+снять planned-маркеры с voice-расширения.
+
+Примечание (Rockmobile, план шаг 2.8): изменения протокола Rockmobile не требуются —
+«Играть на устройстве» (RM-1) строит `station.play_station` через существующую модель
+lifecycle; 10-секундный клиентский deadline с пометкой Expired остаётся ожидаемым
+поведением, серверный bound 30 с покрывает асинхронный result.
 
 ## Milestone E — Home Assistant
 

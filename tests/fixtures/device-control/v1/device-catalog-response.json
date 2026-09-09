@@ -1,0 +1,9 @@
+{
+  "request_id": "req_01DEVCFIX",
+  "stations": [
+    { "id": "station-rock-001", "name": "Highway Rock", "homepage_url": "https://example.com/highway-rock", "tags": ["rock", "classic rock"], "language": "en", "country_code": "GB", "codec": "AAC", "bitrate_kbps": 128, "health": "healthy" },
+    { "id": "station-jazz-001", "name": "Quiet Jazz Radio", "homepage_url": null, "tags": ["jazz", "instrumental", "calm"], "language": "en", "country_code": "US", "codec": "MP3", "bitrate_kbps": 192, "health": "healthy" },
+    { "id": "station-news-001", "name": "Morning News FM", "homepage_url": "https://example.com/morning-news", "tags": ["news", "talk"], "language": "ru", "country_code": "RU", "codec": null, "bitrate_kbps": null, "health": "unknown" }
+  ],
+  "next_cursor": "station-news-001"
+}

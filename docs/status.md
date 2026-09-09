@@ -1,6 +1,48 @@
 # Project status
 
-Last updated: 2026-09-08
+Last updated: 2026-09-09
+
+## RS-1: RockCast-radio contracts frozen before implementation (2026-09-09)
+
+Task RS-1 of the rockcast-device-plan (coordinated from `rock-esp32/docs/plan-control.md`)
+froze the Step-2 contracts in `api/openapi.yaml` 0.5.0 without any runtime change:
+
+- Two `x-rockserver-status: planned` device-facing catalog paths behind the RockserverBearer
+  device session — cursor-paginated browse (`GET /api/v1/device-control/catalog/stations`,
+  explicit stable-ID cursor, at most 20 per page) and one-page ranked search
+  (`GET /api/v1/device-control/catalog/search`, query at most 128 characters, at most 20
+  results, no cursor by the F10 two-path decision). Both return the new `DeviceStationDto`
+  without `stream_url`; the public anonymous catalog and search routes are unchanged.
+- `station.play_stream` is now structurally enforceable: a server-only
+  `source=rockserver_catalog` variant (requires the resolved `station_id`) and a controller
+  `source=direct_stream` variant; SSRF bounds live in the shared `StationStreamUri` schema.
+- The voice stream contract matches the enforced runtime exactly (16 kHz mono pcm_s16le,
+  32 KiB chunks, 2 MiB/60 s session, 10 s idle, 75 s wall, 15 s provider, result limit 10)
+  and documents the planned RS-4 device-session extension (`voice.main` surface,
+  server-derived `source_device_id`, explicit `VoiceStreamCancel`).
+- Decision recorded: `station_list`, `search`, `loading`, `offline` and `playback_error` are
+  local device UI states; remote presentation views stay exactly `text`, `now_playing`,
+  `sensor_grid`.
+- Canonical fixtures updated: the ESP32 register fixture is the truthful radio shape
+  (player/controller/display_surface/voice_endpoint, `media.station` = rockserver_catalog
+  only, volume 0/100/1, `display.main` + `voice.main`, no sensors), manifest revision 2 and
+  the directory snapshot stay coherent, and `device-catalog-response.json` demonstrates a
+  stream-URL-free catalog page. The fixture README freezes the "accepted immediately, result
+  async within 30 s" command semantics and the Rockmobile volume-compatibility rule.
+
+Verification: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`
+and `cargo test` pass; `tests/openapi_contract.rs` grew to 8 tests covering positive and
+negative schema validation and proving the planned catalog routes are not yet registered by
+the runtime router. RS-2/RS-3/RS-4 (implementation) remain pending.
+
+## DC-019/DC-020 deferred; DC-039 selected (2026-09-09)
+
+The owner has deferred DC-019 (ESP32 sensor modules) and DC-020 (sensor-to-display end to
+end) because no physical sensors are currently available. They are not cancelled: their scope,
+dependencies and acceptance criteria remain recorded, but no firmware or RockServer work should
+begin until the hardware is available. The owner has instead selected DC-039 for execution,
+authorizing the product decision required for its on-device interactive station browse GUI.
+This does not change the protocol-v1 sensor scope or claim any sensor behavior as implemented.
 
 ## DC-018 GUI stack confirmed: LVGL v9 via esp_lvgl_port (2026-09-08)
 

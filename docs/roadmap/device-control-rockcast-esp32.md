@@ -331,18 +331,25 @@ Home Assistant подключается через отдельный provider a
 
 Железо зафиксировано: плата JC4880P443C_I_W (ESP32-P4 v1.3 без радио, Wi-Fi через ESP32-C6 по
 ESP-Hosted/SDIO, 4.3" дисплей, 16 MB flash); прошивка — Rust поверх ESP-IDF 6.1 в репозитории
-rock-esp32. Исполнимый порядок задач — DC-017–DC-020 в [`device-control-tasks.md`](device-control-tasks.md).
+rock-esp32. Текущий исполнимый порядок: DC-017, DC-018, затем выбранная владельцем DC-039;
+DC-019/DC-020 отложены до появления физических датчиков и описаны в
+[`device-control-tasks.md`](device-control-tasks.md).
 
-- [ ] Bring-up предусловия: Wi-Fi через ESP32-C6 (ESP-Hosted/SDIO), SNTP-синхронизация времени и один HTTPS-запрос до любого control-трафика.
-- [ ] Подключить ESP32 к существующему pairing/device-session flow с provisioning-экраном (short code, verification phrase, QR), безопасно хранить выданные `device_id`/device secret и реализовать WSS reconnect/heartbeat/state resync с bounded memory.
-- [ ] GUI-стек зафиксирован владельцем 2026-09-08: LVGL v9 через C-компонент `esp_lvgl_port` (MIT, аппаратное ускорение PPA, списки/скроллы из коробки; Rust владеет протоколом/состоянием, тонкий слой биндингов — собственный). Поддержать `display.show_view` commands, включая `now_playing`, `text` и `sensor_grid`, в RockCast-подобной визуальной теме; command handler должен быть идемпотентным.
-- [ ] Провести soak tests для Wi-Fi loss, power cycle, server restart, firmware update, malformed/unknown messages и восстановления ESP32-C6.
+- [x] DC-017: поднять Wi-Fi через ESP32-C6 (ESP-Hosted/SDIO), выполнить SNTP/HTTPS readiness до TLS-трафика и подтвердить SDIO recovery; P4/C6 используют ESP-Hosted 3.0.7.
+- [x] DC-017: подключить ESP32 к существующему pairing/device-session flow с provisioning-экраном, хранить `device_id`/device secret в NVS и реализовать bounded WSS reconnect/heartbeat/state resync. Контрактные тесты прошли 6/6, P4 прошит без стирания NVS.
+- [ ] DC-018: на подтверждённом LVGL v9 + `esp_lvgl_port` стеке зарегистрировать `display.main`, поддержать идемпотентный `display.show_view` для `now_playing`, `text` и `sensor_grid`, а также инициализировать GT911 touch. Touch ограничен локальным UI и не добавляет on-device browse/search protocol.
+- [ ] Провести DC-018 soak/golden tests для Wi-Fi loss, power cycle, server restart, malformed/unknown messages, восстановления ESP32-C6 и отображения offline/error state.
 - [ ] ESP32 profile уже присутствует в канонических contract fixtures (`tests/fixtures/device-control/v1/`); Rockmobile работает без изменений.
 
 Локальный `playback`/`volume` на самом ESP32 и интерактивный browse каталога не входят в v1:
 они отложены в продуктовые расширения DC-039/DC-040 (Milestone D2 в
 [`device-control-tasks.md`](device-control-tasks.md)). Прошивка обязана публиковать только
 физически доступные capabilities.
+
+DC-019 и зависимая DC-020 отложены владельцем 2026-09-09, поскольку датчики ещё недоступны;
+это не отменяет их scope или acceptance criteria. В тот же день владелец выбрал DC-039 для
+выполнения и подтвердил интерактивный on-device station browse как продуктовый scope. Любое
+необходимое расширение контракта по-прежнему должно предшествовать реализации.
 
 ### Phase 6 — ESP32 sensors и entity telemetry
 

@@ -8,19 +8,19 @@
     "app_version": "1.0.0-fixture",
     "manifest": {
       "manifest_revision": 1,
-      "roles": ["player", "display_surface", "voice_endpoint", "sensor_source"],
+      "roles": ["player", "controller", "display_surface", "voice_endpoint"],
       "capabilities": { "revision": 1, "items": [
         { "name": "media.playback", "version": 1, "actions": ["play", "pause", "stop"] },
+        { "name": "media.station", "version": 1, "sources": ["rockserver_catalog"] },
         { "name": "media.volume", "version": 1, "minimum": 0, "maximum": 100, "step": 1, "mute": true },
         { "name": "display.presentation", "version": 1, "views": ["text", "now_playing", "sensor_grid"], "max_items": 8, "max_text_length": 128 },
-        { "name": "voice.input", "version": 1, "formats": ["pcm16_mono_16000"] },
-        { "name": "entity.sensor", "version": 1, "entity_classes": ["temperature", "humidity"] }
+        { "name": "voice.input", "version": 1, "formats": ["pcm16_mono_16000"] }
       ] },
-      "entities": [
-        { "entity_id": "sensor.kitchen_temperature", "domain": "sensor", "device_class": "temperature", "display_name": "Kitchen temperature", "readable": true, "controllable": false, "unit": "°C", "stale_after_seconds": 300, "allowed_commands": [] },
-        { "entity_id": "sensor.kitchen_humidity", "domain": "sensor", "device_class": "humidity", "display_name": "Kitchen humidity", "readable": true, "controllable": false, "unit": "%", "stale_after_seconds": 300, "allowed_commands": [] }
-      ],
-      "surfaces": [ { "surface_id": "display.main", "kind": "display", "display_name": "Kitchen display", "views": ["text", "now_playing", "sensor_grid"] } ]
+      "entities": [],
+      "surfaces": [
+        { "surface_id": "display.main", "kind": "display", "display_name": "Kitchen display", "views": ["text", "now_playing", "sensor_grid"] },
+        { "surface_id": "voice.main", "kind": "voice", "display_name": "Kitchen voice", "views": [] }
+      ]
     }
   }
 }
