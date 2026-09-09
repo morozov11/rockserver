@@ -6,29 +6,55 @@ use std::{
     time::Duration,
 };
 
+use async_trait::async_trait;
 use sha2::{Digest, Sha256};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use uuid::Uuid;
 
 use crate::{
     device_control::{
-        ActuatorAction, CommandAccepted, CommandBody, CommandId, CommandReceived,
-        CommandReservation, CommandResult, CommandStatus, DeviceCapability, DeviceCommand,
-        DeviceControlScope, DeviceControlStore, DeviceId, DeviceManifest, DeviceRole, DomainError,
-        StoreOutcome, Timestamp,
+        ActuatorAction, CATALOG_STATION_SOURCE, CommandAccepted, CommandBody, CommandId,
+        CommandReceived, CommandReservation, CommandResult, CommandStatus, DIRECT_STATION_SOURCE,
+        DeviceCapability, DeviceCommand, DeviceControlScope, DeviceControlStore, DeviceId,
+        DeviceManifest, DeviceRole, DomainError, StoreOutcome, StreamSource, Timestamp,
+        validate_stream_uri,
     },
     device_control_presence::{ConnectionRegistry, OutboundFrame},
+    search::{RepositoryError, SearchService},
 };
 
 const MAX_CONNECTION_IN_FLIGHT: usize = 16;
 const MAX_TARGET_IN_FLIGHT: usize = 8;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_TIMEOUT: Duration = Duration::from_secs(30);
+/// Budget for one server-side station resolution inside command admission.
+const RESOLUTION_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Read-only station catalog boundary used to resolve station IDs to playable streams.
+///
+/// Implementations return only the stream URL so no wider catalog record crosses into the
+/// command router; the URL is dispatched to the target and never logged or persisted.
+#[async_trait]
+pub trait StationCatalog: Send + Sync {
+    /// Returns the current playable stream URL for one station, or `None` when unknown.
+    async fn station_stream(&self, station_id: &str) -> Result<Option<String>, RepositoryError>;
+}
+
+#[async_trait]
+impl StationCatalog for SearchService {
+    async fn station_stream(&self, station_id: &str) -> Result<Option<String>, RepositoryError> {
+        Ok(self
+            .public_station(station_id)
+            .await?
+            .map(|station| station.stream_url))
+    }
+}
 
 /// Server-side command router shared by all authenticated control WebSocket sessions.
 #[derive(Clone, Default)]
 pub struct CommandRouter {
     state: Arc<Mutex<HashMap<CommandId, InFlight>>>,
+    catalog: Option<Arc<dyn StationCatalog>>,
 }
 
 #[derive(Clone)]
@@ -48,6 +74,15 @@ pub struct CommandError {
 }
 
 impl CommandRouter {
+    /// Attaches the station catalog used to resolve `station.play_station` commands.
+    ///
+    /// A router without a catalog rejects station commands with `persistence_unavailable`
+    /// before any lifecycle record is created.
+    pub fn with_station_catalog(mut self, catalog: Arc<dyn StationCatalog>) -> Self {
+        self.catalog = Some(catalog);
+        self
+    }
+
     /// Admits one command after authentication, owner, scope, manifest and capacity checks.
     pub async fn submit(
         &self,
@@ -71,6 +106,19 @@ impl CommandRouter {
             .validate_at(&received_at)
             .map_err(validation_error)?;
         command.executable().map_err(validation_error)?;
+        // Only the router itself may originate the server-resolved stream variant; the frozen
+        // contract rejects a controller-supplied source=rockserver_catalog as invalid_payload.
+        if matches!(
+            &command.body,
+            CommandBody::PlayStream {
+                source: StreamSource::RockserverCatalog,
+                ..
+            }
+        ) {
+            return Err(CommandError {
+                code: "invalid_payload",
+            });
+        }
         let required_scope = required_scope(&command.body);
         if !controller.scopes.contains(&required_scope) {
             return Err(CommandError { code: "forbidden" });
@@ -100,6 +148,13 @@ impl CommandRouter {
             },
         };
         validate_target(&command, &target.manifest)?;
+        // Station resolution needs the catalog boundary; fail before any lifecycle record
+        // exists so a misconfigured router stays retryable without durable noise.
+        if matches!(command.body, CommandBody::PlayStation { .. }) && self.catalog.is_none() {
+            return Err(CommandError {
+                code: "persistence_unavailable",
+            });
+        }
         // The fingerprint represents the client-visible validated request. The server-selected
         // default deadline is intentionally excluded so a retry with the same command ID replays.
         let fingerprint = fingerprint(&command).map_err(|_| CommandError {
@@ -203,6 +258,50 @@ impl CommandRouter {
                 duplicate: false,
             },
         )?;
+        // Server-side station resolution: the controller-visible lifecycle and idempotency
+        // fingerprint were established above from the original play_station command, and the
+        // resolved play_stream body replaces it only for the dispatch to the target. The
+        // stream URI therefore never enters persistence, logs, or controller frames.
+        if let CommandBody::PlayStation { station_id } = command.body.clone() {
+            let catalog = match self.catalog.clone() {
+                Some(catalog) => catalog,
+                None => {
+                    self.finish(
+                        registry,
+                        store.as_ref(),
+                        command.command_id,
+                        terminal(&command.command_id, "persistence_unavailable"),
+                    )
+                    .await;
+                    return Ok(());
+                }
+            };
+            match resolve_stream(catalog.as_ref(), &station_id).await {
+                Ok(stream_uri) => {
+                    command.body = CommandBody::PlayStream {
+                        source: StreamSource::RockserverCatalog,
+                        station_id: Some(station_id),
+                        stream_uri,
+                    };
+                }
+                Err(failure) => {
+                    let (code, message) = match failure {
+                        ResolutionFailure::Invalid(message) => ("invalid_payload", message),
+                        ResolutionFailure::Unavailable => {
+                            ("persistence_unavailable", "Station catalog is unavailable.")
+                        }
+                    };
+                    self.finish(
+                        registry,
+                        store.as_ref(),
+                        command.command_id,
+                        terminal_message(&command.command_id, code, message),
+                    )
+                    .await;
+                    return Ok(());
+                }
+            }
+        }
         if send(
             registry,
             owner_id,
@@ -388,13 +487,58 @@ fn required_scope(body: &CommandBody) -> DeviceControlScope {
     }
 }
 
+/// Outcome of one server-side station resolution attempt.
+enum ResolutionFailure {
+    /// Deterministic admission failure with a fixed message that never echoes identifiers.
+    Invalid(&'static str),
+    /// Transient catalog backend failure; retryable with a fresh command.
+    Unavailable,
+}
+
+/// Resolves one controller station reference into a validated stream URI.
+///
+/// Deterministic failures (unknown station, unusable stream, forbidden destination) return a
+/// fixed `invalid_payload` message; catalog errors and resolution timeouts are transient.
+async fn resolve_stream(
+    catalog: &dyn StationCatalog,
+    station_id: &str,
+) -> Result<String, ResolutionFailure> {
+    let station =
+        match tokio::time::timeout(RESOLUTION_TIMEOUT, catalog.station_stream(station_id)).await {
+            Ok(Ok(Some(stream_uri))) => stream_uri,
+            Ok(Ok(None)) => {
+                return Err(ResolutionFailure::Invalid("Unknown station identifier."));
+            }
+            Ok(Err(_)) | Err(_) => return Err(ResolutionFailure::Unavailable),
+        };
+    if station.trim().is_empty() {
+        return Err(ResolutionFailure::Invalid(
+            "Station has no playable stream.",
+        ));
+    }
+    match validate_stream_uri(&station) {
+        Ok(()) => Ok(station),
+        Err(_) => Err(ResolutionFailure::Invalid("Stream address is not allowed.")),
+    }
+}
+
 fn validate_target(command: &DeviceCommand, manifest: &DeviceManifest) -> Result<(), CommandError> {
     match &command.body {
-        CommandBody::PlayStation { .. } => {
-            require_role_capability(manifest, DeviceRole::Player, |capability| {
-                matches!(capability, DeviceCapability::Station { .. })
-            })
-        }
+        CommandBody::PlayStation { .. }
+        | CommandBody::PlayStream {
+            source: StreamSource::RockserverCatalog,
+            ..
+        } => require_role_capability(manifest, DeviceRole::Player, |capability| {
+            matches!(capability, DeviceCapability::Station { sources }
+                if sources.iter().any(|source| source == CATALOG_STATION_SOURCE))
+        }),
+        CommandBody::PlayStream {
+            source: StreamSource::DirectStream,
+            ..
+        } => require_role_capability(manifest, DeviceRole::Player, |capability| {
+            matches!(capability, DeviceCapability::Station { sources }
+                if sources.iter().any(|source| source == DIRECT_STATION_SOURCE))
+        }),
         CommandBody::Playback { action } => require_role_capability(
             manifest,
             DeviceRole::Player,
@@ -587,13 +731,22 @@ fn fingerprint(command: &DeviceCommand) -> Result<[u8; 32], serde_json::Error> {
 }
 
 fn terminal(command_id: &CommandId, code: &'static str) -> CommandResult {
+    terminal_message(command_id, code, "Device command did not complete.")
+}
+
+/// Builds a terminal failure with a fixed message; the message must never echo a stream URI.
+fn terminal_message(
+    command_id: &CommandId,
+    code: &'static str,
+    message: &'static str,
+) -> CommandResult {
     CommandResult {
         command_id: *command_id,
         status: CommandStatus::Failed,
         completed_at: timestamp(OffsetDateTime::now_utc()),
         error: Some(DomainError {
             code: code.into(),
-            message: "Device command did not complete.".into(),
+            message: message.into(),
         }),
     }
 }

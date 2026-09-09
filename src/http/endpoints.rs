@@ -11,6 +11,7 @@ use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, Tr
 use tracing::Level;
 
 use crate::{
+    device_control_command::CommandRouter,
     persistence::{PostgresAccountStore, PostgresAdminStore, PostgresDeviceControlStore},
     search::{
         InMemoryStationRepository, SearchService, StationRepository, UnavailableStationRepository,
@@ -141,6 +142,7 @@ pub fn router_with_speech_recognizers_and_bearer_token(
     voice_command_timeout: Duration,
     api_bearer_token: impl Into<String>,
 ) -> Router {
+    let control_commands = station_resolving_command_router(&search_service);
     build_router(AppState {
         search_service,
         speech_recognizers,
@@ -152,7 +154,7 @@ pub fn router_with_speech_recognizers_and_bearer_token(
         local_admin_origin: local_admin_origin_from_env(),
         public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
         control_registry: Default::default(),
-        control_commands: Default::default(),
+        control_commands,
         control_state_hub: Default::default(),
         control_store: None,
         control_session_resolver: None,
@@ -170,6 +172,7 @@ pub fn router_with_search_service_and_native_session_resolver(
     voice_command_timeout: Duration,
     session_resolver: Arc<dyn crate::auth::NativeSessionResolver>,
 ) -> Router {
+    let control_commands = station_resolving_command_router(&search_service);
     build_router(AppState {
         search_service,
         speech_recognizers: SpeechRecognizers::same(Arc::new(UnavailableSpeechRecognizer)),
@@ -181,7 +184,7 @@ pub fn router_with_search_service_and_native_session_resolver(
         local_admin_origin: local_admin_origin_from_env(),
         public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
         control_registry: Default::default(),
-        control_commands: Default::default(),
+        control_commands,
         control_state_hub: Default::default(),
         control_store: None,
         control_session_resolver: Some(session_resolver),
@@ -220,6 +223,7 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
         Arc::new(account_store.clone());
     let control_store: Arc<dyn crate::device_control::DeviceControlStore> =
         Arc::new(PostgresDeviceControlStore::from_pool(account_store.pool()));
+    let control_commands = station_resolving_command_router(&search_service);
     build_router(AppState {
         search_service,
         speech_recognizers,
@@ -231,7 +235,7 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
         local_admin_origin: local_admin_origin_from_env(),
         public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
         control_registry: Default::default(),
-        control_commands: Default::default(),
+        control_commands,
         control_state_hub: Default::default(),
         control_store: Some(control_store),
         control_session_resolver: Some(control_session_resolver),
@@ -253,6 +257,7 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_and_proxy(
         Arc::new(account_store.clone());
     let control_store: Arc<dyn crate::device_control::DeviceControlStore> =
         Arc::new(PostgresDeviceControlStore::from_pool(account_store.pool()));
+    let control_commands = station_resolving_command_router(&search_service);
     build_router(AppState {
         search_service,
         speech_recognizers,
@@ -264,7 +269,7 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_and_proxy(
         local_admin_origin: local_admin_origin_from_env(),
         public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
         control_registry: Default::default(),
-        control_commands: Default::default(),
+        control_commands,
         control_state_hub: Default::default(),
         control_store: Some(control_store),
         control_session_resolver: Some(control_session_resolver),
@@ -284,6 +289,11 @@ fn local_admin_origin_from_env() -> Option<String> {
         .parse::<u16>()
         .ok()?;
     (port != 0).then_some(origin)
+}
+
+/// Builds the shared command router with the station catalog wired for play_station resolution.
+fn station_resolving_command_router(search_service: &SearchService) -> CommandRouter {
+    CommandRouter::default().with_station_catalog(Arc::new(search_service.clone()))
 }
 
 fn build_router(state: AppState) -> Router {

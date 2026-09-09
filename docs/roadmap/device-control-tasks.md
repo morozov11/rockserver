@@ -571,11 +571,73 @@ planned-статусы других операций не тронуты; firmwa
 зарезервированным — ревокация устройства/сессии видна как 401 (сессия перестаёт
 резолвиться), отдельного 403-пути v1 не требует.
 
-#### RS-3 — реализовать резолюцию play_station → play_stream — ожидает
+#### RS-3 — реализовать резолюцию play_station → play_stream — выполнено (2026-09-09)
 
-Резолвить каталог-стрим на сервере и диспатчить валидированный `station.play_stream`
-(тот же `command_id`, `source=rockserver_catalog` + `station_id`) на явный player-target
-после проверки роли `player` и capability `media.station`; снять planned-маркер со схемы.
+**Репозиторий:** RockServer (runtime + контракты + тесты + документация).
+
+Сделано:
+
+- `CommandBody` получил типизированный вариант `PlayStream` (`station.play_stream`): вариант
+  `source=rockserver_catalog` (обязательное эхо `station_id` + `stream_uri`) и вариант
+  `source=direct_stream` (только `stream_uri`, без station_id). Десериализация строго
+  воспроизводит замороженную схему `StationCommand`: каталог-вариант без `station_id`,
+  direct-вариант с `station_id`, неизвестный/отсутствующий `source` — невалидны.
+- В `CommandRouter::submit` команда `station.play_station` резолвится на сервере: после
+  `validate_target` (роль `player` + `media.station` с source `rockserver_catalog`) и после
+  вычисления fingerprint/резерва (дедуп 86 400 с работает по ОРИГИНАЛЬНОЙ команде
+  контроллера) станция ищется в каталоге через новый трейт `StationCatalog` (реализация —
+  `SearchService::public_station`, тот же каталог, что и публичные/device-пути; бюджет 5 с),
+  `stream_url` проверяется SSRF-валидатором формы (http/https, хост, без userinfo/fragment,
+  порт 1..=65535 или дефолт схемы, ≤2048, литеральные IPv4/IPv6 и всегда-локальные имена —
+  только публичные назначения), и тело заменяется на `station.play_stream` под тем же
+  `command_id` ДО диспатча таргету. `stream_uri` не попадает ни в persistence (резерв
+  хранит исходную `play_station`-команду), ни в lifecycle-кадры контроллера, ни в логи,
+  ни в тексты ошибок.
+- Контроллерский `station.play_stream` с `source=rockserver_catalog` отвергается как
+  `invalid_payload` (по контракту вариант серверный); `source=direct_stream` допускается
+  только таргету, объявившему этот source (`capability_not_supported` иначе), и проходит
+  тот же SSRF-валидатор формы при вводе.
+- Детерминированные отказы резолюции дают terminal failed result с кодом из замороженного
+  enum: неизвестный station_id, станция без stream_url, невалидный/запрещённый URI →
+  `invalid_payload` с фиксированными сообщениями («Unknown station identifier.» / «Station
+  has no playable stream.» / «Stream address is not allowed.»); транзиентный отказ/таймаут
+  каталога → `persistence_unavailable`. Отказ воспроизводится идемпотентно: повтор той же
+  команды в окне дедупа возвращает сохранённый result без повторной резолюции и диспатча.
+  Отсутствие подключённого каталога у роутера — синхронный `persistence_unavailable` до
+  создания lifecycle-записи.
+- Семантика lifecycle не изменилась: accepted — от таргета немедленно, result — асинхронно
+  ≤30 с; поздний result после клиентского expiry — норма. Поведение прямых
+  `playback.*`/`volume.*`/display/entity команд не тронуто.
+- SSRF DNS-уровень (резолв имени в приватный адрес, проверка каждого из ≤5 редиректов)
+  сервером НЕ выполняется: общего исходящего egress-слоя в репозитории нет. Валидатор
+  проверяет форму URI и литеральные адреса (+ `localhost`, чисто-цифровые хосты); DNS-разрыв
+  задокументирован в Rustdoc `validate_stream_uri` и в status.md как ограничение; проверку
+  редиректов по контракту выполняет стрим-клиент таргета (RE-5).
+- `x-rockserver-status: planned` снят со схемы `StationStreamUri` (→ `implemented`),
+  обновлено описание info; planned-маркеры voice (RS-4) не тронуты.
+- `CommandRouter` подключается к каталогу во всех продакшн-билдерах роутера (включая
+  Postgres) через `with_station_catalog`; каталог возвращает наружу только stream URL.
+- Тесты: юнит `CommandBody::PlayStream` (round-trip обоих вариантов, строгие формы,
+  validate_at) и батарея `validate_stream_uri` (5 публичных ok; 25 запрещённых назначений,
+  включая IPv4-mapped/compatible IPv6 и `localhost`; 12 структурных отказов — порт 0/65536/
+  нечисловой, userinfo, fragment, ftp/верхний регистр, >2048); роутер-тесты (6): happy path
+  (таргет получил `station.play_stream` под тем же command_id с эхом station_id; контроллер
+  — обычный received→accepted→result; replay дублята без повторного диспатча), 5
+  детерминированных отказов (unknown/empty/malformed/private/loopback) — terminal
+  `invalid_payload` без диспатча, без URI в сериализациях кадров, идемпотентный replay
+  отказа; транзиентный отказ каталога → terminal `persistence_unavailable`; гейтинг
+  контроллерских play_stream (спуфинг rockserver_catalog, forbidden direct URI,
+  легальный direct_stream на объявивший таргет); target без rockserver_catalog source и
+  роутер без каталога. Контрактные тесты: статус `StationStreamUri` = implemented,
+  voice-маркер остался planned.
+
+**Приёмка (выполнено):** резолюция и SSRF-валидация живут в серверном командном роутере;
+тот же `command_id`, fingerprint/идемпотентность по исходной команде контроллера;
+`stream_uri` отсутствует в persistence, lifecycle-кадрах контроллера, логах, текстах
+ошибок, фикстурах и документации; контрактные тесты RS-1/RS-2 остаются зелёными
+(`cargo test --test openapi_contract` 8/8, `--test device_catalog_api` 12/12);
+`cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings` и полный
+`cargo test` зелёные; поведение прямых playback/volume команд не изменилось.
 
 #### RS-4 — реализовать voice device-session, cancel и UserIntent-роутинг — ожидает
 

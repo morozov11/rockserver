@@ -70,4 +70,8 @@ explicit instead of pretending they are schema keywords.
 - Device-facing catalog pages never carry `stream_url` or provider metadata:
   `DeviceStationDto` is the only station shape allowed on device catalog paths,
   and playback is selected by stable station ID through server-resolved
-  `station.play_station` dispatch.
+  `station.play_station` dispatch. RockServer resolves that reference and delivers
+  `station.play_stream` (`source=rockserver_catalog`, `station_id` echo, validated
+  `stream_uri`) to the player target under the same `command_id`; controllers only ever
+  send `station.play_station` and never see a stream URI, so canonical fixtures contain
+  no stream URI values.

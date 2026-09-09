@@ -1200,6 +1200,21 @@ fn station_play_stream_and_volume_bounds_are_enforceable() {
         "stream URIs must be at most 2048 characters",
     );
 
+    assert_eq!(
+        document
+            .pointer("/components/schemas/StationStreamUri/x-rockserver-status")
+            .and_then(JsonValue::as_str),
+        Some("implemented"),
+        "the server-resolved play_stream dispatch is implemented since RS-3"
+    );
+    assert_eq!(
+        document
+            .pointer("/components/schemas/VoiceStreamCancel/x-rockserver-status")
+            .and_then(JsonValue::as_str),
+        Some("planned"),
+        "the voice cancel frame stays planned until RS-4"
+    );
+
     let honest_volume = json!({
         "name": "media.volume",
         "version": 1,

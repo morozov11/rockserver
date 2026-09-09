@@ -570,10 +570,11 @@ mod tests {
         ttl: Duration,
         hub: crate::device_control_state::StateHub,
     ) -> Router {
+        let search_service = SearchService::new(Arc::new(
+            InMemoryStationRepository::with_builtin_catalog().unwrap(),
+        ));
         build_router(AppState {
-            search_service: SearchService::new(Arc::new(
-                InMemoryStationRepository::with_builtin_catalog().unwrap(),
-            )),
+            search_service: search_service.clone(),
             speech_recognizers: SpeechRecognizers::same(Arc::new(UnavailableSpeechRecognizer)),
             voice_command_timeout: Duration::from_secs(5),
             api_bearer_token: "unrelated".to_owned(),
@@ -583,7 +584,8 @@ mod tests {
             local_admin_origin: None,
             public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
             control_registry: registry,
-            control_commands: Default::default(),
+            control_commands: crate::device_control_command::CommandRouter::default()
+                .with_station_catalog(Arc::new(search_service)),
             control_state_hub: hub,
             control_store: None,
             control_session_resolver: Some(resolver),

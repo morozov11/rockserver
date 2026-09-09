@@ -2,6 +2,56 @@
 
 Last updated: 2026-09-09
 
+## RS-3: station.play_station resolves to server-validated play_stream (2026-09-09)
+
+Task RS-3 of the rockcast-device-plan (coordinated from `rock-esp32/docs/plan-control.md`)
+implemented the Step-3 command-router resolution frozen by RS-1 in `api/openapi.yaml` 0.5.0:
+
+- `CommandBody` now carries the typed `station.play_stream` body with the two frozen variants:
+  server-resolved `source=rockserver_catalog` (echoing the resolved `station_id`) and
+  controller-supplied `source=direct_stream` (no station claim). Wire parsing enforces the
+  strict variant shapes of the `StationCommand` schema.
+- On `station.play_station` the router validates the target (player role plus `media.station`
+  advertising `rockserver_catalog`), reserves the lifecycle, then resolves the station through
+  the new `StationCatalog` boundary (`SearchService::public_station`, the same catalog as the
+  public/device routes, 5 s budget), validates the resolved `stream_url` with the new literal
+  SSRF gate, and dispatches `station.play_stream` to the target **under the same command_id**.
+  The idempotency fingerprint and the persisted reservation keep the ORIGINAL controller
+  command, so duplicate submissions replay the stored lifecycle without re-resolution, and the
+  stream URI never enters persistence, controller frames, logs, or error texts.
+- Deterministic failures terminate the lifecycle with `invalid_payload` and fixed messages
+  (unknown station; station without a playable stream; invalid or non-public stream address);
+  transient catalog errors/timeouts terminate with retryable `persistence_unavailable`; a
+  controller sending the server-only variant, or a direct stream to a target that does not
+  advertise `direct_stream`, is rejected with `invalid_payload`/`capability_not_supported`.
+- The SSRF gate validates URI form only (scheme, host, no userinfo/fragment, port 1..=65535
+  or scheme default, ≤2048 chars) plus literal IPv4/IPv6 and always-local names (loopback,
+  private, shared, link-local, unique-local, multicast, benchmarking, documentation and
+  reserved ranges; `localhost`; purely numeric hosts). DNS resolution and per-redirect checks
+  are a documented limitation: the repository has no shared egress layer, and the frozen
+  contract assigns redirect checking to the target's bounded stream client (RE-5).
+- `x-rockserver-status: planned` was removed from the `StationStreamUri` schema (now
+  `implemented`) and the info description was updated; the voice planned markers (RS-4) are
+  untouched. All production router builders (including PostgreSQL) now wire the catalog into
+  the command router.
+
+Verification: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`
+and `cargo test` pass. Router tests (6) cover the happy path (same command_id, resolved body
+delivered only to the target, echo of station_id), five deterministic failures with
+idempotent replay and URI-leak assertions on serialized controller frames, transient catalog
+failure, controller-supplied play_stream gating, and capability/wiring rejections. Command
+unit tests cover both wire variants and a 40+-case `validate_stream_uri` battery. Contract
+tests stay green (`tests/openapi_contract.rs` 8/8 now asserts the implemented stream-URI
+schema and that the voice cancel frame stays planned; `tests/device_catalog_api.rs` 12/12
+unchanged).
+
+Known limitations: DNS-level SSRF (a hostname that only resolves to a private address passes
+the literal gate) and server-side redirect checking are deferred to a future egress layer;
+terminal `command.result` errors serialize as `{code, message}` without the
+`request_id`/`details` fields shown in the golden failed-result fixture — a pre-existing
+divergence since DC-003, unchanged by RS-3 and reported to the control center. Direct
+`playback.*`/`volume.*` behavior is unchanged. RS-4 (voice device-session/cancel) is pending.
+
 ## RS-2: device-facing catalog runtime implemented (2026-09-09)
 
 Task RS-2 of the rockcast-device-plan (coordinated from `rock-esp32/docs/plan-control.md`)
@@ -46,8 +96,9 @@ rate isolation. `tests/openapi_contract.rs` (8/8) now asserts the implemented st
 that both routes are registered and require a native device session.
 
 Known limitations: the catalog is account-independent and requires no device-control scope;
-the contract's 403 remains reserved (revocation is observed as 401 today). RS-3
-(play_station → play_stream resolution) and RS-4 (voice device-session/cancel) are pending.
+the contract's 403 remains reserved (revocation is observed as 401 today). RS-4
+(voice device-session/cancel) is pending; the RS-3 resolution this section awaited is
+implemented above.
 
 ## RS-1: RockCast-radio contracts frozen before implementation (2026-09-09)
 

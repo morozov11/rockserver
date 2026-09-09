@@ -1,5 +1,42 @@
 # Task log
 
+## 2026-09-09 — RS-3: resolve station.play_station to server-validated play_stream dispatch
+
+- Goal: implement the Step-3.2 command-router resolution frozen by RS-1 (openapi 0.5.0):
+  on `station.play_station` RockServer resolves the current catalog stream and dispatches a
+  validated `station.play_stream` (source=rockserver_catalog, station_id echo) to the
+  explicit player target under the same command_id; the controller and logs never see
+  `stream_uri` (plan `rock-esp32/docs/rockcast-device-plan.md`, finding F1).
+- Scope: `src/device_control/command.rs` — typed `CommandBody::PlayStream` with the two
+  frozen wire variants and the literal SSRF gate `validate_stream_uri` (form + literal
+  IPv4/IPv6/always-local destinations); `src/device_control_command.rs` — `StationCatalog`
+  boundary (implemented by `SearchService`), PlayStation resolution between receipt and
+  dispatch (fingerprint/dedup stay on the original controller command), deterministic
+  terminal failures, controller-variant gating, source-aware `validate_target`;
+  `src/http/endpoints.rs` — every production router builder wires the catalog into
+  `CommandRouter`. Contract: `x-rockserver-status: planned` removed from `StationStreamUri`
+  (now `implemented`), info description updated; voice markers untouched. Direct
+  playback/volume/display/entity command behavior unchanged.
+- Result: controllers submit only `station.play_station`; the target alone receives
+  `station.play_stream` under the original command_id with the resolved station echoed;
+  the stream URI never enters persistence (the reservation stores the original command),
+  controller lifecycle frames, logs, error texts, fixtures, or docs. Unknown station,
+  stream-less station, and invalid/forbidden URIs terminate as `invalid_payload` with
+  fixed messages and replay idempotently; catalog outages/timeouts terminate as retryable
+  `persistence_unavailable`; a router without a catalog rejects station commands before any
+  lifecycle record. DNS-level SSRF and server-side redirect checking are documented
+  limitations (no shared egress layer; redirect checks belong to the target stream client).
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`;
+  `cargo test` — all regular suites green, including router tests (6: happy path with
+  same-command_id resolved dispatch, five deterministic failures with URI-leak and replay
+  assertions, transient catalog failure, controller play_stream gating, capability/wiring
+  rejections), command unit tests (variant round-trip and a 40+-case URI battery), and
+  contract tests (`openapi_contract` 8/8 asserting the implemented stream-URI schema and
+  the still-planned voice cancel frame; `device_catalog_api` 12/12 unchanged).
+  `git diff --check` clean. PostgreSQL integration and live provider tests remain ignored
+  (no disposable `TEST_DATABASE_URL` / credentials configured).
+- Status: **complete.**
+
 ## 2026-09-09 — RS-2: implement device-session catalog browse and search runtime
 
 - Goal: implement the two device-facing catalog routes frozen by RS-1 (openapi 0.5.0) on the

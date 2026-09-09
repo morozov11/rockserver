@@ -1,5 +1,7 @@
 //! Typed command and presentation payloads with their wire serialization rules.
 
+use std::net::{Ipv4Addr, Ipv6Addr};
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use serde_json::{Map, Value};
 
@@ -8,6 +10,13 @@ use super::{
     foundation::EXTENSION_NAME,
     validation::{bounded, namespaced},
 };
+
+/// `media.station` source string for streams resolved by RockServer from its catalog.
+pub const CATALOG_STATION_SOURCE: &str = "rockserver_catalog";
+/// `media.station` source string for controller-supplied direct stream URIs.
+pub const DIRECT_STATION_SOURCE: &str = "direct_stream";
+/// Maximum station stream URI length accepted by the v1 command vocabulary.
+pub const MAX_STREAM_URI_LENGTH: usize = 2048;
 
 /// Explicit device, entity, or surface command target.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -97,6 +106,15 @@ pub enum CommandBody {
     PlayStation {
         station_id: String,
     },
+    /// Server-resolved or controller-supplied stream playback for a player target.
+    PlayStream {
+        /// Origin of the stream; only `RockserverCatalog` is server-dispatchable.
+        source: StreamSource,
+        /// Echo of the resolved station; required for `RockserverCatalog`.
+        station_id: Option<String>,
+        /// Validated stream URI; never logged and never echoed in errors.
+        stream_uri: String,
+    },
     Display {
         presentation: Presentation,
     },
@@ -116,6 +134,23 @@ pub enum CommandBody {
         name: String,
         payload: Map<String, Value>,
     },
+}
+/// Origin of a `station.play_stream` command body.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StreamSource {
+    /// RockServer resolved the primary catalog stream; `station_id` echoes the resolution.
+    RockserverCatalog,
+    /// The controller supplied a direct URI; allowed only for targets advertising it.
+    DirectStream,
+}
+impl StreamSource {
+    /// Wire value of the `source` discriminator.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RockserverCatalog => CATALOG_STATION_SOURCE,
+            Self::DirectStream => DIRECT_STATION_SOURCE,
+        }
+    }
 }
 /// Typed volume and mute operations accepted by the v1 command vocabulary.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -152,6 +187,31 @@ impl DeviceCommand {
         match &self.body {
             CommandBody::Unknown { .. } => Ok(()),
             CommandBody::PlayStation { station_id } => bounded(station_id, 1, 128, "station_id"),
+            CommandBody::PlayStream {
+                source,
+                station_id,
+                stream_uri,
+            } => {
+                match (source, station_id) {
+                    (StreamSource::RockserverCatalog, Some(station_id)) => {
+                        bounded(station_id, 1, 128, "station_id")?
+                    }
+                    (StreamSource::RockserverCatalog, None) => {
+                        return Err(ValidationError::InvalidPayload {
+                            field: "station_id",
+                        });
+                    }
+                    (StreamSource::DirectStream, Some(_)) => {
+                        return Err(ValidationError::InvalidPayload {
+                            field: "station_id",
+                        });
+                    }
+                    (StreamSource::DirectStream, None) => {}
+                }
+                validate_stream_uri(stream_uri).map_err(|_| ValidationError::InvalidPayload {
+                    field: "stream_uri",
+                })
+            }
             CommandBody::Display { presentation } => presentation.validate(),
             CommandBody::Playback { action }
                 if ["play", "pause", "stop", "next", "previous"].contains(&action.as_str()) =>
@@ -190,6 +250,23 @@ impl Serialize for CommandBody {
             Self::PlayStation { station_id } => {
                 serde_json::json!({"name":"station.play_station","station_id":station_id})
             }
+            Self::PlayStream {
+                source,
+                station_id,
+                stream_uri,
+            } => match station_id {
+                Some(station_id) => serde_json::json!({
+                    "name":"station.play_stream",
+                    "source":source.as_str(),
+                    "station_id":station_id,
+                    "stream_uri":stream_uri
+                }),
+                None => serde_json::json!({
+                    "name":"station.play_stream",
+                    "source":source.as_str(),
+                    "stream_uri":stream_uri
+                }),
+            },
             Self::Playback { action } => serde_json::json!({"name":format!("playback.{action}")}),
             Self::Volume { command } => match command {
                 VolumeCommand::SetLevel { level } => {
@@ -244,6 +321,29 @@ impl<'de> Deserialize<'de> for CommandBody {
             "station.play_station" => Self::PlayStation {
                 station_id: serde_json::from_value(get("station_id")?).map_err(D::Error::custom)?,
             },
+            "station.play_stream" => {
+                let source = match m.get("source").and_then(Value::as_str) {
+                    Some(CATALOG_STATION_SOURCE) => StreamSource::RockserverCatalog,
+                    Some(DIRECT_STATION_SOURCE) => StreamSource::DirectStream,
+                    _ => return Err(D::Error::custom("invalid stream source")),
+                };
+                let station_id = match source {
+                    StreamSource::RockserverCatalog => {
+                        Some(serde_json::from_value(get("station_id")?).map_err(D::Error::custom)?)
+                    }
+                    // The direct-stream variant must not claim a catalog station.
+                    StreamSource::DirectStream if m.contains_key("station_id") => {
+                        return Err(D::Error::custom("invalid station echo"));
+                    }
+                    StreamSource::DirectStream => None,
+                };
+                Self::PlayStream {
+                    source,
+                    station_id,
+                    stream_uri: serde_json::from_value(get("stream_uri")?)
+                        .map_err(D::Error::custom)?,
+                }
+            }
             "display.show_text" => Self::Display {
                 presentation: Presentation::Text {
                     text: serde_json::from_value(get("text")?).map_err(D::Error::custom)?,
@@ -309,4 +409,156 @@ impl<'de> Deserialize<'de> for CommandBody {
         };
         Ok(body)
     }
+}
+
+/// Why a station stream URI was rejected at admission.
+///
+/// Rejections never carry the URI itself; callers must map them to fixed messages.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StreamUriRejection {
+    /// The URI is not an absolute lowercase `http://` or `https://` URL.
+    NotAbsoluteHttp,
+    /// The URI exceeds [`MAX_STREAM_URI_LENGTH`] characters.
+    TooLong,
+    /// The authority has no host component.
+    MissingHost,
+    /// The authority carries userinfo.
+    Userinfo,
+    /// A fragment component is present.
+    Fragment,
+    /// An explicit port is malformed, zero, or above the TCP range.
+    InvalidPort,
+    /// The literal address or always-local name is not a public destination.
+    ForbiddenDestination,
+}
+
+/// Validates the literal form of a station stream URI per the `StationStreamUri` contract.
+///
+/// Enforced: absolute lowercase `http(s)`, a non-empty host, no userinfo, no fragment, an
+/// explicit port in 1..=65535 or the scheme default, at most [`MAX_STREAM_URI_LENGTH`]
+/// characters, and literal IPv4/IPv6 or always-local host names limited to public
+/// destinations (loopback, private, shared, link-local, unique-local, multicast, benchmarking,
+/// documentation and reserved ranges are rejected).
+///
+/// DNS resolution and per-redirect checks are deliberately not performed here: the frozen
+/// contract assigns them to the validating egress layers, and today only the target's bounded
+/// stream client (`max_stream_redirects`) performs them. Hostnames that only resolve to
+/// non-public addresses therefore pass this gate; that gap is a documented RS-3 limitation.
+pub fn validate_stream_uri(uri: &str) -> Result<(), StreamUriRejection> {
+    if uri.chars().count() > MAX_STREAM_URI_LENGTH {
+        return Err(StreamUriRejection::TooLong);
+    }
+    let Some(rest) = uri
+        .strip_prefix("https://")
+        .or_else(|| uri.strip_prefix("http://"))
+    else {
+        return Err(StreamUriRejection::NotAbsoluteHttp);
+    };
+    if rest.contains('#') {
+        return Err(StreamUriRejection::Fragment);
+    }
+    let authority_end = rest.find(['/', '?']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    if authority.contains('@') {
+        return Err(StreamUriRejection::Userinfo);
+    }
+    let (host, port, literal_v6) = split_stream_authority(authority)?;
+    if host.is_empty() {
+        return Err(StreamUriRejection::MissingHost);
+    }
+    if let Some(port) = port {
+        match port.parse::<u32>() {
+            // Port zero is not a usable TCP destination; the contract range is 1..=65535.
+            Ok(value) if (1..=u32::from(u16::MAX)).contains(&value) => {}
+            _ => return Err(StreamUriRejection::InvalidPort),
+        }
+    }
+    validate_stream_host(host, literal_v6)
+}
+
+/// Splits an authority into host, optional port, and whether the host was a bracketed literal.
+///
+/// Bracketed hosts must close with `]` before an optional `:port`; an unbracketed host may not
+/// contain colons at all, which also rejects raw IPv6 literals.
+fn split_stream_authority(
+    authority: &str,
+) -> Result<(&str, Option<&str>, bool), StreamUriRejection> {
+    if let Some(bracketed) = authority.strip_prefix('[') {
+        let (host, tail) = bracketed
+            .split_once(']')
+            .ok_or(StreamUriRejection::MissingHost)?;
+        let port = tail.strip_prefix(':');
+        if !tail.is_empty() && port.is_none() {
+            return Err(StreamUriRejection::InvalidPort);
+        }
+        Ok((host, port, true))
+    } else {
+        match authority.split_once(':') {
+            Some((host, port)) => Ok((host, Some(port), false)),
+            None => Ok((authority, None, false)),
+        }
+    }
+}
+
+/// Classifies one host against the public-destination rules.
+fn validate_stream_host(host: &str, literal_v6: bool) -> Result<(), StreamUriRejection> {
+    if literal_v6 {
+        let address = host
+            .parse::<Ipv6Addr>()
+            .map_err(|_| StreamUriRejection::ForbiddenDestination)?;
+        return validate_stream_ipv6(&address);
+    }
+    if let Ok(address) = host.parse::<Ipv4Addr>() {
+        return validate_stream_ipv4(&address);
+    }
+    if host
+        .chars()
+        .any(|character| character.is_ascii_whitespace() || character.is_ascii_control() || character == '%')
+        || host.eq_ignore_ascii_case("localhost")
+        // A purely numeric host can only be a non-dotted IPv4 shorthand such as 2130706433,
+        // which some resolvers turn into a loopback address.
+        || host.chars().all(|character| character.is_ascii_digit())
+    {
+        return Err(StreamUriRejection::ForbiddenDestination);
+    }
+    Ok(())
+}
+
+/// Rejects every IPv4 range that is not global unicast.
+fn validate_stream_ipv4(address: &Ipv4Addr) -> Result<(), StreamUriRejection> {
+    let [a, b, c, _] = address.octets();
+    let forbidden = matches!(a, 0 | 10 | 127)
+        || (a == 100 && (64..=127).contains(&b))
+        || (a == 169 && b == 254)
+        || (a == 172 && (16..=31).contains(&b))
+        || (a == 192 && b == 168)
+        || (a == 198 && matches!(b, 18 | 19))
+        || matches!(
+            (a, b, c),
+            (192, 0, 0) | (192, 0, 2) | (192, 88, 99) | (198, 51, 100) | (203, 0, 113)
+        )
+        || (224..=255).contains(&a);
+    if forbidden {
+        return Err(StreamUriRejection::ForbiddenDestination);
+    }
+    Ok(())
+}
+
+/// Rejects IPv6 loopback/unspecified/multicast/link-local/unique-local and classifies
+/// IPv4-mapped or IPv4-compatible literals through the IPv4 rules.
+fn validate_stream_ipv6(address: &Ipv6Addr) -> Result<(), StreamUriRejection> {
+    let segments = address.segments();
+    // ::, ::1, ::a.b.c.d (96 zero bits) and ::ffff:a.b.c.d (IPv4-mapped) all reduce to the
+    // IPv4 classification; unspecified and loopback land on forbidden 0.0.0.0/8 anyway.
+    if segments[..5].iter().all(|&segment| segment == 0) && matches!(segments[5], 0 | 0xffff) {
+        let embedded = (u32::from(segments[6]) << 16) | u32::from(segments[7]);
+        return validate_stream_ipv4(&Ipv4Addr::from(embedded));
+    }
+    if address.is_multicast()
+        || (segments[0] & 0xffc0) == 0xfe80
+        || (segments[0] & 0xfe00) == 0xfc00
+    {
+        return Err(StreamUriRejection::ForbiddenDestination);
+    }
+    Ok(())
 }

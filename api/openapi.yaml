@@ -10,9 +10,9 @@ info:
     PostgreSQL may use provenance-compatible semantic ranking; metadata fallback preserves
     the same schemas when embeddings are absent or unavailable. Operations marked
     `x-rockserver-status: planned` are contract-first device-control designs and are not yet
-    registered by the runtime; this currently includes the server-resolved
-    `station.play_stream` dispatch and the voice device-session/cancel extension. The two
-    device-facing catalog paths (`GET /api/v1/device-control/catalog/stations` and
+    registered by the runtime; this currently includes the voice device-session/cancel
+    extension. The server-resolved `station.play_stream` dispatch and the two device-facing
+    catalog paths (`GET /api/v1/device-control/catalog/stations` and
     `GET /api/v1/device-control/catalog/search`) are implemented behind the RockserverBearer
     device session.
 servers:
@@ -1901,7 +1901,7 @@ components:
         every DNS result and at most five redirects (max_stream_redirects) and reject loopback,
         private, link-local, multicast and reserved destinations. The URI is never logged and
         never appears in fixtures, documents, or audit output.
-      x-rockserver-status: planned
+      x-rockserver-status: implemented
     VolumeCommand:
       oneOf:
         - type: object
