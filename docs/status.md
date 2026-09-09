@@ -2,6 +2,20 @@
 
 Last updated: 2026-09-09
 
+## RS-5: canonical terminal command errors (2026-09-09)
+
+Server-generated terminal `command.result` failures now use the canonical v1
+`DeviceControlError` shape: `code`, `message`, the original `device.command`
+envelope `message_id` as `request_id`, and an empty object for `details`.
+The ID is retained through asynchronous timeout and disconnect completion, so a
+replayed stored result retains the originating request correlation. No fixture
+or other wire shape changed.
+
+Rockmobile's device-control JSON codec is forward-compatible
+(`DirectoryDtos.kt:9` sets `ignoreUnknownKeys = true`), so it safely accepts
+the added `details` field. Focused command-router and OpenAPI fixture checks,
+formatting, strict Clippy, and the full Rust test suite passed.
+
 ## RS-4: device voice sessions route typed radio intents through device control (2026-09-09)
 
 `/api/v1/voice/stream` now authenticates native device sessions with the same server-derived

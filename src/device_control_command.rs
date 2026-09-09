@@ -64,6 +64,7 @@ struct InFlight {
     controller_connection_id: Uuid,
     target_device_id: DeviceId,
     target_connection_id: Uuid,
+    request_id: String,
 }
 
 /// Safe protocol outcome sent only to the originating active controller connection.
@@ -84,6 +85,7 @@ impl CommandRouter {
     }
 
     /// Admits one command after authentication, owner, scope, manifest and capacity checks.
+    #[allow(clippy::too_many_arguments)] // Authenticated transport context includes the request ID.
     pub async fn submit(
         &self,
         registry: &ConnectionRegistry,
@@ -91,6 +93,7 @@ impl CommandRouter {
         owner_id: Uuid,
         controller_device_id: Uuid,
         controller_connection_id: Uuid,
+        request_id: String,
         mut command: DeviceCommand,
     ) -> Result<(), CommandError> {
         let now = OffsetDateTime::now_utc();
@@ -228,7 +231,7 @@ impl CommandRouter {
                 store.as_ref(),
                 owner_id,
                 command.target.device_id,
-                terminal(&command.command_id, "too_many_in_flight"),
+                terminal(&command.command_id, &request_id, "too_many_in_flight"),
             )
             .await;
             return Err(CommandError {
@@ -241,6 +244,7 @@ impl CommandRouter {
             controller_connection_id,
             target_device_id: command.target.device_id,
             target_connection_id: target.connection_id,
+            request_id: request_id.clone(),
         };
         self.state
             .lock()
@@ -270,7 +274,7 @@ impl CommandRouter {
                         registry,
                         store.as_ref(),
                         command.command_id,
-                        terminal(&command.command_id, "persistence_unavailable"),
+                        terminal(&command.command_id, &request_id, "persistence_unavailable"),
                     )
                     .await;
                     return Ok(());
@@ -295,7 +299,7 @@ impl CommandRouter {
                         registry,
                         store.as_ref(),
                         command.command_id,
-                        terminal_message(&command.command_id, code, message),
+                        terminal_message(&command.command_id, &request_id, code, message),
                     )
                     .await;
                     return Ok(());
@@ -316,7 +320,7 @@ impl CommandRouter {
                 registry,
                 store.as_ref(),
                 command.command_id,
-                terminal(&command.command_id, "target_offline"),
+                terminal(&command.command_id, &request_id, "target_offline"),
             )
             .await;
             return Ok(());
@@ -336,7 +340,7 @@ impl CommandRouter {
                     &registry,
                     store.as_ref(),
                     command.command_id,
-                    terminal(&command.command_id, "command_timeout"),
+                    terminal(&command.command_id, &request_id, "command_timeout"),
                 )
                 .await;
         });
@@ -425,7 +429,7 @@ impl CommandRouter {
         let Some(store) = store else {
             return;
         };
-        let command_ids: Vec<_> = self
+        let commands: Vec<_> = self
             .state
             .lock()
             .expect("command router mutex is not poisoned")
@@ -434,15 +438,15 @@ impl CommandRouter {
                 (item.owner_id == owner_id
                     && item.target_device_id.0 == device_id
                     && item.target_connection_id == connection_id)
-                    .then_some(*command_id)
+                    .then_some((*command_id, item.request_id.clone()))
             })
             .collect();
-        for command_id in command_ids {
+        for (command_id, request_id) in commands {
             self.finish(
                 registry,
                 store.as_ref(),
                 command_id,
-                terminal(&command_id, "target_offline"),
+                terminal(&command_id, &request_id, "target_offline"),
             )
             .await;
         }
@@ -730,13 +734,19 @@ fn fingerprint(command: &DeviceCommand) -> Result<[u8; 32], serde_json::Error> {
     Ok(Sha256::digest(serde_json::to_vec(command)?).into())
 }
 
-fn terminal(command_id: &CommandId, code: &'static str) -> CommandResult {
-    terminal_message(command_id, code, "Device command did not complete.")
+fn terminal(command_id: &CommandId, request_id: &str, code: &'static str) -> CommandResult {
+    terminal_message(
+        command_id,
+        request_id,
+        code,
+        "Device command did not complete.",
+    )
 }
 
 /// Builds a terminal failure with a fixed message; the message must never echo a stream URI.
 fn terminal_message(
     command_id: &CommandId,
+    request_id: &str,
     code: &'static str,
     message: &'static str,
 ) -> CommandResult {
@@ -747,6 +757,8 @@ fn terminal_message(
         error: Some(DomainError {
             code: code.into(),
             message: message.into(),
+            request_id: request_id.into(),
+            details: Default::default(),
         }),
     }
 }

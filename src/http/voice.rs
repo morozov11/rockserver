@@ -951,6 +951,7 @@ async fn finish_device_voice(
             principal.user_id,
             principal.device_id,
             active.connection_id,
+            request_id.to_owned(),
             command,
         )
         .await

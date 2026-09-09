@@ -422,6 +422,8 @@ impl Harness {
                             error: failed.then(|| DomainError {
                                 code: "device_failure".to_owned(),
                                 message: "Device command failed.".to_owned(),
+                                request_id: "test-device-command".to_owned(),
+                                details: Default::default(),
                             }),
                             status: terminal_status,
                             completed_at: Timestamp::parse("2026-09-09T00:00:00Z").unwrap(),

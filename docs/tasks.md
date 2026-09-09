@@ -1,5 +1,16 @@
 # Task log
 
+## 2026-09-09 — RS-5: canonical terminal command-result errors
+
+- Result: server-generated terminal `command.result` failures now serialize
+  `request_id` from the original `device.command` envelope and `details: {}`
+  alongside the existing code/message. The request ID remains available for
+  timeout/disconnect completion and stored-result replay. Rockmobile's parser
+  is tolerant of the extra field (`DirectoryDtos.kt:9`, `ignoreUnknownKeys = true`).
+- Checks: focused command-router serialization regression, OpenAPI fixtures,
+  `cargo fmt --check`, strict all-target/all-feature Clippy, and full `cargo test`.
+- Status: **complete.**
+
 ## 2026-09-09 — RS-4: route authenticated device voice through typed intents and CommandRouter
 
 - Goal: implement Step 3.3 of the RockCast-radio plan: native device session and `voice.main`

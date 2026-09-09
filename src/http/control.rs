@@ -392,7 +392,7 @@ async fn run(mut socket: WebSocket, principal: DeviceControlPrincipal, runtime: 
                             _ => { let _ = protocol_close(&mut socket, "invalid_message", 1007).await; break; }
                         },
                         "device.command" => match serde_json::from_value::<DeviceCommand>(envelope.payload) {
-                            Ok(command) => if let Err(error) = commands.submit(&registry, store.as_ref(), principal.user_id, principal.device_id, connection_id, command).await { let _ = send_command_error(&mut socket, error.code).await; },
+                            Ok(command) => if let Err(error) = commands.submit(&registry, store.as_ref(), principal.user_id, principal.device_id, connection_id, envelope.message_id.to_string(), command).await { let _ = send_command_error(&mut socket, error.code).await; },
                             Err(_) => { let _ = send_command_error(&mut socket, "invalid_payload").await; }
                         },
                         "command.accepted" => match serde_json::from_value::<CommandAccepted>(envelope.payload) {

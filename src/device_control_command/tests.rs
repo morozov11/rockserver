@@ -296,6 +296,7 @@ async fn command_is_delivered_once_and_only_terminal_target_result_completes_it(
             owner,
             controller,
             controller_connection,
+            Uuid::new_v4().to_string(),
             command.clone(),
         )
         .await
@@ -381,6 +382,7 @@ async fn command_is_delivered_once_and_only_terminal_target_result_completes_it(
             owner,
             controller,
             controller_connection,
+            Uuid::new_v4().to_string(),
             command,
         )
         .await
@@ -439,6 +441,7 @@ async fn spoofed_or_offline_targets_are_never_delivered() {
             owner,
             controller,
             controller_connection,
+            Uuid::new_v4().to_string(),
             sent.clone(),
         )
         .await
@@ -478,6 +481,7 @@ async fn spoofed_or_offline_targets_are_never_delivered() {
                 owner,
                 controller,
                 controller_connection,
+                Uuid::new_v4().to_string(),
                 command(target)
             )
             .await
@@ -593,6 +597,7 @@ async fn deterministic_resolution_failures_terminate_without_dispatch_or_uri_lea
                 owner,
                 controller,
                 controller_connection,
+                Uuid::new_v4().to_string(),
                 sent.clone(),
             )
             .await
@@ -622,6 +627,7 @@ async fn deterministic_resolution_failures_terminate_without_dispatch_or_uri_lea
                 owner,
                 controller,
                 controller_connection,
+                Uuid::new_v4().to_string(),
                 sent,
             )
             .await
@@ -673,6 +679,8 @@ async fn transient_catalog_failure_completes_with_retryable_terminal_result() {
         )
         .await
         .unwrap();
+    let request_id = "rs-5-terminal-request".to_owned();
+    let sent = command(target);
     router
         .submit(
             &registry,
@@ -680,7 +688,8 @@ async fn transient_catalog_failure_completes_with_retryable_terminal_result() {
             owner,
             controller,
             controller_connection,
-            command(target),
+            request_id.clone(),
+            sent.clone(),
         )
         .await
         .unwrap();
@@ -691,6 +700,13 @@ async fn transient_catalog_failure_completes_with_retryable_terminal_result() {
     );
     let result = controller_frame(&mut controller_messages).await;
     assert!(result.contains("persistence_unavailable"));
+    let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(
+        result["command_id"],
+        serde_json::to_value(sent.command_id).unwrap()
+    );
+    assert_eq!(result["error"]["request_id"], request_id);
+    assert_eq!(result["error"]["details"], serde_json::json!({}));
     assert!(target_messages.try_recv().is_err(), "nothing is dispatched");
 }
 
@@ -740,6 +756,7 @@ async fn controller_supplied_play_stream_variants_are_gated() {
                 owner,
                 controller,
                 controller_connection,
+                Uuid::new_v4().to_string(),
                 spoofed,
             )
             .await
@@ -765,6 +782,7 @@ async fn controller_supplied_play_stream_variants_are_gated() {
                 owner,
                 controller,
                 controller_connection,
+                Uuid::new_v4().to_string(),
                 forbidden,
             )
             .await
@@ -787,6 +805,7 @@ async fn controller_supplied_play_stream_variants_are_gated() {
             owner,
             controller,
             controller_connection,
+            Uuid::new_v4().to_string(),
             direct.clone(),
         )
         .await
@@ -848,6 +867,7 @@ async fn play_station_requires_catalog_wiring_and_a_catalog_source_target() {
                 owner,
                 controller,
                 controller_connection,
+                Uuid::new_v4().to_string(),
                 command(direct_only),
             )
             .await
@@ -864,6 +884,7 @@ async fn play_station_requires_catalog_wiring_and_a_catalog_source_target() {
                 owner,
                 controller,
                 controller_connection,
+                Uuid::new_v4().to_string(),
                 command(catalog_target),
             )
             .await

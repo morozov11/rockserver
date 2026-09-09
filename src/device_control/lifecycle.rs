@@ -37,6 +37,8 @@ pub enum CommandStatus {
 pub struct DomainError {
     pub code: String,
     pub message: String,
+    pub request_id: String,
+    pub details: serde_json::Map<String, serde_json::Value>,
 }
 impl CommandResult {
     /// Checks the one terminal outcome invariant.

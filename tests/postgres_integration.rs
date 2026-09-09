@@ -264,6 +264,8 @@ async fn postgres_device_control_manifest_is_owner_scoped_and_tombstoned() {
         error: Some(DomainError {
             code: "failed".into(),
             message: "safe test error".into(),
+            request_id: "postgres-test".into(),
+            details: Default::default(),
         }),
     };
     assert_eq!(

@@ -95,7 +95,9 @@ fn presentation_command_and_terminal_invariants() {
             completed_at: t,
             error: Some(DomainError {
                 code: "x".into(),
-                message: "x".into()
+                message: "x".into(),
+                request_id: "test".into(),
+                details: Default::default(),
             })
         }
         .validate()
