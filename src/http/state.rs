@@ -76,9 +76,11 @@ pub(super) struct AppState {
 }
 
 #[derive(Default)]
-/// Process-local buckets used by anonymous HTTP admission control.
+/// Process-local buckets used by anonymous and per-device HTTP admission control.
 pub(super) struct PublicLimitState {
     pub(super) requests: HashMap<&'static str, Vec<std::time::Instant>>,
+    /// Per-device buckets for authenticated device-facing endpoints, keyed `endpoint:device_id`.
+    pub(super) device_requests: HashMap<String, Vec<std::time::Instant>>,
     pub(super) active_voice: usize,
 }
 
@@ -106,6 +108,45 @@ impl AppState {
                     "Request rate limit exceeded.",
                     request_id,
                     json!({"limit_scope":"direct_peer"}),
+                ),
+                RETRY_AFTER_SECONDS,
+            )));
+        }
+        bucket.push(now);
+        Ok(())
+    }
+
+    /// Applies the per-device quota for authenticated device-facing endpoints.
+    ///
+    /// Buckets are scoped to one authenticated device so a single chatty device cannot exhaust
+    /// the quota of the rest of the fleet; requests rejected before authentication never enter
+    /// a device bucket. Window and retry policy match the anonymous limiter.
+    pub(super) fn device_request_allowed(
+        &self,
+        endpoint: &'static str,
+        device_id: uuid::Uuid,
+        limit: PublicLimit,
+        request_id: &str,
+    ) -> Result<(), Box<Response>> {
+        let mut state = self
+            .public_limits
+            .lock()
+            .expect("public limiter mutex is not poisoned");
+        let now = std::time::Instant::now();
+        let bucket = state
+            .device_requests
+            .entry(format!("{endpoint}:{device_id}"))
+            .or_default();
+        bucket.retain(|seen| now.duration_since(*seen) < RATE_WINDOW);
+        if bucket.len() >= limit.burst {
+            tracing::warn!(%request_id, endpoint, limit_scope = "device", requests_per_minute = limit.requests, "device rate limit rejected");
+            return Err(Box::new(retry_after(
+                error_response(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "rate_limited",
+                    "Request rate limit exceeded.",
+                    request_id,
+                    json!({"limit_scope":"device"}),
                 ),
                 RETRY_AFTER_SECONDS,
             )));

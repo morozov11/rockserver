@@ -19,7 +19,7 @@ unless their schema below is an explicitly source-neutral projection component.
 | `esp32-temperature-state-client.json` | client → server | `EntityStateMessage` | valid | temperature telemetry with observation and freshness deadline. |
 | `esp32-humidity-state-client.json` | client → server | `EntityStateMessage` | valid | humidity telemetry with its own entity revision. |
 | `directory-snapshot-server.json` | server → controller | `DirectorySnapshotMessage` | valid | RockMobile-readable projection of registered RockCast and ESP32. |
-| `device-catalog-response.json` | HTTP response (planned) | `DeviceCatalogPage` | valid | one bounded device-facing catalog browse page of `DeviceStationDto` metadata; `stream_url` is deliberately absent and the cursor is the last stable station ID. |
+| `device-catalog-response.json` | HTTP response (implemented, RS-2) | `DeviceCatalogPage` | valid | one bounded device-facing catalog browse page of `DeviceStationDto` metadata; `stream_url` is deliberately absent and the cursor is the last stable station ID. |
 | `ha-normalized-entity-directory-entry.json` | HTTP/projection | `EntityDirectoryEntry` | valid | source-neutral allowlisted Home Assistant entity metadata; it deliberately carries no paired device or provider-native identity. |
 | `ha-normalized-entity-state.json` | HTTP/projection | `EntityStateSnapshot` | valid | source-neutral normalized allowlisted Home Assistant state. |
 | `display-sensor-grid-command-server.json` | server → ESP32 | `DeviceCommandMessage` | valid | explicit `display.main` sensor-grid presentation. |

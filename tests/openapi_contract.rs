@@ -962,8 +962,8 @@ fn device_catalog_contract_is_bounded_and_stream_free() {
             operation
                 .get("x-rockserver-status")
                 .and_then(JsonValue::as_str),
-            Some("planned"),
-            "{path} must stay planned until RS-2 implements it"
+            Some("implemented"),
+            "{path} must be implemented since RS-2"
         );
         let security = operation
             .get("security")
@@ -1363,15 +1363,37 @@ fn voice_stream_contract_matches_runtime_and_adds_planned_cancel() {
 }
 
 #[tokio::test]
-async fn planned_device_catalog_paths_are_not_registered_by_runtime() {
+async fn device_catalog_paths_are_registered_and_require_a_native_device_session() {
     use axum::{body::Body, http::Request};
     use tower::ServiceExt;
 
+    struct EmptyResolver;
+    #[async_trait::async_trait]
+    impl rockserver::auth::NativeSessionResolver for EmptyResolver {
+        async fn resolve_active_native_session(
+            &self,
+            _access_hash: &rockserver::auth::SecretHash,
+        ) -> Result<
+            Option<rockserver::auth::ActiveSession>,
+            rockserver::auth::NativeSessionLookupError,
+        > {
+            Ok(None)
+        }
+    }
+
+    let app = rockserver::http::router_with_search_service_and_native_session_resolver(
+        rockserver::search::SearchService::new(std::sync::Arc::new(
+            rockserver::search::InMemoryStationRepository::with_builtin_catalog().unwrap(),
+        )),
+        std::time::Duration::from_secs(5),
+        std::sync::Arc::new(EmptyResolver),
+    );
     for path in [
         "/api/v1/device-control/catalog/stations",
         "/api/v1/device-control/catalog/search?q=jazz",
     ] {
-        let response = rockserver::http::router()
+        let response = app
+            .clone()
             .oneshot(
                 Request::get(path)
                     .header(
@@ -1385,8 +1407,8 @@ async fn planned_device_catalog_paths_are_not_registered_by_runtime() {
             .unwrap();
         assert_eq!(
             response.status(),
-            axum::http::StatusCode::NOT_FOUND,
-            "{path} is contract-only until RS-2 registers it"
+            axum::http::StatusCode::UNAUTHORIZED,
+            "{path} is registered since RS-2 and must require a valid device session"
         );
     }
 }

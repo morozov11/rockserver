@@ -10,10 +10,11 @@ info:
     PostgreSQL may use provenance-compatible semantic ranking; metadata fallback preserves
     the same schemas when embeddings are absent or unavailable. Operations marked
     `x-rockserver-status: planned` are contract-first device-control designs and are not yet
-    registered by the runtime; this includes the two device-facing catalog paths
-    (`GET /api/v1/device-control/catalog/stations` and
-    `GET /api/v1/device-control/catalog/search`), the server-resolved `station.play_stream`
-    dispatch, and the voice device-session/cancel extension.
+    registered by the runtime; this currently includes the server-resolved
+    `station.play_stream` dispatch and the voice device-session/cancel extension. The two
+    device-facing catalog paths (`GET /api/v1/device-control/catalog/stations` and
+    `GET /api/v1/device-control/catalog/search`) are implemented behind the RockserverBearer
+    device session.
 servers:
   - url: https://alex.vault57.ru
   - url: http://localhost
@@ -349,7 +350,7 @@ paths:
     get:
       operationId: browseDeviceCatalog
       summary: Browse one bounded device-facing catalog page of station metadata
-      x-rockserver-status: planned
+      x-rockserver-status: implemented
       description: >-
         Device-facing catalog browse for paired native devices that render a station list
         locally (ESP32 display/controller roles). Authentication is the short-lived
@@ -411,7 +412,7 @@ paths:
     get:
       operationId: searchDeviceCatalog
       summary: Run one bounded ranked station search for a device session
-      x-rockserver-status: planned
+      x-rockserver-status: implemented
       description: >-
         Device-facing ranked search reusing the existing deterministic station-search service
         (hard filters, deterministic ranking, semantic-provider failures degrade to metadata

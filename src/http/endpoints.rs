@@ -33,6 +33,8 @@ mod control;
 #[path = "control_auth.rs"]
 mod control_auth;
 pub use control_auth::authenticate_control_ingress;
+#[path = "device_catalog.rs"]
+mod device_catalog;
 #[path = "directory.rs"]
 mod directory;
 #[path = "health.rs"]
@@ -154,6 +156,35 @@ pub fn router_with_speech_recognizers_and_bearer_token(
         control_state_hub: Default::default(),
         control_store: None,
         control_session_resolver: None,
+        control_timing: Default::default(),
+    })
+}
+
+/// Creates the router with an explicit native-session resolver for device-facing endpoints.
+///
+/// The resolver authenticates the short-lived RockserverBearer device sessions accepted by
+/// `GET /api/v1/device-control/catalog/*`; production routers derive it from the PostgreSQL
+/// account store, while tests may supply a deterministic fake.
+pub fn router_with_search_service_and_native_session_resolver(
+    search_service: SearchService,
+    voice_command_timeout: Duration,
+    session_resolver: Arc<dyn crate::auth::NativeSessionResolver>,
+) -> Router {
+    build_router(AppState {
+        search_service,
+        speech_recognizers: SpeechRecognizers::same(Arc::new(UnavailableSpeechRecognizer)),
+        voice_command_timeout,
+        api_bearer_token: TEST_API_BEARER_TOKEN.to_owned(),
+        account_store: None,
+        admin_store: None,
+        trusted_proxy_token: None,
+        local_admin_origin: local_admin_origin_from_env(),
+        public_limits: Arc::new(Mutex::new(PublicLimitState::default())),
+        control_registry: Default::default(),
+        control_commands: Default::default(),
+        control_state_hub: Default::default(),
+        control_store: None,
+        control_session_resolver: Some(session_resolver),
         control_timing: Default::default(),
     })
 }
@@ -314,6 +345,14 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/device-control/directory",
             axum::routing::get(directory::get),
+        )
+        .route(
+            "/api/v1/device-control/catalog/stations",
+            axum::routing::get(device_catalog::browse),
+        )
+        .route(
+            "/api/v1/device-control/catalog/search",
+            axum::routing::get(device_catalog::search),
         )
         .route(
             "/api/v1/pairing-requests",

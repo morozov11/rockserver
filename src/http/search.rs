@@ -116,7 +116,8 @@ impl TryFrom<SearchRequestDto> for ValidatedSearchRequest {
     }
 }
 
-fn is_valid_locale(locale: &str) -> bool {
+/// Validates the bounded BCP 47-style locale accepted by search and device-catalog transports.
+pub(super) fn is_valid_locale(locale: &str) -> bool {
     let mut subtags = locale.split('-');
     let Some(language) = subtags.next() else {
         return false;

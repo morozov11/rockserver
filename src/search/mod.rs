@@ -394,13 +394,15 @@ impl StationRepository for InMemoryStationRepository {
         after_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Station>, RepositoryError> {
-        Ok(self
+        // The stable-ID cursor contract requires ascending station-ID order; the PostgreSQL
+        // repository enforces the same ORDER BY, but the pinned catalog is not pre-sorted.
+        let mut page: Vec<&Station> = self
             .stations
             .iter()
             .filter(|station| after_id.is_none_or(|after| station.id.as_str() > after))
-            .take(limit)
-            .cloned()
-            .collect())
+            .collect();
+        page.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(page.into_iter().take(limit).cloned().collect())
     }
 
     async fn list_admin(
@@ -410,7 +412,8 @@ impl StationRepository for InMemoryStationRepository {
         limit: usize,
     ) -> Result<Vec<Station>, RepositoryError> {
         let query = query.map(str::to_lowercase);
-        Ok(self
+        // Same ascending station-ID contract as the public listing and the PostgreSQL backend.
+        let mut page: Vec<&Station> = self
             .stations
             .iter()
             .filter(|station| {
@@ -423,9 +426,9 @@ impl StationRepository for InMemoryStationRepository {
                 })
             })
             .filter(|station| after_id.is_none_or(|after| station.id.as_str() > after))
-            .take(limit)
-            .cloned()
-            .collect())
+            .collect();
+        page.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(page.into_iter().take(limit).cloned().collect())
     }
 
     async fn get_public(&self, id: &str) -> Result<Option<Station>, RepositoryError> {

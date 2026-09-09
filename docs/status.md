@@ -2,6 +2,53 @@
 
 Last updated: 2026-09-09
 
+## RS-2: device-facing catalog runtime implemented (2026-09-09)
+
+Task RS-2 of the rockcast-device-plan (coordinated from `rock-esp32/docs/plan-control.md`)
+implemented the two Step-3 device-catalog routes frozen by RS-1 in `api/openapi.yaml` 0.5.0:
+
+- `GET /api/v1/device-control/catalog/stations` (browse): cursor = stable station ID of the
+  last page item (`^[A-Za-z0-9-]+$`, ≤512), limit 1..=20 (default 20), `next_cursor` null
+  exactly when no further page may exist. Reuses `SearchService::public_catalog`.
+- `GET /api/v1/device-control/catalog/search`: GET query parameters — `q` (1..=128 chars,
+  non-whitespace-only), `locale` (BCP 47-like, default `en-US`), `limit` 1..=20 — one ranked
+  page with no cursor. Reuses `SearchService::interpret_and_search` under the same 5 s budget
+  as the public search route; a timeout maps to the contract's 503 (the device contract has
+  no 504).
+- Authentication reuses the existing device-session mechanism: the short-lived native
+  RockserverBearer from `POST /api/v1/auth/device-session` is resolved through
+  `authenticate_control_ingress`/`NativeSessionResolver` (same path as
+  `/device-control/directory`). Missing, unknown, expired, revoked, or non-native
+  credentials return 401; an unavailable session store returns a retryable 503. No new token
+  format and no extra scope: v1 needs only a valid non-revoked session (RS-1 decision).
+- Responses are `DeviceCatalogPage`/`DeviceSearchPage` of `DeviceStationDto`: the mapping
+  from domain stations drops `stream_url`, ranking fields, and provider/persistence
+  identifiers by construction; `Cache-Control: no-store` on 200s.
+- Rate limits mirror the public routes numerically (browse 60/20, search 30/10) but buckets
+  are per authenticated device, so one device cannot exhaust the fleet quota; 429 carries
+  `Retry-After` and `details.limit_scope = "device"`.
+- Unknown or oversized parameters (including unknown query keys) are rejected
+  deterministically with 400.
+- Side fix surfaced by the cursor-walk test: `InMemoryStationRepository::list_public` and
+  `list_admin` now sort by stable station ID like the PostgreSQL `ORDER BY s.id`; previously
+  the unsorted pinned catalog could repeat stations across cursor pages.
+- `x-rockserver-status: planned` was removed from exactly these two operations (now
+  `implemented`); the play_stream (RS-3) and voice (RS-4) planned markers are untouched.
+- New public builder `router_with_search_service_and_native_session_resolver` allows tests
+  and firmware-facing harnesses to run the router with a deterministic session resolver.
+
+Verification: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`
+and `cargo test` pass. New `tests/device_catalog_api.rs` (12 tests) covers happy paths,
+cursor pagination across all 41 builtin stations, parameter bounds (limit/cursor/q/locale,
+unknown keys), 401 without/expired session, retryable 503s, search timeout mapping,
+stream-URL-free responses (including stations with invalid stream URLs), and per-device
+rate isolation. `tests/openapi_contract.rs` (8/8) now asserts the implemented status and
+that both routes are registered and require a native device session.
+
+Known limitations: the catalog is account-independent and requires no device-control scope;
+the contract's 403 remains reserved (revocation is observed as 401 today). RS-3
+(play_station → play_stream resolution) and RS-4 (voice device-session/cancel) are pending.
+
 ## RS-1: RockCast-radio contracts frozen before implementation (2026-09-09)
 
 Task RS-1 of the rockcast-device-plan (coordinated from `rock-esp32/docs/plan-control.md`)

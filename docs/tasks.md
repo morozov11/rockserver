@@ -1,5 +1,42 @@
 # Task log
 
+## 2026-09-09 — RS-2: implement device-session catalog browse and search runtime
+
+- Goal: implement the two device-facing catalog routes frozen by RS-1 (openapi 0.5.0) on the
+  existing catalog/search services with device-session authentication, stream-free responses,
+  and bounded deterministic behavior (Step 3.1 of `rock-esp32/docs/rockcast-device-plan.md`).
+- Scope: new `src/http/device_catalog.rs` — `GET /api/v1/device-control/catalog/stations`
+  (stable-ID cursor `^[A-Za-z0-9-]+$` ≤512, limit 1..=20 default 20, `next_cursor` = last
+  station ID of a full page) over `SearchService::public_catalog`, and
+  `GET /api/v1/device-control/catalog/search` (`q` 1..=128 non-whitespace-only, BCP 47-like
+  `locale` default en-US, limit 1..=20, one ranked page without cursor) over
+  `SearchService::interpret_and_search` under the shared 5 s timeout (timeout → 503, the
+  device contract has no 504). Both authenticate the native RockserverBearer device session
+  through `authenticate_control_ingress`/`NativeSessionResolver` (401 for missing, unknown,
+  expired, revoked, or non-native credentials; retryable 503 when the session store is
+  unavailable); no new token format, no extra scope. `DeviceStationDto` mapping drops
+  `stream_url`, score/reason, and provider fields by construction; 200s carry
+  `Cache-Control: no-store`. Per-device rate buckets in `AppState::device_request_allowed`
+  (browse 60/20, search 30/10; 429 with `Retry-After`, `details.limit_scope = "device"`);
+  unknown or oversized query parameters rejected with 400 via `deny_unknown_fields`.
+  `x-rockserver-status: planned` removed from exactly the two catalog operations (RS-3/RS-4
+  markers untouched) and the info description updated. New public builder
+  `router_with_search_service_and_native_session_resolver` for tests and harnesses.
+  Side fix: `InMemoryStationRepository::list_public`/`list_admin` now sort by stable
+  station ID (matching the PostgreSQL `ORDER BY s.id`); the unsorted pinned catalog
+  previously could repeat stations across cursor pages. Tests: new
+  `tests/device_catalog_api.rs` (12 integration tests: happy paths, full 41-station cursor
+  walk without repeats, parameter bounds including unknown keys, 401 without/expired
+  session, retryable 503, timeout mapping, stream-free responses including stations with
+  invalid stream URLs, per-device rate isolation); `tests/openapi_contract.rs` updated to
+  assert `implemented` status and that both routes are registered behind native-session
+  auth (401) instead of the previous 404 check. Docs: `docs/status.md`,
+  `docs/roadmap/device-control-tasks.md`, fixture README status, service diagrams.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
+  `cargo test` — all pass (device_catalog_api 12/12, openapi_contract 8/8, search_api 9/9,
+  full suite green).
+- Status: complete.
+
 ## 2026-09-09 — RS-1: freeze RockCast-radio contracts before implementation
 
 - Goal: freeze the Step-2 contracts of `rock-esp32/docs/rockcast-device-plan.md` in RockServer
