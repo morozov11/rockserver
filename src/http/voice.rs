@@ -409,6 +409,11 @@ async fn run_voice_stream(
             return;
         }
     };
+    // The frozen contract keeps legacy device clients (station-search voice,
+    // for example the RockCast desktop app) on the established flow: only a
+    // start frame that explicitly announces voice.main opts a device session
+    // into the device intent flow.
+    let principal = principal.filter(|_| start.surface_id.as_deref() == Some("voice.main"));
     if let Some(principal) = principal
         && let Err((code, message)) = validate_device_voice_start(&state, principal, &start)
     {

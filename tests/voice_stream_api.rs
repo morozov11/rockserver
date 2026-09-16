@@ -166,7 +166,7 @@ async fn ambiguity_and_unsupported_intent_are_deterministic_errors() {
 }
 
 #[tokio::test]
-async fn device_start_requires_voice_surface_and_keeps_runtime_limits() {
+async fn device_session_without_surface_keeps_legacy_station_search() {
     let harness = Harness::new("play rock", stations(1), DEFAULT_VOICE_COMMAND_TIMEOUT);
     let (mut stream, server) = harness.connect(Some("native-token")).await;
     assert!(
@@ -175,12 +175,19 @@ async fn device_start_requires_voice_surface_and_keeps_runtime_limits() {
             .starts_with("HTTP/1.1 101 Switching Protocols")
     );
     start(&mut stream, false, 16_000).await;
-    assert_eq!(
-        read_json_frame(&mut stream).await["code"],
-        "validation_failed"
-    );
+    let ready = read_json_frame(&mut stream).await;
+    assert!(ready.get("source_device_id").is_none());
+    write_client_frame(&mut stream, 0x1, br#"{"type":"commit"}"#).await;
+    assert_eq!(read_json_frame(&mut stream).await["type"], "transcript");
+    let result = read_json_frame(&mut stream).await;
+    assert_eq!(result["type"], "result");
+    assert!(result["selected_station"].is_object());
+    assert!(result.get("status").is_none());
     server.abort();
+}
 
+#[tokio::test]
+async fn device_start_with_surface_keeps_runtime_limit_validation() {
     let harness = Harness::new("play rock", stations(1), DEFAULT_VOICE_COMMAND_TIMEOUT);
     let (mut stream, server) = harness.connect(Some("native-token")).await;
     assert!(
