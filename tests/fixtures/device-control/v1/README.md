@@ -10,7 +10,7 @@ unless their schema below is an explicitly source-neutral projection component.
 | --- | --- | --- | --- | --- |
 | `hello-client.json` | client → server | `ProtocolHelloMessage` | valid | v1 negotiation starts. |
 | `welcome-server.json` | server → client | `ProtocolWelcomeMessage` | valid | server selects v1 and publishes fixed limits. |
-| `rockcast-register-client.json` | client → server | `DeviceRegisterMessage` | valid | RockCast declares only player/playback, station, volume, Chromecast and relay support. |
+| `rockcast-register-client.json` | client → server | `DeviceRegisterMessage` | valid | RockCast registers player and voice_endpoint roles, playback, station, volume, Chromecast, relay, and voice.input capabilities, and the voice.main surface. |
 | `rockcast-registered-server.json` | server → client | `DeviceRegisteredMessage` | valid | server-derived connection, identity and policy after registration. |
 | `esp32-register-client.json` | client → server | `DeviceRegisterMessage` | valid | ESP32 radio registers with player/controller/display/voice roles; `media.station` allows only `rockserver_catalog`, volume is 0..100 step 1, surfaces are `display.main` and `voice.main`. No sensors are declared on this board. |
 | `esp32-manifest-client.json` | client → server | `DeviceManifestMessage` | valid | revision 2 full replacement manifest: the radio capabilities persist and `entity.sensor` plus sensor entities appear (the deferred DC-019 resumption example). |

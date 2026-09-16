@@ -8,16 +8,19 @@
     "app_version": "1.0.0-fixture",
     "manifest": {
       "manifest_revision": 1,
-      "roles": ["player"],
+      "roles": ["player", "voice_endpoint"],
       "capabilities": { "revision": 1, "items": [
         { "name": "media.playback", "version": 1, "actions": ["play", "pause", "stop", "next", "previous"] },
         { "name": "media.station", "version": 1, "sources": ["rockserver_catalog", "direct_stream"] },
         { "name": "media.volume", "version": 1, "minimum": 0, "maximum": 100, "step": 5, "mute": true },
         { "name": "media.chromecast", "version": 1, "actions": ["discover", "connect", "disconnect"], "discovery_ttl_seconds": 60 },
-        { "name": "media.relay", "version": 1, "actions": ["start", "stop", "set_mode"], "modes": ["local", "chromecast"] }
+        { "name": "media.relay", "version": 1, "actions": ["start", "stop", "set_mode"], "modes": ["local", "chromecast"] },
+        { "name": "voice.input", "version": 1, "formats": ["pcm16_mono_16000"] }
       ] },
       "entities": [],
-      "surfaces": []
+      "surfaces": [
+        { "surface_id": "voice.main", "kind": "voice", "display_name": "RockCast voice", "views": [] }
+      ]
     }
   }
 }
