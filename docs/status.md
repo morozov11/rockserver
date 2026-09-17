@@ -33,10 +33,15 @@ change propagating with a strictly higher `state_revision`.
 Verification: 156 library unit tests and 8 OpenAPI contract tests pass,
 including the new directory projection tests, the strengthened stale-revision
 guard test, and the hub latest-snapshot test. `cargo fmt --check`, strict
-all-target/all-feature Clippy, full `cargo test`, and `git diff --check` pass.
-PostgreSQL-gated and live tests remain ignored as usual. Physical acceptance
-(Phase 4) is not claimed; RockCast publishing (RC-4/Phase 1) and the
-RockMobile state-driven UI (RM-4/Phase 3) remain the next dependent steps in
+all-target/all-feature Clippy, full `cargo test` (211 passed overall), and
+`git diff --check` pass. PostgreSQL-gated and live tests remain ignored as
+usual. **Production deploy:** commit `511dd7b` (RS-8) was released through
+`deploy/ops-001-d.ps1 -Action deploy` on 2026-09-17; the VPS applied embedded
+migrations and the release gate returned `readiness=passed`, independently
+confirmed as `HTTP 200 {"status":"ok"}` on the public `/health/ready`.
+Physical acceptance (Phase 4, USB RockCast + RockMobile) is not claimed;
+RockCast publishing (RC-4/Phase 1) and the RockMobile state-driven UI
+(RM-4/Phase 3) are implemented in their repositories — see
 [`roadmap/rockmobile-rockcast-live-control.md`](roadmap/rockmobile-rockcast-live-control.md).
 
 ## RC-4 / RM-4: authoritative live playback UI — planned handoff (2026-09-17)
