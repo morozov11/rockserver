@@ -1878,19 +1878,21 @@ components:
             shorter client expiry; that is expected, not an error.
         - type: object
           additionalProperties: false
-          required: [name, source, station_id, stream_uri]
+          required: [name, source, station_id, station, stream_uri]
           properties:
             name: { const: station.play_stream }
             source: { const: rockserver_catalog }
             station_id: { type: string, minLength: 1, maxLength: 128 }
+            station: { $ref: "#/components/schemas/StationPresentation" }
             stream_uri: { $ref: "#/components/schemas/StationStreamUri" }
           description: >-
             Server-resolved playback dispatched by RockServer only, under the same command_id
             as the originating station.play_station, after validating the target's player role
             and media.station capability. station_id echoes the resolved station so the target
-            can publish truthful playback state and now_playing presentations. Controllers
-            must not send this variant; a controller-supplied source=rockserver_catalog is
-            rejected as invalid_payload.
+            can publish truthful playback state; station is a bounded target-only display hint
+            for a player whose local catalog lacks that ID. Controllers never receive either
+            field and must not send this variant; a controller-supplied source=rockserver_catalog
+            is rejected as invalid_payload.
         - type: object
           additionalProperties: false
           required: [name, source, stream_uri]
@@ -1902,6 +1904,36 @@ components:
             Controller-supplied direct stream. Allowed only when the target's media.station
             capability advertises direct_stream; a target without it rejects the command with
             capability_not_supported.
+    StationPresentation:
+      type: object
+      additionalProperties: false
+      required: [name, icon_url]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Current catalog display name; it is not an identity key.
+        icon_url:
+          oneOf:
+            - $ref: "#/components/schemas/StationIconUri"
+            - type: "null"
+          description: >-
+            Optional catalog icon. It is null until RockServer stores a validated icon URL;
+            targets may safely ignore it and must not infer an icon from a stream URL.
+      description: >-
+        Bounded presentation attached only to a server-resolved station.play_stream delivery.
+        It never appears in controller directory state, command results, or persisted command
+        input; stable station_id remains the playback identity.
+    StationIconUri:
+      type: string
+      format: uri
+      pattern: "^https?://"
+      maxLength: 2048
+      description: >-
+        Absolute HTTP(S) icon URL with a public host, no userinfo or fragment and a TCP port in
+        1..65535. It follows the same literal destination bounds as StationStreamUri; targets
+        apply their existing bounded image-fetch policy before downloading it.
     StationStreamUri:
       type: string
       format: uri

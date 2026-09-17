@@ -108,7 +108,7 @@ fn presentation_command_and_terminal_invariants() {
 #[test]
 fn station_play_stream_variants_round_trip_and_enforce_their_shapes() {
     let resolved: DeviceCommand = serde_json::from_str(
-        r#"{"command_id":"00000000-0000-4000-8000-000000000001","target":{"device_id":"00000000-0000-4000-8000-000000000002"},"deadline_at":"2026-09-02T12:02:10Z","body":{"name":"station.play_stream","source":"rockserver_catalog","station_id":"station.jazz_fixture","stream_uri":"https://streams.example.com/quiet-jazz.mp3"}}"#,
+        r#"{"command_id":"00000000-0000-4000-8000-000000000001","target":{"device_id":"00000000-0000-4000-8000-000000000002"},"deadline_at":"2026-09-02T12:02:10Z","body":{"name":"station.play_stream","source":"rockserver_catalog","station_id":"station.jazz_fixture","station":{"name":"Fixture Jazz","icon_url":null},"stream_uri":"https://streams.example.com/quiet-jazz.mp3"}}"#,
     )
     .unwrap();
     assert_eq!(
@@ -116,12 +116,16 @@ fn station_play_stream_variants_round_trip_and_enforce_their_shapes() {
         CommandBody::PlayStream {
             source: StreamSource::RockserverCatalog,
             station_id: Some("station.jazz_fixture".into()),
+            station: Some(StationPresentation {
+                name: "Fixture Jazz".into(),
+                icon_url: None,
+            }),
             stream_uri: "https://streams.example.com/quiet-jazz.mp3".into(),
         }
     );
     assert_eq!(
         serde_json::to_value(&resolved).unwrap()["body"],
-        serde_json::json!({"name":"station.play_stream","source":"rockserver_catalog","station_id":"station.jazz_fixture","stream_uri":"https://streams.example.com/quiet-jazz.mp3"})
+        serde_json::json!({"name":"station.play_stream","source":"rockserver_catalog","station_id":"station.jazz_fixture","station":{"name":"Fixture Jazz","icon_url":null},"stream_uri":"https://streams.example.com/quiet-jazz.mp3"})
     );
     resolved
         .validate_at(&Timestamp::parse("2026-09-02T12:02:00Z").unwrap())
@@ -137,14 +141,16 @@ fn station_play_stream_variants_round_trip_and_enforce_their_shapes() {
         CommandBody::PlayStream {
             source: StreamSource::DirectStream,
             station_id: None,
+            station: None,
             stream_uri: "https://streams.example.com/highway-rock.aac".into(),
         }
     );
 
-    // The frozen variant shapes are strict: catalog requires the echo, direct forbids it.
+    // Catalog must echo an ID; direct streams cannot claim catalog presentation.
     for broken in [
         r#"{"name":"station.play_stream","source":"rockserver_catalog","stream_uri":"https://streams.example.com/x.mp3"}"#,
         r#"{"name":"station.play_stream","source":"direct_stream","station_id":"station.jazz_fixture","stream_uri":"https://streams.example.com/x.mp3"}"#,
+        r#"{"name":"station.play_stream","source":"direct_stream","station":{"name":"Fixture Jazz","icon_url":null},"stream_uri":"https://streams.example.com/x.mp3"}"#,
         r#"{"name":"station.play_stream","stream_uri":"https://streams.example.com/x.mp3"}"#,
         r#"{"name":"station.play_stream","source":"torrent","stream_uri":"https://streams.example.com/x.mp3"}"#,
     ] {
@@ -153,6 +159,29 @@ fn station_play_stream_variants_round_trip_and_enforce_their_shapes() {
             "shape must be rejected: {broken}"
         );
     }
+
+    assert!(
+        StationPresentation {
+            name: "".into(),
+            icon_url: None,
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        StationPresentation {
+            name: "Fixture Jazz".into(),
+            icon_url: Some("file:///not-an-icon.png".into()),
+        }
+        .validate()
+        .is_err()
+    );
+    StationPresentation {
+        name: "Fixture Jazz".into(),
+        icon_url: Some("https://icons.example.com/jazz.png".into()),
+    }
+    .validate()
+    .unwrap();
 }
 
 #[test]

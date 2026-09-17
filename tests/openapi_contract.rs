@@ -1208,6 +1208,18 @@ fn station_play_stream_and_volume_bounds_are_enforceable() {
             "name": "station.play_stream",
             "source": "rockserver_catalog",
             "station_id": "station.jazz_fixture",
+            "station": {"name": "Fixture Jazz", "icon_url": null},
+            "stream_uri": "https://streams.example.com/quiet-jazz.mp3"
+        }),
+    );
+    assert_component_valid(
+        &document,
+        "StationCommand",
+        &json!({
+            "name": "station.play_stream",
+            "source": "rockserver_catalog",
+            "station_id": "station.jazz_fixture",
+            "station": {"name": "Fixture Jazz", "icon_url": "https://icons.example.com/jazz.png"},
             "stream_uri": "https://streams.example.com/quiet-jazz.mp3"
         }),
     );
@@ -1226,6 +1238,30 @@ fn station_play_stream_and_volume_bounds_are_enforceable() {
         &json!({
             "name": "station.play_stream",
             "source": "rockserver_catalog",
+            "station_id": "station.jazz_fixture",
+            "stream_uri": "https://streams.example.com/quiet-jazz.mp3"
+        }),
+        "the server-resolved variant must include the target presentation",
+    );
+    assert_component_invalid(
+        &document,
+        "StationCommand",
+        &json!({
+            "name": "station.play_stream",
+            "source": "rockserver_catalog",
+            "station_id": "station.jazz_fixture",
+            "station": {"name": "Fixture Jazz"},
+            "stream_uri": "https://streams.example.com/quiet-jazz.mp3"
+        }),
+        "the target presentation must explicitly carry nullable icon_url",
+    );
+    assert_component_invalid(
+        &document,
+        "StationCommand",
+        &json!({
+            "name": "station.play_stream",
+            "source": "rockserver_catalog",
+            "station": {"name": "Fixture Jazz", "icon_url": null},
             "stream_uri": "https://streams.example.com/quiet-jazz.mp3"
         }),
         "the server-resolved variant must echo the resolved station_id",

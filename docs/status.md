@@ -2,6 +2,32 @@
 
 Last updated: 2026-09-17
 
+## RS-9: bounded station presentation in server-to-target playback (implemented locally, 2026-09-17)
+
+The `station.play_stream` delivery created only after RockServer resolves a
+controller's `station.play_station` now includes
+`station: { name, icon_url }`. The exact `station_id` remains the authoritative
+playback identity and is the only station fact that RockCast publishes in its
+runtime state. `name` repairs a target-local fallback entry so `Now playing`
+shows the selected station rather than an opaque catalog UUID.
+
+This is deliberately target-only presentation, not a catalog transfer or a
+new controller response: the server resolves the current catalog record,
+attaches its bounded name, and sends the existing resolved stream only to the
+target. The original controller command remains the only persisted/fingerprinted
+input; no stream URL or presentation object appears in controller lifecycle
+frames, directory state, logs, or error text. The current catalog has no icon
+field, therefore the truthful server value is `icon_url: null`. The OpenAPI
+schema and validation reserve a bounded public HTTP(S) `icon_url` for the
+future catalog field without another wire change.
+
+Rollout is target first, then server: the updated RockCast accepts an older
+delivery with no `station` object, while its older strict parser would reject a
+new field. Server checks passed: `cargo fmt --check`, strict
+`cargo clippy --all-targets --all-features -- -D warnings`, full `cargo test`
+(all regular tests passed), and `git diff --check`. This change is not deployed
+and no physical USB acceptance of the new delivery is claimed.
+
 ## RS-8: owner-scoped `runtime_state` projection in the directory (2026-09-17)
 
 `DeviceControlDirectoryEntry` now carries an optional, owner-scoped
@@ -44,21 +70,20 @@ RockCast publishing (RC-4/Phase 1) and the RockMobile state-driven UI
 (RM-4/Phase 3) are implemented in their repositories — see
 [`roadmap/rockmobile-rockcast-live-control.md`](roadmap/rockmobile-rockcast-live-control.md).
 
-## RC-4 / RM-4: authoritative live playback UI — planned handoff (2026-09-17)
+## RC-4 / RM-4: authoritative live playback UI — implemented locally, physical handoff pending (2026-09-17)
 
 The deployed RC-3 path has live acceptance: RockMobile can explicitly send
 `station.play_station` and standard playback commands to a paired online
 RockCast. RockServer already resolves that station command to a catalog-validated
 `station.play_stream`; no client needs or may receive a raw stream URL.
 
-The remaining user-facing gap is state projection and presentation, not a second
-command path. The protocol already defines revisioned playback (`status`,
-`station_id`) and volume state, but the current `DeviceControlDirectoryEntry`
-exports only `state_freshness`, not the runtime state itself. RockServer must
-make an owner-scoped state projection available to the existing directory before
-RockMobile can use it as the source of truth for the now-playing card, transport
-state, and volume control. The implementation handoff, UI states, API amendment,
-acceptance criteria, and cross-repository order are recorded in
+The user-facing model is now present locally: RS-8 projects revisioned playback
+and volume state through the existing owner-scoped directory, RC-4 publishes
+truthful target facts, and RM-4 uses them rather than optimistic command success.
+RS-9/RC-4b add the bounded display name needed for a station absent from the
+local RockCast cache; its future nullable icon URL remains target-only. The
+implementation record, UI states, API amendment, acceptance criteria, and
+cross-repository deployment order are recorded in
 [`roadmap/rockmobile-rockcast-live-control.md`](roadmap/rockmobile-rockcast-live-control.md),
 with interactive mockups and embedded Hi-Res artwork consolidated in
 [`live-control-mockups.html`](live-control-mockups.html).

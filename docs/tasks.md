@@ -1,5 +1,32 @@
 # Task log
 
+## 2026-09-17 — RS-9: target-only station name and future icon delivery
+
+- Goal: correct the RockCast fallback presentation for a station selected on
+  RockMobile but missing from RockCast's local cache. The previous RC-4a
+  fallback correctly preserved the catalog ID but used it as the visible name,
+  yielding a UUID in `Now playing`.
+- Contract: the server-resolved `station.play_stream` branch now requires a
+  target-only `station: { name, icon_url }` object in OpenAPI. `name` is
+  bounded to 1..128 characters. `icon_url` is nullable and, when populated in
+  a future catalog, must meet the same bounded public HTTP(S) safety policy as
+  a delivery URL (maximum 2048 characters); the current catalog has no icon
+  column, so the resolver emits `icon_url: null`.
+- Scope: `StationCatalog` returns the resolved stream plus `StationPresentation`;
+  the router attaches it only after resolving the controller's original
+  `station.play_station`. The controller payload/fingerprint, command
+  persistence, terminal lifecycle frames, directory projection, logs and
+  error text remain unchanged, and none receive stream URLs or presentation
+  fields. Direct stream commands cannot carry a presentation object.
+- Compatibility: the Rust decoder accepts an absent `station` only during
+  target-first rollout. Deploy updated RockCast before this server release;
+  once deployed, the server always supplies the bounded object.
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features --
+  -D warnings`; `cargo test` — all regular suites passed; `git diff --check`.
+  No server deployment or physical USB-phone acceptance is claimed.
+- Status: **implemented locally; awaiting target-first deployment and live
+  acceptance.**
+
 ## 2026-09-17 — RS-8: owner-scoped runtime_state projection in the directory
 
 - Goal: implement Phase 0 + Phase 2 of

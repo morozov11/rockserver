@@ -16,8 +16,8 @@ use crate::{
         ActuatorAction, CATALOG_STATION_SOURCE, CommandAccepted, CommandBody, CommandId,
         CommandReceived, CommandReservation, CommandResult, CommandStatus, DIRECT_STATION_SOURCE,
         DeviceCapability, DeviceCommand, DeviceControlScope, DeviceControlStore, DeviceId,
-        DeviceManifest, DeviceRole, DomainError, StoreOutcome, StreamSource, Timestamp,
-        validate_stream_uri,
+        DeviceManifest, DeviceRole, DomainError, StationPresentation, StoreOutcome, StreamSource,
+        Timestamp, validate_stream_uri,
     },
     device_control_presence::{ConnectionRegistry, OutboundFrame},
     search::{RepositoryError, SearchService},
@@ -30,23 +30,40 @@ const MAX_TIMEOUT: Duration = Duration::from_secs(30);
 /// Budget for one server-side station resolution inside command admission.
 const RESOLUTION_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Read-only station catalog boundary used to resolve station IDs to playable streams.
+/// Bounded server-resolved station data sent only to the selected target.
 ///
-/// Implementations return only the stream URL so no wider catalog record crosses into the
-/// command router; the URL is dispatched to the target and never logged or persisted.
+/// The stream URI is never persisted, logged, or sent to a controller. Presentation is a
+/// target-local display hint and does not replace the stable station identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedStation {
+    /// Validated playable stream URL for the target's one-time delivery.
+    pub stream_uri: String,
+    /// Display values for a target whose local catalog lacks the resolved station.
+    pub presentation: StationPresentation,
+}
+
+/// Read-only station catalog boundary used to resolve station IDs for playback delivery.
 #[async_trait]
 pub trait StationCatalog: Send + Sync {
-    /// Returns the current playable stream URL for one station, or `None` when unknown.
-    async fn station_stream(&self, station_id: &str) -> Result<Option<String>, RepositoryError>;
+    /// Returns one current playable station, or `None` when its stable ID is unknown.
+    async fn station(&self, station_id: &str) -> Result<Option<ResolvedStation>, RepositoryError>;
 }
 
 #[async_trait]
 impl StationCatalog for SearchService {
-    async fn station_stream(&self, station_id: &str) -> Result<Option<String>, RepositoryError> {
+    async fn station(&self, station_id: &str) -> Result<Option<ResolvedStation>, RepositoryError> {
         Ok(self
             .public_station(station_id)
             .await?
-            .map(|station| station.stream_url))
+            .map(|station| ResolvedStation {
+                stream_uri: station.stream_url,
+                presentation: StationPresentation {
+                    name: station.name,
+                    // The catalog has no stored icon yet. Keeping the null slot in the command
+                    // avoids a future wire-contract change when that catalog field is added.
+                    icon_url: None,
+                },
+            }))
     }
 }
 
@@ -280,12 +297,13 @@ impl CommandRouter {
                     return Ok(());
                 }
             };
-            match resolve_stream(catalog.as_ref(), &station_id).await {
-                Ok(stream_uri) => {
+            match resolve_station(catalog.as_ref(), &station_id).await {
+                Ok(station) => {
                     command.body = CommandBody::PlayStream {
                         source: StreamSource::RockserverCatalog,
                         station_id: Some(station_id),
-                        stream_uri,
+                        station: Some(station.presentation),
+                        stream_uri: station.stream_uri,
                     };
                 }
                 Err(failure) => {
@@ -499,28 +517,33 @@ enum ResolutionFailure {
     Unavailable,
 }
 
-/// Resolves one controller station reference into a validated stream URI.
+/// Resolves one controller station reference into a validated target delivery.
 ///
 /// Deterministic failures (unknown station, unusable stream, forbidden destination) return a
 /// fixed `invalid_payload` message; catalog errors and resolution timeouts are transient.
-async fn resolve_stream(
+async fn resolve_station(
     catalog: &dyn StationCatalog,
     station_id: &str,
-) -> Result<String, ResolutionFailure> {
-    let station =
-        match tokio::time::timeout(RESOLUTION_TIMEOUT, catalog.station_stream(station_id)).await {
-            Ok(Ok(Some(stream_uri))) => stream_uri,
-            Ok(Ok(None)) => {
-                return Err(ResolutionFailure::Invalid("Unknown station identifier."));
-            }
-            Ok(Err(_)) | Err(_) => return Err(ResolutionFailure::Unavailable),
-        };
-    if station.trim().is_empty() {
+) -> Result<ResolvedStation, ResolutionFailure> {
+    let station = match tokio::time::timeout(RESOLUTION_TIMEOUT, catalog.station(station_id)).await
+    {
+        Ok(Ok(Some(station))) => station,
+        Ok(Ok(None)) => {
+            return Err(ResolutionFailure::Invalid("Unknown station identifier."));
+        }
+        Ok(Err(_)) | Err(_) => return Err(ResolutionFailure::Unavailable),
+    };
+    if station.stream_uri.trim().is_empty() {
         return Err(ResolutionFailure::Invalid(
             "Station has no playable stream.",
         ));
     }
-    match validate_stream_uri(&station) {
+    if station.presentation.validate().is_err() {
+        return Err(ResolutionFailure::Invalid(
+            "Station presentation is not allowed.",
+        ));
+    }
+    match validate_stream_uri(&station.stream_uri) {
         Ok(()) => Ok(station),
         Err(_) => Err(ResolutionFailure::Invalid("Stream address is not allowed.")),
     }

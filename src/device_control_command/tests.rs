@@ -15,16 +15,27 @@ type StoredCommand = (Uuid, DeviceId, CommandReservation, Option<CommandResult>)
 
 /// Deterministic station catalog fake; stream URLs are inert test placeholders only.
 struct FakeCatalog {
-    streams: HashMap<String, String>,
+    stations: HashMap<String, ResolvedStation>,
     unavailable: bool,
 }
 
 impl FakeCatalog {
-    fn with_streams(streams: &[(&str, &str)]) -> Arc<Self> {
+    fn with_stations(stations: &[(&str, &str, &str)]) -> Arc<Self> {
         Arc::new(Self {
-            streams: streams
+            stations: stations
                 .iter()
-                .map(|(id, url)| ((*id).to_owned(), (*url).to_owned()))
+                .map(|(id, name, url)| {
+                    (
+                        (*id).to_owned(),
+                        ResolvedStation {
+                            stream_uri: (*url).to_owned(),
+                            presentation: crate::device_control::StationPresentation {
+                                name: (*name).to_owned(),
+                                icon_url: None,
+                            },
+                        },
+                    )
+                })
                 .collect(),
             unavailable: false,
         })
@@ -33,14 +44,14 @@ impl FakeCatalog {
 
 #[async_trait]
 impl StationCatalog for FakeCatalog {
-    async fn station_stream(&self, station_id: &str) -> Result<Option<String>, RepositoryError> {
+    async fn station(&self, station_id: &str) -> Result<Option<ResolvedStation>, RepositoryError> {
         if self.unavailable {
             return Err(RepositoryError::new(
                 "station catalog fixture",
                 std::io::Error::other("fixture catalog failure"),
             ));
         }
-        Ok(self.streams.get(station_id).cloned())
+        Ok(self.stations.get(station_id).cloned())
     }
 }
 
@@ -247,8 +258,9 @@ fn command(target: Uuid) -> DeviceCommand {
 
 /// Router with the canonical resolved calm-jazz stream available for resolution.
 fn station_router() -> CommandRouter {
-    CommandRouter::default().with_station_catalog(FakeCatalog::with_streams(&[(
+    CommandRouter::default().with_station_catalog(FakeCatalog::with_stations(&[(
         "calm-jazz",
+        "Calm Jazz",
         "https://streams.example.com/calm-jazz.mp3",
     )]))
 }
@@ -319,6 +331,10 @@ async fn command_is_delivered_once_and_only_terminal_target_result_completes_it(
         crate::device_control::CATALOG_STATION_SOURCE
     );
     assert_eq!(delivered.payload["body"]["station_id"], "calm-jazz");
+    assert_eq!(
+        delivered.payload["body"]["station"],
+        serde_json::json!({"name":"Calm Jazz","icon_url":null})
+    );
     assert_eq!(
         delivered.payload["body"]["stream_uri"],
         "https://streams.example.com/calm-jazz.mp3"
@@ -546,14 +562,19 @@ async fn controller_frame(receiver: &mut mpsc::Receiver<OutboundFrame>) -> Strin
 #[tokio::test]
 async fn deterministic_resolution_failures_terminate_without_dispatch_or_uri_leak() {
     let registry = ConnectionRegistry::default();
-    let router = CommandRouter::default().with_station_catalog(FakeCatalog::with_streams(&[
-        ("station-empty-001", ""),
-        ("station-broken-002", "not a valid url"),
+    let router = CommandRouter::default().with_station_catalog(FakeCatalog::with_stations(&[
+        ("station-empty-001", "Empty", ""),
+        ("station-broken-002", "Broken", "not a valid url"),
         (
             "station-private-003",
+            "Private",
             "https://192.0.2.10/never-echo-this.mp3",
         ),
-        ("station-loopback-004", "http://127.0.0.1:8000/live"),
+        (
+            "station-loopback-004",
+            "Loopback",
+            "http://127.0.0.1:8000/live",
+        ),
     ]));
     let store: Arc<dyn DeviceControlStore> = Arc::new(MemoryStore::default());
     let owner = Uuid::new_v4();
@@ -653,7 +674,7 @@ async fn deterministic_resolution_failures_terminate_without_dispatch_or_uri_lea
 async fn transient_catalog_failure_completes_with_retryable_terminal_result() {
     let registry = ConnectionRegistry::default();
     let router = CommandRouter::default().with_station_catalog(Arc::new(FakeCatalog {
-        streams: HashMap::new(),
+        stations: HashMap::new(),
         unavailable: true,
     }));
     let store: Arc<dyn DeviceControlStore> = Arc::new(MemoryStore::default());
@@ -746,6 +767,10 @@ async fn controller_supplied_play_stream_variants_are_gated() {
     spoofed.body = CommandBody::PlayStream {
         source: StreamSource::RockserverCatalog,
         station_id: Some("calm-jazz".into()),
+        station: Some(crate::device_control::StationPresentation {
+            name: "Spoofed".into(),
+            icon_url: None,
+        }),
         stream_uri: "https://streams.example.com/spoofed.mp3".into(),
     };
     assert_eq!(
@@ -772,6 +797,7 @@ async fn controller_supplied_play_stream_variants_are_gated() {
     forbidden.body = CommandBody::PlayStream {
         source: StreamSource::DirectStream,
         station_id: None,
+        station: None,
         stream_uri: "https://10.0.0.5/private.mp3".into(),
     };
     assert_eq!(
@@ -796,6 +822,7 @@ async fn controller_supplied_play_stream_variants_are_gated() {
     direct.body = CommandBody::PlayStream {
         source: StreamSource::DirectStream,
         station_id: None,
+        station: None,
         stream_uri: "https://streams.example.com/direct.mp3".into(),
     };
     router

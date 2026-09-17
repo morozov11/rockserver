@@ -18,6 +18,32 @@ pub const DIRECT_STATION_SOURCE: &str = "direct_stream";
 /// Maximum station stream URI length accepted by the v1 command vocabulary.
 pub const MAX_STREAM_URI_LENGTH: usize = 2048;
 
+/// Bounded catalog presentation delivered only with a server-resolved station stream.
+///
+/// The station ID remains the playback identity. These values are display hints for a target
+/// whose local catalog does not contain that ID; they never become controller-visible state.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StationPresentation {
+    /// Catalog display name for the resolved station.
+    pub name: String,
+    /// Optional catalog icon URL. The current catalog does not store icons and emits `None`.
+    pub icon_url: Option<String>,
+}
+
+impl StationPresentation {
+    /// Checks the bounded, safely fetchable presentation data attached by RockServer.
+    pub(crate) fn validate(&self) -> Result<(), ValidationError> {
+        bounded(&self.name, 1, 128, "station.name")?;
+        if let Some(icon_url) = &self.icon_url {
+            validate_stream_uri(icon_url).map_err(|_| ValidationError::InvalidPayload {
+                field: "station.icon_url",
+            })?;
+        }
+        Ok(())
+    }
+}
+
 /// Explicit device, entity, or surface command target.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -112,6 +138,9 @@ pub enum CommandBody {
         source: StreamSource,
         /// Echo of the resolved station; required for `RockserverCatalog`.
         station_id: Option<String>,
+        /// Optional server-authored presentation for catalog delivery. It is absent only while
+        /// a target is rolling forward from a server that predates this additive field.
+        station: Option<StationPresentation>,
         /// Validated stream URI; never logged and never echoed in errors.
         stream_uri: String,
     },
@@ -190,23 +219,30 @@ impl DeviceCommand {
             CommandBody::PlayStream {
                 source,
                 station_id,
+                station,
                 stream_uri,
             } => {
-                match (source, station_id) {
-                    (StreamSource::RockserverCatalog, Some(station_id)) => {
-                        bounded(station_id, 1, 128, "station_id")?
+                match (source, station_id, station) {
+                    (StreamSource::RockserverCatalog, Some(station_id), station) => {
+                        bounded(station_id, 1, 128, "station_id")?;
+                        if let Some(station) = station {
+                            station.validate()?;
+                        }
                     }
-                    (StreamSource::RockserverCatalog, None) => {
+                    (StreamSource::RockserverCatalog, None, _) => {
                         return Err(ValidationError::InvalidPayload {
                             field: "station_id",
                         });
                     }
-                    (StreamSource::DirectStream, Some(_)) => {
+                    (StreamSource::DirectStream, Some(_), _) => {
                         return Err(ValidationError::InvalidPayload {
                             field: "station_id",
                         });
                     }
-                    (StreamSource::DirectStream, None) => {}
+                    (StreamSource::DirectStream, None, Some(_)) => {
+                        return Err(ValidationError::InvalidPayload { field: "station" });
+                    }
+                    (StreamSource::DirectStream, None, None) => {}
                 }
                 validate_stream_uri(stream_uri).map_err(|_| ValidationError::InvalidPayload {
                     field: "stream_uri",
@@ -253,20 +289,30 @@ impl Serialize for CommandBody {
             Self::PlayStream {
                 source,
                 station_id,
+                station,
                 stream_uri,
-            } => match station_id {
-                Some(station_id) => serde_json::json!({
+            } => {
+                let mut value = match station_id {
+                    Some(station_id) => serde_json::json!({
                     "name":"station.play_stream",
                     "source":source.as_str(),
                     "station_id":station_id,
                     "stream_uri":stream_uri
-                }),
-                None => serde_json::json!({
+                    }),
+                    None => serde_json::json!({
                     "name":"station.play_stream",
                     "source":source.as_str(),
                     "stream_uri":stream_uri
-                }),
-            },
+                    }),
+                };
+                if let Some(station) = station {
+                    value["station"] = serde_json::json!({
+                        "name": station.name,
+                        "icon_url": station.icon_url,
+                    });
+                }
+                value
+            }
             Self::Playback { action } => serde_json::json!({"name":format!("playback.{action}")}),
             Self::Volume { command } => match command {
                 VolumeCommand::SetLevel { level } => {
@@ -337,9 +383,23 @@ impl<'de> Deserialize<'de> for CommandBody {
                     }
                     StreamSource::DirectStream => None,
                 };
+                let station = match source {
+                    StreamSource::RockserverCatalog => m
+                        .get("station")
+                        .cloned()
+                        .map(serde_json::from_value)
+                        .transpose()
+                        .map_err(D::Error::custom)?,
+                    // Direct-stream commands must not claim a catalog presentation.
+                    StreamSource::DirectStream if m.contains_key("station") => {
+                        return Err(D::Error::custom("invalid station presentation"));
+                    }
+                    StreamSource::DirectStream => None,
+                };
                 Self::PlayStream {
                     source,
                     station_id,
+                    station,
                     stream_uri: serde_json::from_value(get("stream_uri")?)
                         .map_err(D::Error::custom)?,
                 }

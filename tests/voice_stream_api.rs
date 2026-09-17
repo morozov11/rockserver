@@ -60,11 +60,13 @@ async fn device_voice_routes_play_stop_and_volume_through_the_normal_router() {
                 CommandBody::PlayStream {
                     source,
                     station_id,
+                    station,
                     stream_uri,
                 },
             ) => {
                 assert_eq!(source.as_str(), CATALOG_STATION_SOURCE);
                 assert_eq!(station_id.as_deref(), Some("station-1"));
+                assert_eq!(station.unwrap().name, "Station 1");
                 assert_eq!(stream_uri, "https://streams.example.com/1.mp3");
                 let stored = harness
                     .store

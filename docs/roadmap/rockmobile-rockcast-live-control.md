@@ -1,14 +1,16 @@
 # ТЗ: достоверное управление проигрыванием RockCast из RockMobile
 
-**Статус:** planned handoff — 2026-09-17 (мокапы и спецификация согласованы);
+**Статус:** локальная реализация RS-8/RS-9, RC-4/RC-4b и RM-4 готова;
+физическая USB-приёмка обновлённой server-to-target доставки ещё не выполнена;
 **ревизия UX — 2026-09-17:** модель «Mini-Player + Bottom Sheet» (Концепция 2) заменена
 на **Station-First** (единый каталог станций → экран станции с селектором устройства
 вывода и пультом). Мокапы Концепции 2 ниже сохранены как исторический референс палитры.
 **Исполнители:** RockServer (контракт и directory projection), RockCast (источник
 фактического state), RockMobile (модель и UI)  
 **Предпосылки:** RS-3, DC-013, DC-015, DC-016 и RC-3 завершены.  
-**Необходимая последовательность:** сначала контракт/fixtures, затем RockCast,
-затем server projection, затем RockMobile и физическая приёмка.
+**Необходимая последовательность:** для новой station presentation сначала
+выпустить совместимый RockCast, затем RockServer; directory projection и
+RockMobile уже реализованы локально. После этого — физическая приёмка.
 
 ![Мокапы: экран «Сейчас играет» и выбор станции](../rockmobile-rockcast-live-control-mockups.png)
 
@@ -30,8 +32,11 @@
 Первый релиз не требует получения названия трека из радиопотока. «Что играет» в
 этом ТЗ означает подтверждённую станцию: `station_id` из state сопоставляется с
 уже существующим каталогом, из которого Mobile берёт название, обложку, жанр и
-битрейт. Если карточки станции нет в локальном каталоге, UI показывает безопасный
-fallback «Станция <id>», а не прошлый выбранный пользователем текст.
+битрейт. Это не меняет source of truth: server-to-target delivery также несёт
+bounded display name, чтобы именно RockCast не показывал UUID, если у него нет
+локальной карточки. Если карточки станции нет в локальном каталоге Mobile, UI
+показывает безопасный fallback «Станция <id>», а не прошлый выбранный
+пользователем текст.
 
 ## 2. Фактическая исходная точка
 
@@ -41,11 +46,10 @@ fallback «Станция <id>», а не прошлый выбранный по
   `station.play_stream` с тем же command ID. Stream URL не возвращается Mobile.
 - RockCast уже располагает реальным состоянием собственного player и volume;
   RC-3 подтвердил с телефона `playback.stop` на физическом target-е.
-- Протокол v1 уже задаёт revisioned runtime state и `PlaybackRuntimeState`
-  (`status`, `station_id`), а также volume. Но текущий
-  `DeviceControlDirectoryEntry` содержит лишь `state_freshness`, а не runtime
-  state: controller сейчас не может его получить. Нужно расширить **существующие**
-  directory snapshot/event owner-scoped проекцией, а не создавать второй transport.
+- Протокол v1 задаёт revisioned runtime state и `PlaybackRuntimeState`
+  (`status`, `station_id`), а также volume. RS-8 уже добавил его owner-scoped
+  в существующие `DeviceControlDirectoryEntry` REST/WSS snapshot/upsert;
+  controller получает state без второго transport-а или polling endpoint-а.
 - Визуальный стиль обоих клиентов зафиксирован в дизайн-системе: тёплая тёмная
   палитра «RockCast espresso» (`#1A1410` фон, `#241C16` панели, `#E8DCC8` текст,
   `#C45C26` терракотовый акцент). Мокапы приведены в полное соответствие с этой
@@ -76,6 +80,25 @@ fallback «Станция <id>», а не прошлый выбранный по
 7. Никаких ложных элементов перемотки (scrub/seek bar) для радиопотока. Плеер
    отображает статус живого вещания и реальные доступные команды (`play`, `pause`,
    `stop`, переключение станций).
+
+### 3.1 Bounded presentation in the server-to-target delivery (RS-9 / RC-4b)
+
+После server-side каталоговой резолюции target получает
+`station.play_stream { station_id, station: { name, icon_url }, stream_uri }`.
+`station_id` — единственная идентичность playback/runtime state; `name` — только
+отображение в RockCast. Ни Mobile, ни directory state, command lifecycle,
+persisted controller input или логи не получают этот presentation-object и не
+получают `stream_uri`.
+
+`icon_url` зарезервирован как nullable bounded HTTP(S) URL. Пока RockServer не
+хранит иконки каталога, он всегда отправляет `null`; RockCast не придумывает
+обложку из stream URL. Когда поле появится в каталоге, оно пройдёт прежнюю
+валидацию безопасного публичного URL на сервере и существующую bounded очередь
+иконок RockCast — без нового endpoint-а и передачи списка станций.
+
+**Совместимое развёртывание:** сначала обновить RockCast до RC-4b (он принимает
+старую доставку без `station` и имеет fallback), затем развернуть RS-9. Старый
+строгий parser RockCast отвергает новое поле, поэтому обратный порядок запрещён.
 
 ## 4. Требуемая модель состояния
 
@@ -270,6 +293,9 @@ revisioned runtime state в обычном directory snapshot/upsert; не-owner
 > `station_id` привязан к lifecycle запуска и сохраняется в error/stopped,
 > монотонная персистентная ревизия; пауза не поддерживается (см. §4.5.3).
 > Fake-transport тесты покрывают все переходы и resync; `cargo test` 129+2/0.
+> **Дополнение RC-4b (2026-09-17):** server-delivered fallback использует
+> `station.name`, но сохраняет exact `station_id`; готов принять nullable
+> `icon_url` через существующую bounded очередь иконок. `cargo test` 131+2/0.
 
 1. Найти единственный owner player state и volume state; не создавать второй
    shadow player для control worker.
@@ -347,7 +373,10 @@ snapshot и последующие upsert после restart/reconnect, без p
 1. Запустить one current RockCast instance, дождаться online/fresh directory
    state на USB-connected Android device.
 2. Выбрать две отличающиеся catalog stations подряд и проверить exact
-   `station_id`/название на телефоне после каждой команды.
+   `station_id`/название на телефоне после каждой команды, а для станции вне
+   локального cache RockCast — её человеческое `station.name` (не UUID) в
+   `Now playing` на ПК. Зафиксировать, что текущая иконка корректно отсутствует:
+   `icon_url` от сервера сейчас `null`.
 3. Изменить volume с телефона, затем локально в RockCast; после каждого изменения
    убедиться, что телефон показывает device-confirmed значение.
 4. Проверить stop/pause/play и failure path (без ложного success), offline/stale
