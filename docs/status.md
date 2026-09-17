@@ -25,8 +25,13 @@ Rollout is target first, then server: the updated RockCast accepts an older
 delivery with no `station` object, while its older strict parser would reject a
 new field. Server checks passed: `cargo fmt --check`, strict
 `cargo clippy --all-targets --all-features -- -D warnings`, full `cargo test`
-(all regular tests passed), and `git diff --check`. This change is not deployed
-and no physical USB acceptance of the new delivery is claimed.
+(all regular tests passed), and `git diff --check`. **Production deploy:**
+commit `509ea0c` was released with `deploy/ops-001-d.ps1 -Action deploy` on
+2026-09-17; the VPS deploy worker returned `status=succeeded` and public
+`/health/ready` independently returned `HTTP 200 {"status":"ok"}`. The
+explicit server-only rollout occurred before RC-4b is installed on the Windows
+target, so do not send a catalog selection to the old strict RockCast parser;
+update/restart RockCast first, then perform the physical USB acceptance.
 
 ## RS-8: owner-scoped `runtime_state` projection in the directory (2026-09-17)
 

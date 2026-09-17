@@ -23,9 +23,13 @@
   once deployed, the server always supplies the bounded object.
 - Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features --
   -D warnings`; `cargo test` — all regular suites passed; `git diff --check`.
-  No server deployment or physical USB-phone acceptance is claimed.
-- Status: **implemented locally; awaiting target-first deployment and live
-  acceptance.**
+  **Deploy evidence:** commit `509ea0c` was released via
+  `deploy/ops-001-d.ps1 -Action deploy`; VPS status is `succeeded`, then public
+  `/health/ready` returned `HTTP 200 {"status":"ok"}`.
+- Status: **server deployed; physical acceptance blocked on installing RC-4b.**
+  The explicitly requested server-only deploy preceded the compatible target
+  release, so no new catalog-selection command may be tested on an older strict
+  RockCast parser.
 
 ## 2026-09-17 — RS-8: owner-scoped runtime_state projection in the directory
 
