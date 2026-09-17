@@ -71,6 +71,11 @@ const DEVICE_CONTROL_FIXTURES: &[FixtureSpec] = &[
         valid: true,
     },
     FixtureSpec {
+        file: "directory-upsert-server.json",
+        schema: "DirectoryUpsertMessage",
+        valid: true,
+    },
+    FixtureSpec {
         file: "device-catalog-response.json",
         schema: "DeviceCatalogPage",
         valid: true,
@@ -644,6 +649,24 @@ fn device_control_v1_is_bounded_and_fully_linked() {
             "directory must not expose {forbidden}"
         );
     }
+    let runtime_state = directory_properties
+        .get(Value::String("runtime_state".to_owned()))
+        .expect("directory entries must declare the owner-scoped runtime_state projection");
+    assert_eq!(
+        runtime_state.get("$ref").and_then(Value::as_str),
+        Some("#/components/schemas/DeviceStateSnapshot"),
+        "runtime_state must reuse the revisioned DeviceStateSnapshot without duplication"
+    );
+    let directory_entry_required = value_at(
+        &document,
+        "components/schemas/DeviceControlDirectoryEntry/required",
+    )
+    .and_then(Value::as_sequence)
+    .expect("directory entry requirements must be declared");
+    assert!(
+        !directory_entry_required.contains(&Value::String("runtime_state".to_owned())),
+        "runtime_state must stay optional for targets that never published state"
+    );
 
     let mut references = Vec::new();
     let mut operation_ids = Vec::new();
@@ -745,7 +768,7 @@ fn device_control_v1_golden_fixtures_match_schemas_and_flows() {
         .collect();
     assert_eq!(
         message_ids.len(),
-        33,
+        34,
         "message IDs must be distinct across the v1 flows"
     );
 
@@ -944,6 +967,44 @@ fn device_control_v1_golden_fixtures_match_schemas_and_flows() {
     assert!(
         ha.get("device_id").is_none() && ha.get("provider_native_id").is_none(),
         "HA projection must not masquerade as a paired device or expose provider IDs"
+    );
+
+    // RS-8: the owner-scoped runtime_state projection rides the ordinary directory snapshot
+    // and upsert. A target without published state keeps the field absent, and a later
+    // upsert carries a strictly higher device state revision than the earlier snapshot.
+    let directory_snapshot = load_fixture("directory-snapshot-server.json");
+    let devices = directory_snapshot
+        .pointer("/payload/directory/devices")
+        .and_then(JsonValue::as_array)
+        .expect("directory snapshot fixture must list devices");
+    let rockcast = devices
+        .iter()
+        .find(|device| {
+            device["device_type"] == json!("rockcast") && device["runtime_state"].is_object()
+        })
+        .expect("one entry must demonstrate the runtime_state projection");
+    assert!(
+        devices
+            .iter()
+            .any(|device| device.get("runtime_state").is_none()),
+        "one entry must demonstrate absent runtime_state for a target without published state"
+    );
+    let upsert = load_fixture("directory-upsert-server.json");
+    assert_eq!(
+        upsert.pointer("/payload/device/device_id"),
+        rockcast.get("device_id"),
+        "the upsert fixture must project the same device as the snapshot fixture"
+    );
+    assert!(
+        upsert
+            .pointer("/payload/device/runtime_state/state_revision")
+            .and_then(JsonValue::as_i64)
+            .expect("upsert runtime_state must be revisioned")
+            > rockcast
+                .pointer("/runtime_state/state_revision")
+                .and_then(JsonValue::as_i64)
+                .expect("snapshot runtime_state must be revisioned"),
+        "the upsert must advance the device's monotonic state_revision over the snapshot"
     );
 }
 

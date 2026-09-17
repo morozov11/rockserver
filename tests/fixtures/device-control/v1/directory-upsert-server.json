@@ -1,0 +1,11 @@
+{
+  "protocol_version": 1,
+  "message_id": "10000000-0000-4000-8000-000000000034",
+  "type": "directory.upsert",
+  "sent_at": "2026-09-02T12:03:30Z",
+  "payload": {
+    "event_id": "50000000-0000-4000-8000-000000000002",
+    "directory_revision": 13,
+    "device": { "device_id": "40000000-0000-4000-8000-000000000001", "device_display_name": "Living room RockCast", "device_type": "rockcast", "roles": ["player"], "capabilities": { "revision": 1, "items": [ { "name": "media.playback", "version": 1, "actions": ["play", "pause", "stop", "next", "previous"] }, { "name": "media.station", "version": 1, "sources": ["rockserver_catalog", "direct_stream"] }, { "name": "media.volume", "version": 1, "minimum": 0, "maximum": 100, "step": 5, "mute": true }, { "name": "media.chromecast", "version": 1, "actions": ["discover", "connect", "disconnect"], "discovery_ttl_seconds": 60 }, { "name": "media.relay", "version": 1, "actions": ["start", "stop", "set_mode"], "modes": ["local", "chromecast"] } ] }, "presence": { "status": "online", "last_seen_at": "2026-09-02T12:03:29Z" }, "state_freshness": { "status": "fresh", "observed_at": "2026-09-02T12:03:28Z", "received_at": "2026-09-02T12:03:29Z", "stale_after": "2026-09-02T12:08:28Z" }, "runtime_state": { "state_revision": 7, "observed_at": "2026-09-02T12:03:28Z", "received_at": "2026-09-02T12:03:29Z", "state": { "playback": { "status": "playing", "station_id": "station-rock-001" }, "volume": { "level": 71, "muted": false } } }, "entities": [], "surfaces": [] }
+  }
+}

@@ -1,6 +1,64 @@
 # Project status
 
-Last updated: 2026-09-09
+Last updated: 2026-09-17
+
+## RS-8: owner-scoped `runtime_state` projection in the directory (2026-09-17)
+
+`DeviceControlDirectoryEntry` now carries an optional, owner-scoped
+`runtime_state` field holding the revisioned `DeviceStateSnapshot`
+(`state_revision`, `observed_at`, `received_at`, playback/volume/output/display).
+It is served by the two existing transports only — REST
+`GET /api/v1/device-control/directory` and the control WSS
+`directory.snapshot`/`directory.upsert` fan-out, which share one DTO builder —
+with no new endpoint, transport, pairing, or polling. The value comes from the
+persisted latest-snapshot projection (`DeviceControlStore::load_device_state`),
+never from the command lifecycle, and `state_revision` stays the device's own
+monotonic revision.
+
+Scope gating matches entity states: the field is serialized only for callers
+holding `entity.state.read` (controller-role manifests via `granted_scopes`).
+A target that never published state keeps the field absent from the JSON — not
+`null`, not a fabricated `stopped`/`0%` — and `state_freshness` remains a
+separate always-present fact. Cross-account isolation is unchanged: a foreign
+account still does not see the entry at all.
+
+Contract and fixtures: `api/openapi.yaml` 0.5.0 declares `runtime_state` as an
+optional `$ref` to the existing `DeviceStateSnapshot`; the golden
+`directory-snapshot-server.json` now shows two entries with `runtime_state`
+(RockCast playing `station-rock-001` at 62%, ESP32 at revision 8 consistent with
+the state-full/delta fixtures) plus a legacy offline entry demonstrating absence,
+and the new golden `directory-upsert-server.json` demonstrates a local volume
+change propagating with a strictly higher `state_revision`.
+
+Verification: 156 library unit tests and 8 OpenAPI contract tests pass,
+including the new directory projection tests, the strengthened stale-revision
+guard test, and the hub latest-snapshot test. `cargo fmt --check`, strict
+all-target/all-feature Clippy, full `cargo test`, and `git diff --check` pass.
+PostgreSQL-gated and live tests remain ignored as usual. Physical acceptance
+(Phase 4) is not claimed; RockCast publishing (RC-4/Phase 1) and the
+RockMobile state-driven UI (RM-4/Phase 3) remain the next dependent steps in
+[`roadmap/rockmobile-rockcast-live-control.md`](roadmap/rockmobile-rockcast-live-control.md).
+
+## RC-4 / RM-4: authoritative live playback UI — planned handoff (2026-09-17)
+
+The deployed RC-3 path has live acceptance: RockMobile can explicitly send
+`station.play_station` and standard playback commands to a paired online
+RockCast. RockServer already resolves that station command to a catalog-validated
+`station.play_stream`; no client needs or may receive a raw stream URL.
+
+The remaining user-facing gap is state projection and presentation, not a second
+command path. The protocol already defines revisioned playback (`status`,
+`station_id`) and volume state, but the current `DeviceControlDirectoryEntry`
+exports only `state_freshness`, not the runtime state itself. RockServer must
+make an owner-scoped state projection available to the existing directory before
+RockMobile can use it as the source of truth for the now-playing card, transport
+state, and volume control. The implementation handoff, UI states, API amendment,
+acceptance criteria, and cross-repository order are recorded in
+[`roadmap/rockmobile-rockcast-live-control.md`](roadmap/rockmobile-rockcast-live-control.md),
+with interactive mockups and embedded Hi-Res artwork consolidated in
+[`live-control-mockups.html`](live-control-mockups.html).
+`media.chromecast` and `media.relay` remain explicitly out of this scope until
+RS-7 supplies server routing.
 
 ## RS-5: canonical terminal command errors (2026-09-09)
 

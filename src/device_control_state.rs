@@ -195,4 +195,52 @@ mod tests {
             Err(broadcast::error::TryRecvError::Lagged(_))
         ));
     }
+
+    #[test]
+    fn device_state_keeps_only_the_last_accepted_snapshot_per_device() {
+        let hub = StateHub::default();
+        let user = Uuid::new_v4();
+        let player = DeviceId(Uuid::new_v4());
+        let legacy = DeviceId(Uuid::new_v4());
+        let snapshot = |revision: u64, status: &str, level: u8| DeviceStateSnapshot {
+            state_revision: revision,
+            observed_at: crate::device_control::Timestamp::parse("2026-09-03T00:00:00Z").unwrap(),
+            received_at: None,
+            state: crate::device_control::DeviceRuntimeState {
+                playback: Some(crate::device_control::PlaybackState {
+                    status: status.to_owned(),
+                    station_id: Some("station-rock-001".to_owned()),
+                }),
+                volume: Some(crate::device_control::VolumeState {
+                    level,
+                    muted: false,
+                }),
+                display: None,
+            },
+        };
+        hub.publish_device_state(user, player, snapshot(7, "buffering", 62));
+        hub.publish_device_state(user, player, snapshot(8, "playing", 62));
+        // Another device's projection is independent, so one device catching up never
+        // overwrites a neighbour's state.
+        hub.publish_device_state(user, legacy, snapshot(2, "idle", 10));
+        let latest = hub
+            .device_state(user, player)
+            .expect("the last accepted snapshot is the directory runtime_state source");
+        assert_eq!(latest.state_revision, 8);
+        assert_eq!(
+            latest.state.playback.expect("playback state").status,
+            "playing"
+        );
+        assert_eq!(latest.state.volume.expect("volume state").level, 62);
+        assert_eq!(
+            hub.device_state(user, legacy)
+                .expect("legacy device keeps its own projection")
+                .state_revision,
+            2
+        );
+        assert!(
+            hub.device_state(user, DeviceId(Uuid::new_v4())).is_none(),
+            "a device that never published state has no projection to fabricate"
+        );
+    }
 }

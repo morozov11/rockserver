@@ -1,5 +1,58 @@
 # Task log
 
+## 2026-09-17 — RS-8: owner-scoped runtime_state projection in the directory
+
+- Goal: implement Phase 0 + Phase 2 of
+  [`roadmap/rockmobile-rockcast-live-control.md`](roadmap/rockmobile-rockcast-live-control.md):
+  give the controller-owner confirmed device runtime state (playback/volume with a monotonic
+  `state_revision`) through the ordinary directory REST snapshot and WSS `directory.upsert`,
+  without new endpoints, transports, pairing, auth changes, or polling.
+- Scope: `api/openapi.yaml` adds optional `runtime_state` (`$ref DeviceStateSnapshot`,
+  absent-not-null semantics) to `DeviceControlDirectoryEntry`; `DirectoryDeviceDto` serializes
+  it with `skip_serializing_if` and fills it in both `directory::snapshot` (WSS fan-out) and
+  `directory::get` (REST) from the already-loaded `load_device_state` projection, gated on
+  `DeviceControlScope::EntityStateRead` via the existing `granted_scopes`; `state_freshness`
+  stays a separate always-present fact. Golden fixture `directory-snapshot-server.json` now
+  carries two entries with `runtime_state` plus a legacy offline entry without the field, and
+  the new golden `directory-upsert-server.json` (registered in `FixtureSpec`, distinct
+  message-ID count 33→34) demonstrates a local volume change with a strictly higher device
+  `state_revision`. No station resolver, pairing, auth, or command-lifecycle change; no
+  secrets or stream URLs in DTOs/fixtures.
+- Result: owner controllers holding `entity.state.read` see the revisioned runtime state in
+  the directory; callers without the scope and targets that never published state keep the
+  field absent (never a fabricated `stopped`/`0%`); stale and conflicting device revisions
+  cannot resurrect an older projection (strengthened WSS admission test plus a new StateHub
+  last-accepted-snapshot test). Cross-account isolation semantics unchanged.
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`;
+  `cargo test` — 211 passed, 0 failed, 15 ignored (PostgreSQL/live gates as usual);
+  `git diff --check`. Deterministic only: no network, LLM, or PostgreSQL in the new tests
+  (full-path REST/WSS directory coverage above the DTO projection stays with the
+  PostgreSQL-gated suite because `AppState.account_store` is the concrete Postgres store).
+- Status: **complete; contract + projection implemented.** Physical acceptance (Phase 4)
+  not performed; RC-4 (truthful RockCast publisher) and RM-4 (state-driven UI) remain the
+  dependent next steps.
+
+## 2026-09-17 — RC-4 / RM-4 planning handoff: authoritative live playback UI
+
+- Baseline: RC-3 is live-accepted. `station.play_station` remains the only
+  controller-facing station action; RS-3 resolves it server-side to a validated
+  `station.play_stream` for the selected player. A command terminal result is
+  not proof that the player is now playing.
+- Planned outcome: add an owner-scoped revisioned runtime-state projection to
+  the existing directory (the current entry has only `state_freshness`) and make
+  it authoritative for now-playing, playback, and volume. RockCast must publish
+  state after both remote commands and local player changes; RockMobile must wait
+  for the matching state rather than show optimistic success.
+- Canonical handoff: [`roadmap/rockmobile-rockcast-live-control.md`](roadmap/rockmobile-rockcast-live-control.md).
+  It includes the OpenAPI compatibility gate, implementation order, negative
+  cases, test matrix, documentation obligations, and mockup reference.
+  Self-contained interactive mockups and Hi-Res PNG assets are packaged in
+  [`live-control-mockups.html`](live-control-mockups.html).
+- Exclusions: raw stream URLs/credentials, unbounded ICY track metadata, a new
+  pairing or command channel, and relay/Chromecast controls (RS-7 remains their
+  prerequisite).
+- Status: **planned; no runtime contract or code changed by this entry.**
+
 ## 2026-09-09 — RS-5: canonical terminal command-result errors
 
 - Result: server-generated terminal `command.result` failures now serialize

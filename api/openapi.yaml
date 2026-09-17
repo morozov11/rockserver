@@ -1364,6 +1364,15 @@ components:
         capabilities: { $ref: "#/components/schemas/DeviceCapabilities" }
         presence: { $ref: "#/components/schemas/Presence" }
         state_freshness: { $ref: "#/components/schemas/StateFreshness" }
+        runtime_state:
+          $ref: "#/components/schemas/DeviceStateSnapshot"
+          description: >-
+            Owner-scoped current runtime-state projection carrying the target's monotonic
+            state_revision and observed_at. The field is absent (not null) when the target has
+            not published state or the caller lacks the entity.state.read scope; controllers
+            must treat absence as "no data" and never fabricate playback or volume values.
+            state_revision is the device's own state revision, never a directory revision or
+            command identifier.
         entities:
           type: array
           maxItems: 256

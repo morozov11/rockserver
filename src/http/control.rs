@@ -1069,6 +1069,12 @@ mod tests {
             accept_snapshot(&hub, user, device, stale),
             RevisionOrder::Stale
         );
+        assert_eq!(
+            hub.device_state(user, crate::device_control::DeviceId(device))
+                .expect("a stale revision never resurrects the directory projection")
+                .state_revision,
+            3
+        );
         let conflict = DeviceStateSnapshot {
             state_revision: 3,
             state: DeviceRuntimeState {
@@ -1084,6 +1090,12 @@ mod tests {
         assert_eq!(
             accept_snapshot(&hub, user, device, conflict),
             RevisionOrder::Conflict
+        );
+        assert_eq!(
+            hub.device_state(user, crate::device_control::DeviceId(device))
+                .expect("a conflicting revision never mutates the directory projection")
+                .state_revision,
+            3
         );
     }
 }

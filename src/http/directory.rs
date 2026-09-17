@@ -54,6 +54,10 @@ pub(crate) struct DirectoryDeviceDto {
     capabilities: crate::device_control::DeviceCapabilities,
     presence: PresenceDto,
     state_freshness: FreshnessDto,
+    /// Owner-scoped latest runtime state; stays absent without the state-read scope or a
+    /// published snapshot, so receivers never mistake a fabricated default for an observation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runtime_state: Option<DeviceStateSnapshot>,
     entities: Vec<DirectoryEntityDto>,
     surfaces: Vec<crate::device_control::Surface>,
 }
@@ -152,6 +156,7 @@ pub(crate) async fn snapshot(
                 },
             },
             state_freshness: freshness(state_snapshot.as_ref()),
+            runtime_state: runtime_state_projection(state_snapshot, include_states),
             entities,
             surfaces: manifest.surfaces,
         });
@@ -405,6 +410,7 @@ pub(super) async fn get(
                 },
             },
             state_freshness: freshness(state_snapshot.as_ref()),
+            runtime_state: runtime_state_projection(state_snapshot, include_states),
             entities,
             surfaces: manifest.surfaces,
         });
@@ -482,8 +488,134 @@ fn freshness(state: Option<&DeviceStateSnapshot>) -> FreshnessDto {
     }
 }
 
+/// Projects the persisted latest device state into the owner-scoped `runtime_state` field.
+///
+/// The snapshot is exposed only to callers holding the entity-state read scope and only when
+/// the target actually published state. Without either, the field is omitted from the wire
+/// entirely so controllers read "no data" rather than a fabricated `stopped` or `0%` default.
+/// The value keeps the device's own monotonic `state_revision`; it is never a directory
+/// revision or command identifier.
+fn runtime_state_projection(
+    state_snapshot: Option<DeviceStateSnapshot>,
+    include_states: bool,
+) -> Option<DeviceStateSnapshot> {
+    state_snapshot.filter(|_| include_states)
+}
+
 fn now() -> String {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .expect("RFC3339 formatter is valid")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::device_control::{DeviceRuntimeState, PlaybackState, VolumeState};
+    use uuid::Uuid;
+
+    fn playing_snapshot(revision: u64, level: u8) -> DeviceStateSnapshot {
+        DeviceStateSnapshot {
+            state_revision: revision,
+            observed_at: crate::device_control::Timestamp::parse("2026-09-02T12:01:58Z").unwrap(),
+            received_at: Some(
+                crate::device_control::Timestamp::parse("2026-09-02T12:01:59Z").unwrap(),
+            ),
+            state: DeviceRuntimeState {
+                playback: Some(PlaybackState {
+                    status: "playing".to_owned(),
+                    station_id: Some("station-rock-001".to_owned()),
+                }),
+                volume: Some(VolumeState {
+                    level,
+                    muted: false,
+                }),
+                display: None,
+            },
+        }
+    }
+
+    /// Builds an entry the way `snapshot`/`get` do: `state_freshness` always renders the
+    /// loaded store snapshot, while `runtime_state` receives the scope-gated projection.
+    fn dto(
+        loaded: Option<&DeviceStateSnapshot>,
+        runtime_state: Option<DeviceStateSnapshot>,
+    ) -> DirectoryDeviceDto {
+        DirectoryDeviceDto {
+            device_id: crate::device_control::DeviceId(Uuid::new_v4()),
+            device_display_name: "Living room RockCast".to_owned(),
+            device_type: "rockcast".to_owned(),
+            roles: vec![crate::device_control::DeviceRole::Player],
+            capabilities: crate::device_control::DeviceCapabilities {
+                revision: 1,
+                items: Vec::new(),
+            },
+            presence: PresenceDto {
+                status: "online",
+                last_seen_at: None,
+            },
+            state_freshness: freshness(loaded),
+            runtime_state,
+            entities: Vec::new(),
+            surfaces: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn runtime_state_round_trips_the_latest_snapshot_for_state_scoped_callers() {
+        let snapshot = playing_snapshot(9, 62);
+        let payload = serde_json::to_value(dto(
+            Some(&snapshot),
+            runtime_state_projection(Some(snapshot.clone()), true),
+        ))
+        .unwrap();
+        assert_eq!(
+            payload["runtime_state"],
+            serde_json::to_value(&snapshot).unwrap(),
+            "the projection must expose the stored snapshot verbatim"
+        );
+        assert_eq!(payload["runtime_state"]["state_revision"], 9);
+        assert_eq!(
+            payload["runtime_state"]["state"]["playback"]["status"],
+            "playing"
+        );
+        assert_eq!(
+            payload["runtime_state"]["state"]["playback"]["station_id"],
+            "station-rock-001"
+        );
+        assert_eq!(payload["runtime_state"]["state"]["volume"]["level"], 62);
+        assert_eq!(payload["runtime_state"]["state"]["volume"]["muted"], false);
+    }
+
+    #[test]
+    fn runtime_state_stays_absent_without_the_state_read_scope() {
+        let snapshot = playing_snapshot(9, 62);
+        let payload = serde_json::to_value(dto(
+            Some(&snapshot),
+            runtime_state_projection(Some(snapshot.clone()), false),
+        ))
+        .unwrap();
+        assert!(
+            payload.get("runtime_state").is_none(),
+            "callers without entity.state.read must not receive the runtime state"
+        );
+        // Freshness stays a separate, always-present directory fact.
+        assert_eq!(payload["state_freshness"]["status"], "fresh");
+        assert_eq!(
+            payload["state_freshness"]["observed_at"],
+            snapshot.observed_at.as_str()
+        );
+    }
+
+    #[test]
+    fn runtime_state_stays_absent_when_the_target_never_published_state() {
+        let payload =
+            serde_json::to_value(dto(None, runtime_state_projection(None, true))).unwrap();
+        assert!(
+            payload.get("runtime_state").is_none(),
+            "absence must be an absent field, not a null object or fabricated playback values"
+        );
+        assert!(!payload["runtime_state"].is_object());
+        assert_eq!(payload["state_freshness"]["status"], "unknown");
+    }
 }

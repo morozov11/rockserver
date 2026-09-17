@@ -14,6 +14,20 @@
 - существующие search/voice endpoints и локальный каталог RockCast сохраняют совместимость;
 - каждая задача обновляет status/task log соответствующего репозитория и выполняет его обязательные проверки.
 
+## Current handoff — RC-4 / RM-4 authoritative live playback UI (planned 2026-09-17)
+
+RC-3 has physical acceptance for an online RockCast target and standard
+`playback.stop`. RS-3 already keeps station selection on the safe path:
+RockMobile submits `station.play_station`, RockServer resolves the canonical
+catalog stream, and only the target sees `station.play_stream`. Do not add a
+parallel direct-stream path or expose stream URLs to the controller.
+
+The next increment is documented as a handoff for a separate implementation
+agent in [`rockmobile-rockcast-live-control.md`](rockmobile-rockcast-live-control.md).
+It must treat revisioned runtime state—not a command-result success—as the
+authority for selected station, playback status, and volume. It also retains
+RS-7 as the prerequisite for relay/Chromecast controls.
+
 ## Milestone A — контракт и базовая модель
 
 ### DC-000 — подтвердить готовность Windows-first основы
