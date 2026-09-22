@@ -14,7 +14,19 @@
   typecheck`, `pnpm test` (11 passed), the OPS-001-D local regression suite,
   and `ops-001-d.ps1 -Action deploy -DryRun`. This closes the verification
   deferred by RS-ICON-002 through RS-ICON-006.
-- Status: **verified locally; production deploy pending.**
+- Production deploy: commit `179c9a8` was released through
+  `deploy/ops-001-d.ps1 -Action deploy` on 2026-09-22; the VPS applied
+  migrations `0022`/`0023` and the gate returned `readiness=passed`.
+  Independently confirmed: public `/health/ready` `HTTP 200 {"status":"ok"}`,
+  unknown-station `GET /api/v1/stations/{id}/icon` returns the contract
+  `404` with `Cache-Control: no-store`, and public search serializes
+  `favicon_url: null` for every station because no import job has been
+  started. Operational note: the launcher must resolve `tar.exe` to the
+  Windows bsdtar (`C:\Windows\System32`); when invoked from a Git Bash
+  child, GNU tar interprets the artifact drive prefix as a remote host and
+  the deploy aborts before any remote mutation.
+- Status: **deployed to production on 2026-09-22; first admin-started icon
+  import remains an explicit operator action.**
 
 ## 2026-09-22 — RS-ICON-009: nullable server favicon URL in catalog/search
 

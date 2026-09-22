@@ -57,7 +57,7 @@ complete: `cargo fmt --check`, strict all-target/all-feature Clippy and full
 `cargo test` passed. The 10 PostgreSQL integration tests remain ignored because
 no disposable `TEST_DATABASE_URL` was supplied.
 
-## RS-ICON-010: persistent production icon storage (verified locally, 2026-09-22)
+## RS-ICON-010: persistent production icon storage (deployed, 2026-09-22)
 
 The standard deployment creates `/home/rockserver/station-icons` with UID
 `10001` ownership, mounts it to `/var/lib/rockserver/station-icons`, and sets
@@ -70,8 +70,17 @@ strict all-target/all-feature Clippy, full `cargo test` (216 passed; 15
 PostgreSQL/live-provider tests ignored as designed), `pnpm typecheck`,
 `pnpm test` (11 passed), the OPS-001-D local regression suite, and
 `ops-001-d.ps1 -Action deploy -DryRun`. This closes the per-stage deferred
-verification of RS-ICON-002 through RS-ICON-010; the production deploy record
-follows below once the release is actually shipped.
+verification of RS-ICON-002 through RS-ICON-010.
+
+**Production deploy:** commit `179c9a8` was released with
+`deploy/ops-001-d.ps1 -Action deploy` on 2026-09-22; the VPS deploy worker
+returned `status=succeeded` with `readiness=passed`. Independently
+confirmed: public `/health/ready` returned `HTTP 200 {"status":"ok"}`,
+unknown-station `GET /api/v1/stations/{id}/icon` returns the contract `404`
+with `Cache-Control: no-store`, and public search serializes
+`favicon_url: null` for all stations because no import job has run. The next
+step is the operator's explicit first icon import from the Stations tab at
+`https://alex.vault57.ru/admin`; deployment itself never starts it.
 
 ## RS-ICON-002: metadata schema (implemented locally, 2026-09-22)
 

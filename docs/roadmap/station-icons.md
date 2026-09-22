@@ -213,7 +213,7 @@ requirements for steps 3–5, not behavior of migrations or request handling.
 
 ## Шаг 10. Deployment, наблюдаемость и финальная проверка
 
-**Статус:** deployment-часть реализована и проверена локально 2026-09-22 (RS-ICON-010: persistent volume, env wiring, deploy regression, dry-run); метрики, admin-диагностика и подтверждённый orphan cleanup остаются будущими отдельными этапами.
+**Статус:** deployment-часть реализована и проверена локально 2026-09-22 (RS-ICON-010: persistent volume, env wiring, deploy regression, dry-run); production deploy коммита `179c9a8` выполнен 2026-09-22 (`readiness=passed`). Метрики, admin-диагностика и подтверждённый orphan cleanup остаются будущими отдельными этапами. Первый импорт иконок — явное действие оператора в админке, не часть deployment.
 
 **Цель:** поддерживать функцию после первого admin-started import и безопасно включить клиентов.
 
