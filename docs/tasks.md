@@ -1,5 +1,30 @@
 # Task log
 
+## 2026-09-22 — RS-ICON-011: homepage favicon discovery for the icon import
+
+- Goal: let the administrator-started import produce icons for the production
+  catalog, whose pinned release carries no explicit favicon URLs. The first
+  production job therefore ended with 16,825 missing and 0 ready because the
+  worker only consumed an already-stored `station_icons.source_url`, and the
+  production `station_icons` table was empty.
+- Result: the import worker now resolves each item's automatic source in the
+  roadmap's priority order — an explicit catalog `source_url` (priority 2)
+  first, otherwise a favicon discovered on the station's validated homepage
+  (priority 1) through a bounded SSRF-checked homepage fetch, the first
+  `<link rel="icon">`/`apple-touch-icon"` target, or the `/favicon.ico`
+  fallback. Ready metadata is written through an upsert so stations without a
+  prior `station_icons` row become ready atomically. Unsuccessful HTTP
+  statuses now classify as permanent (unusable URL) while transport failures
+  stay retryable.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features --
+  -D warnings`, and `cargo test` passed (225 tests; 15 PostgreSQL/live
+  tests ignored as designed). New deterministic offline coverage: the
+  icon-link parser (rel variants, quoting, entities, `data:`/`mask-icon`
+  exclusion, relative resolution, `/favicon.ico` fallback) and fake-fetcher
+  classification of missing/retryable/permanent/ready with source
+  priorities.
+- Status: **implemented locally; production deploy pending.**
+
 ## 2026-09-22 — RS-ICON-010: persistent production icon storage
 
 - Goal: make administrator-managed prepared icons durable through the standard

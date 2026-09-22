@@ -24,6 +24,8 @@ use uuid::Uuid;
 
 /// Maximum accepted encoded source or administrator-upload byte size.
 pub const MAX_SOURCE_BYTES: usize = 2 * 1024 * 1024;
+/// Maximum homepage HTML bytes inspected while resolving a favicon candidate.
+const MAX_HOMEPAGE_BYTES: usize = 256 * 1024;
 const MAX_SOURCE_PIXELS: u32 = 1_048_576;
 const MAX_SOURCE_DIMENSION: u32 = 1_024;
 const ICON_DIMENSION: u32 = 256;
@@ -92,7 +94,8 @@ pub struct PreparedIcon {
 pub enum IconValidationError {
     /// The source body is empty or exceeds the bounded byte limit.
     Size,
-    /// The source format is not one of the accepted raster formats.
+    /// The source URL is unusable (invalid, non-public, or unsuccessfully answered)
+    /// or its bytes are not one of the accepted raster formats.
     Format,
     /// The source cannot be decoded as a safe raster image.
     Decode,
@@ -179,7 +182,17 @@ pub fn prepare_icon(source: &[u8]) -> Result<PreparedIcon, IconValidationError> 
     })
 }
 
-/// Fetches one external icon only after validating the URL and every redirect destination.
+/// Boundary for bounded external icon fetching, faked in tests without network access.
+#[async_trait]
+pub trait IconSourceFetcher: Send + Sync {
+    /// Downloads and normalizes one validated external icon URL.
+    async fn fetch_icon(&self, source: &str) -> Result<PreparedIcon, IconValidationError>;
+
+    /// Resolves one favicon candidate URL for a station homepage, or why none can be fetched.
+    async fn discover_homepage_icon(&self, homepage: &str) -> Result<String, IconValidationError>;
+}
+
+/// Fetches external icons only after validating the URL and every redirect destination.
 #[derive(Clone, Debug)]
 pub struct SafeIconFetcher {
     client: reqwest::Client,
@@ -196,8 +209,16 @@ impl SafeIconFetcher {
         Ok(Self { client })
     }
 
-    /// Downloads at most two MiB from a publicly routable HTTP(S) URL and normalizes it.
-    pub async fn fetch(&self, source: &str) -> Result<PreparedIcon, IconValidationError> {
+    /// Downloads at most `limit` bytes from a validated publicly routable URL.
+    ///
+    /// Every redirect destination is re-validated against the same SSRF policy before the
+    /// request is sent. An unsuccessful HTTP status classifies as `Format` because that URL
+    /// is unusable, while transport failures classify as `Decode` so callers can retry.
+    async fn fetch_bounded(
+        &self,
+        source: &str,
+        limit: usize,
+    ) -> Result<Vec<u8>, IconValidationError> {
         let mut url = Url::parse(source).map_err(|_| IconValidationError::Format)?;
         for _ in 0..=5 {
             validate_public_url(&url).await?;
@@ -218,10 +239,12 @@ impl SafeIconFetcher {
                     .map_err(|_| IconValidationError::Format)?;
                 continue;
             }
-            if !response.status().is_success()
-                || response
-                    .content_length()
-                    .is_some_and(|size| size as usize > MAX_SOURCE_BYTES)
+            if !response.status().is_success() {
+                return Err(IconValidationError::Format);
+            }
+            if response
+                .content_length()
+                .is_some_and(|size| size as usize > limit)
             {
                 return Err(IconValidationError::Size);
             }
@@ -231,15 +254,161 @@ impl SafeIconFetcher {
                 .await
                 .map_err(|_| IconValidationError::Decode)?
             {
-                if body.len() + chunk.len() > MAX_SOURCE_BYTES {
+                if body.len() + chunk.len() > limit {
                     return Err(IconValidationError::Size);
                 }
                 body.extend_from_slice(&chunk);
             }
-            return prepare_icon(&body);
+            return Ok(body);
         }
         Err(IconValidationError::Format)
     }
+}
+
+#[async_trait]
+impl IconSourceFetcher for SafeIconFetcher {
+    /// Downloads at most two MiB from a publicly routable HTTP(S) URL and normalizes it.
+    async fn fetch_icon(&self, source: &str) -> Result<PreparedIcon, IconValidationError> {
+        prepare_icon(&self.fetch_bounded(source, MAX_SOURCE_BYTES).await?)
+    }
+
+    /// Resolves one favicon candidate for a validated station homepage.
+    ///
+    /// Returns the first HTTP(S) `<link rel="...icon...">` target, or the homepage-root
+    /// `/favicon.ico` fallback when the page declares no usable icon link.
+    async fn discover_homepage_icon(&self, homepage: &str) -> Result<String, IconValidationError> {
+        let body = self.fetch_bounded(homepage, MAX_HOMEPAGE_BYTES).await?;
+        let base = Url::parse(homepage).map_err(|_| IconValidationError::Format)?;
+        Ok(homepage_icon_candidate(
+            &String::from_utf8_lossy(&body),
+            &base,
+        ))
+    }
+}
+
+/// Chooses a homepage's favicon candidate: its declared icon link, else `/favicon.ico`.
+fn homepage_icon_candidate(html: &str, base: &Url) -> String {
+    if let Some(link) = first_icon_link(html, base) {
+        return link;
+    }
+    let mut fallback = base
+        .join("/favicon.ico")
+        .expect("an absolute HTTP(S) base always joins a root-relative path");
+    fallback.set_fragment(None);
+    fallback.to_string()
+}
+
+/// Extracts the first HTTP(S) icon link declared by bounded HTML, resolved against its base.
+///
+/// Accepts `rel` tokens `icon` and `apple-touch-icon` (this naturally excludes the SVG-only
+/// `mask-icon` token) and skips `data:` targets, which cannot be fetched like a URL.
+fn first_icon_link(html: &str, base: &Url) -> Option<String> {
+    let lowered = html.to_ascii_lowercase();
+    let mut cursor = 0;
+    while let Some(found) = lowered[cursor..].find("<link") {
+        let tag_start = cursor + found;
+        cursor = tag_start + "<link".len();
+        // `<link` must end the tag name so prefixes like `<linker` are not matched.
+        let after_name = lowered.as_bytes().get(cursor).copied();
+        let name_terminated = after_name.is_none()
+            || matches!(after_name, Some(b'>') | Some(b'/'))
+            || after_name.is_some_and(|byte| byte.is_ascii_whitespace());
+        if !name_terminated {
+            continue;
+        }
+        let Some(tag_end) = lowered[cursor..].find('>') else {
+            break;
+        };
+        let tag_end = cursor + tag_end;
+        let attributes = parse_link_attributes(&html[tag_start..=tag_end]);
+        let Some((_, rel)) = attributes.iter().find(|(name, _)| name == "rel") else {
+            cursor = tag_end + 1;
+            continue;
+        };
+        let is_icon_rel = rel
+            .to_ascii_lowercase()
+            .split_ascii_whitespace()
+            .any(|token| matches!(token, "icon" | "apple-touch-icon"));
+        if is_icon_rel
+            && let Some((_, href)) = attributes.iter().find(|(name, _)| name == "href")
+            && let Some(resolved) = resolve_icon_href(&unescape_href(href), base)
+        {
+            return Some(resolved);
+        }
+        cursor = tag_end + 1;
+    }
+    None
+}
+
+/// Resolves one link target to an absolute fragment-free HTTP(S) URL.
+fn resolve_icon_href(href: &str, base: &Url) -> Option<String> {
+    if href.is_empty() || href.starts_with("data:") {
+        return None;
+    }
+    let mut url = base.join(href).ok()?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return None;
+    }
+    url.set_fragment(None);
+    Some(url.to_string())
+}
+
+/// Parses one `<link>` tag's attributes; names are lowercased, values are kept verbatim.
+///
+/// Handles double-quoted, single-quoted and unquoted values; slice offsets only ever stop on
+/// ASCII delimiters, so slicing never splits a multi-byte character.
+fn parse_link_attributes(tag: &str) -> Vec<(String, String)> {
+    let bytes = tag.as_bytes();
+    let mut attributes = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        while index < bytes.len() && (bytes[index].is_ascii_whitespace() || bytes[index] == b'/') {
+            index += 1;
+        }
+        if index >= bytes.len() {
+            break;
+        }
+        let name_start = index;
+        while index < bytes.len() && bytes[index] != b'=' && !bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        let name = tag[name_start..index].to_ascii_lowercase();
+        let mut value = String::new();
+        if index < bytes.len() && bytes[index] == b'=' {
+            index += 1;
+            if matches!(bytes.get(index), Some(b'"') | Some(b'\'')) {
+                let quote = bytes[index];
+                index += 1;
+                let value_start = index;
+                while index < bytes.len() && bytes[index] != quote {
+                    index += 1;
+                }
+                value = tag[value_start..index].to_owned();
+                if index < bytes.len() {
+                    index += 1;
+                }
+            } else {
+                let value_start = index;
+                while index < bytes.len() && !bytes[index].is_ascii_whitespace() {
+                    index += 1;
+                }
+                value = tag[value_start..index].to_owned();
+            }
+        }
+        attributes.push((name, value));
+    }
+    attributes
+}
+
+/// Decodes the small set of character entities valid inside an attribute value.
+fn unescape_href(value: &str) -> String {
+    value
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
 }
 
 async fn validate_public_url(url: &Url) -> Result<(), IconValidationError> {
@@ -322,7 +491,7 @@ pub struct ReadyIcon {
 pub struct IconImportCoordinator {
     pool: PgPool,
     storage: Arc<dyn IconStorage>,
-    fetcher: SafeIconFetcher,
+    fetcher: Arc<dyn IconSourceFetcher>,
 }
 
 impl IconImportCoordinator {
@@ -331,7 +500,7 @@ impl IconImportCoordinator {
         Ok(Self {
             pool,
             storage,
-            fetcher: SafeIconFetcher::new()?,
+            fetcher: Arc::new(SafeIconFetcher::new()?),
         })
     }
 
@@ -466,17 +635,20 @@ impl IconImportCoordinator {
     /// Processes the snapshot one item at a time; callers run this only in a detached server task.
     pub async fn run(&self, id: Uuid) {
         while let Ok(Some(item)) = self.claim_item(id).await {
-            let outcome = match item.source_url {
-                None => "missing",
-                Some(source_url) => match self.fetcher.fetch(&source_url).await {
-                    Ok(icon) => match self.publish(&item.station_id, icon).await {
-                        Ok(()) => "ready",
-                        Err(_) => "retryable_error",
-                    },
-                    Err(IconValidationError::Decode | IconValidationError::Size) => {
-                        "retryable_error"
-                    }
-                    Err(_) => "permanent_error",
+            let outcome = match resolve_item_plan(self.fetcher.as_ref(), &item).await {
+                ItemPlan::Missing => "missing",
+                ItemPlan::Retryable => "retryable_error",
+                ItemPlan::Permanent => "permanent_error",
+                ItemPlan::Ready {
+                    icon,
+                    source_url,
+                    source_priority,
+                } => match self
+                    .publish(&item.station_id, &source_url, source_priority, &icon)
+                    .await
+                {
+                    Ok(()) => "ready",
+                    Err(_) => "retryable_error",
                 },
             };
             let _ = self.finish_item(id, &item.station_id, outcome).await;
@@ -486,16 +658,32 @@ impl IconImportCoordinator {
     }
 
     async fn claim_item(&self, id: Uuid) -> Result<Option<IconJobItem>, IconStorageError> {
-        sqlx::query_as::<_, IconJobItem>("WITH next_item AS (SELECT station_id FROM station_icon_job_items WHERE job_id = $1 AND status = 'pending' ORDER BY station_id FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE station_icon_job_items item SET status = 'processing' FROM next_item WHERE item.job_id = $1 AND item.station_id = next_item.station_id RETURNING item.station_id, (SELECT source_url FROM station_icons WHERE station_id = item.station_id) AS source_url")
+        sqlx::query_as::<_, IconJobItem>("WITH next_item AS (SELECT station_id FROM station_icon_job_items WHERE job_id = $1 AND status = 'pending' ORDER BY station_id FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE station_icon_job_items item SET status = 'processing' FROM next_item WHERE item.job_id = $1 AND item.station_id = next_item.station_id RETURNING item.station_id, (SELECT source_url FROM station_icons WHERE station_id = item.station_id) AS source_url, (SELECT homepage_url FROM stations WHERE id = item.station_id) AS homepage_url")
             .bind(id).fetch_optional(&self.pool).await.map_err(|_| IconStorageError::Unavailable)
     }
 
-    async fn publish(&self, station_id: &str, icon: PreparedIcon) -> Result<(), IconStorageError> {
+    /// Upserts ready metadata so a station without a prior metadata row becomes ready atomically.
+    ///
+    /// A manual override row is never touched: the job cannot have selected it, but a concurrent
+    /// administrator upload while the job runs must keep its explicit artifact and source.
+    async fn publish(
+        &self,
+        station_id: &str,
+        source_url: &str,
+        source_priority: i16,
+        icon: &PreparedIcon,
+    ) -> Result<(), IconStorageError> {
         let key = IconStorageKey::from_hash(&icon.content_hash);
         self.storage.put_atomic(&key, &icon.bytes).await?;
-        sqlx::query("UPDATE station_icons SET storage_key = $2, content_type = 'image/webp', byte_size = $3, width = $4, height = $5, content_hash = $6, status = 'ready', refresh_needed = false, retry_after = NULL, last_error_code = NULL, updated_at = now() WHERE station_id = $1")
-            .bind(station_id).bind(key.as_str()).bind(i32::try_from(icon.bytes.len()).map_err(|_| IconStorageError::Unavailable)?).bind(i32::try_from(icon.width).map_err(|_| IconStorageError::Unavailable)?).bind(i32::try_from(icon.height).map_err(|_| IconStorageError::Unavailable)?).bind(icon.content_hash.as_slice())
-            .execute(&self.pool).await.map_err(|_| IconStorageError::Unavailable)?;
+        sqlx::query("INSERT INTO station_icons (station_id, source_url, source_priority, storage_key, content_type, byte_size, width, height, content_hash, status, refresh_needed) VALUES ($1, $2, $3, $4, 'image/webp', $5, $6, $7, $8, 'ready', false) ON CONFLICT (station_id) DO UPDATE SET source_url = CASE WHEN station_icons.manual_override THEN station_icons.source_url ELSE EXCLUDED.source_url END, source_priority = CASE WHEN station_icons.manual_override THEN station_icons.source_priority ELSE EXCLUDED.source_priority END, storage_key = CASE WHEN station_icons.manual_override THEN station_icons.storage_key ELSE EXCLUDED.storage_key END, content_type = CASE WHEN station_icons.manual_override THEN station_icons.content_type ELSE EXCLUDED.content_type END, byte_size = CASE WHEN station_icons.manual_override THEN station_icons.byte_size ELSE EXCLUDED.byte_size END, width = CASE WHEN station_icons.manual_override THEN station_icons.width ELSE EXCLUDED.width END, height = CASE WHEN station_icons.manual_override THEN station_icons.height ELSE EXCLUDED.height END, content_hash = CASE WHEN station_icons.manual_override THEN station_icons.content_hash ELSE EXCLUDED.content_hash END, status = CASE WHEN station_icons.manual_override THEN station_icons.status ELSE 'ready' END, refresh_needed = CASE WHEN station_icons.manual_override THEN station_icons.refresh_needed ELSE false END, retry_after = CASE WHEN station_icons.manual_override THEN station_icons.retry_after ELSE NULL END, last_error_code = CASE WHEN station_icons.manual_override THEN station_icons.last_error_code ELSE NULL END, updated_at = now()")
+            .bind(station_id).bind(source_url).bind(source_priority).bind(key.as_str())
+            .bind(i32::try_from(icon.bytes.len()).map_err(|_| IconStorageError::Unavailable)?)
+            .bind(i32::try_from(icon.width).map_err(|_| IconStorageError::Unavailable)?)
+            .bind(i32::try_from(icon.height).map_err(|_| IconStorageError::Unavailable)?)
+            .bind(icon.content_hash.as_slice())
+            .execute(&self.pool)
+            .await
+            .map_err(|_| IconStorageError::Unavailable)?;
         Ok(())
     }
 
@@ -554,6 +742,55 @@ impl From<IconJobProgressRow> for IconJobProgress {
 struct IconJobItem {
     station_id: String,
     source_url: Option<String>,
+    homepage_url: Option<String>,
+}
+
+/// One item's fully resolved terminal plan before any persistence side effect.
+#[derive(Debug, PartialEq)]
+enum ItemPlan {
+    /// No automatic source exists for the station.
+    Missing,
+    /// A bounded source operation failed transiently and may succeed on a later job.
+    Retryable,
+    /// The source is unusable and will not heal without new metadata.
+    Permanent,
+    /// A normalized artifact plus the automatic source that produced it.
+    Ready {
+        icon: PreparedIcon,
+        source_url: String,
+        source_priority: i16,
+    },
+}
+
+/// Resolves one item's outcome without touching persistence so the decision stays testable.
+///
+/// Source priority follows the roadmap order: an explicit catalog icon URL wins (2), a favicon
+/// discovered on the station homepage is the fallback (1), and neither leaves the item missing.
+/// Transport-level failures are retryable; unusable URLs (invalid, non-public, unsuccessful
+/// response) are permanent so a dead icon address cannot loop forever.
+async fn resolve_item_plan(fetcher: &dyn IconSourceFetcher, item: &IconJobItem) -> ItemPlan {
+    let (source, source_priority) = match item.source_url.as_deref() {
+        Some(source) => (source.to_owned(), 2),
+        None => match item.homepage_url.as_deref() {
+            None => return ItemPlan::Missing,
+            Some(homepage) => match fetcher.discover_homepage_icon(homepage).await {
+                Ok(discovered) => (discovered, 1),
+                Err(IconValidationError::Decode | IconValidationError::Size) => {
+                    return ItemPlan::Retryable;
+                }
+                Err(_) => return ItemPlan::Permanent,
+            },
+        },
+    };
+    match fetcher.fetch_icon(&source).await {
+        Ok(icon) => ItemPlan::Ready {
+            icon,
+            source_url: source,
+            source_priority,
+        },
+        Err(IconValidationError::Decode | IconValidationError::Size) => ItemPlan::Retryable,
+        Err(_) => ItemPlan::Permanent,
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -652,11 +889,53 @@ fn hex(bytes: &[u8; 32]) -> String {
 mod tests {
     use std::io::Cursor;
 
+    use async_trait::async_trait;
     use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
+    use url::Url;
 
     use super::{
-        FilesystemIconStorage, IconStorage, IconStorageKey, IconValidationError, prepare_icon,
+        FilesystemIconStorage, IconJobItem, IconSourceFetcher, IconStorage, IconStorageKey,
+        IconValidationError, ItemPlan, PreparedIcon, first_icon_link, homepage_icon_candidate,
+        prepare_icon, resolve_item_plan,
     };
+
+    /// Deterministic offline fetcher used to verify job outcome classification.
+    struct FakeFetcher {
+        discovered: Result<String, IconValidationError>,
+        icon: Result<PreparedIcon, IconValidationError>,
+    }
+
+    #[async_trait]
+    impl IconSourceFetcher for FakeFetcher {
+        async fn fetch_icon(&self, _source: &str) -> Result<PreparedIcon, IconValidationError> {
+            self.icon.clone()
+        }
+
+        async fn discover_homepage_icon(
+            &self,
+            _homepage: &str,
+        ) -> Result<String, IconValidationError> {
+            self.discovered.clone()
+        }
+    }
+
+    /// Builds one claimable item without touching persistence.
+    fn item(source_url: Option<&str>, homepage_url: Option<&str>) -> IconJobItem {
+        IconJobItem {
+            station_id: "station-1".to_owned(),
+            source_url: source_url.map(str::to_owned),
+            homepage_url: homepage_url.map(str::to_owned),
+        }
+    }
+
+    /// Builds a small valid prepared icon for ready-path assertions.
+    fn sample_prepared() -> PreparedIcon {
+        let mut source = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(RgbaImage::from_pixel(32, 16, Rgba([9, 8, 7, 255])))
+            .write_to(&mut source, ImageFormat::Png)
+            .unwrap();
+        prepare_icon(source.get_ref()).unwrap()
+    }
 
     #[tokio::test]
     async fn filesystem_storage_publishes_and_removes_one_safe_key() {
@@ -698,6 +977,148 @@ mod tests {
         assert_eq!(
             prepare_icon(&vec![0; 2 * 1024 * 1024 + 1]),
             Err(IconValidationError::Size)
+        );
+    }
+
+    #[test]
+    fn homepage_icon_link_is_extracted_and_resolved() {
+        let base = Url::parse("https://radio.example/en/index.html").unwrap();
+        let html = r#"<html><head><LINK REL="shortcut icon" HREF='/static/img/favicon.png'><link rel="stylesheet" href="styles.css"></head><body/></html>"#;
+        assert_eq!(
+            first_icon_link(html, &base).as_deref(),
+            Some("https://radio.example/static/img/favicon.png")
+        );
+    }
+
+    #[test]
+    fn apple_touch_icon_and_absolute_hrefs_are_accepted() {
+        let base = Url::parse("https://radio.example/deep/page").unwrap();
+        let html =
+            r#"<head><link rel="apple-touch-icon" href="https://cdn.example/touch.png"></head>"#;
+        assert_eq!(
+            first_icon_link(html, &base).as_deref(),
+            Some("https://cdn.example/touch.png")
+        );
+    }
+
+    #[test]
+    fn mask_icon_data_and_entity_hrefs_are_handled() {
+        let base = Url::parse("https://radio.example/deep/page").unwrap();
+        let html = concat!(
+            r#"<head><link rel="mask-icon" href="/icon.svg">"#,
+            r#"<link rel=icon href="data:image/png;base64,AAA">"#,
+            r#"<link rel="icon" type="image/png" href="favicon.png?v=2&amp;size=64"></head>"#,
+        );
+        assert_eq!(
+            first_icon_link(html, &base).as_deref(),
+            Some("https://radio.example/deep/favicon.png?v=2&size=64")
+        );
+    }
+
+    #[test]
+    fn homepage_without_links_falls_back_to_root_favicon() {
+        let base = Url::parse("https://radio.example/deep/page?from=nav#top").unwrap();
+        assert_eq!(
+            first_icon_link("<html><head><title>x</title></head></html>", &base),
+            None
+        );
+        assert_eq!(
+            homepage_icon_candidate("<html><head><title>x</title></head></html>", &base),
+            "https://radio.example/favicon.ico"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_catalog_source_wins_with_top_priority() {
+        let fetcher = FakeFetcher {
+            // A wrongly consulted homepage discovery with this result would end the item
+            // as Permanent instead of Ready, so this assertion also proves it is skipped.
+            discovered: Err(IconValidationError::Format),
+            icon: Ok(sample_prepared()),
+        };
+        let plan = resolve_item_plan(
+            &fetcher,
+            &item(
+                Some("https://icons.example/explicit.png"),
+                Some("https://radio.example"),
+            ),
+        )
+        .await;
+        assert!(matches!(
+            plan,
+            ItemPlan::Ready {
+                source_priority: 2,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn homepage_discovery_is_the_fallback_source() {
+        let fetcher = FakeFetcher {
+            discovered: Ok("https://radio.example/favicon.ico".to_owned()),
+            icon: Ok(sample_prepared()),
+        };
+        let plan = resolve_item_plan(&fetcher, &item(None, Some("https://radio.example"))).await;
+        assert!(matches!(
+            plan,
+            ItemPlan::Ready {
+                source_priority: 1,
+                source_url: ref source,
+                ..
+            } if source == "https://radio.example/favicon.ico"
+        ));
+    }
+
+    #[tokio::test]
+    async fn station_without_any_source_is_missing() {
+        let fetcher = FakeFetcher {
+            discovered: Ok("https://radio.example/favicon.ico".to_owned()),
+            icon: Ok(sample_prepared()),
+        };
+        assert_eq!(
+            resolve_item_plan(&fetcher, &item(None, None)).await,
+            ItemPlan::Missing
+        );
+    }
+
+    #[tokio::test]
+    async fn transient_homepage_failures_are_retryable_and_dead_ones_permanent() {
+        let transient = FakeFetcher {
+            discovered: Err(IconValidationError::Decode),
+            icon: Ok(sample_prepared()),
+        };
+        assert_eq!(
+            resolve_item_plan(&transient, &item(None, Some("https://radio.example"))).await,
+            ItemPlan::Retryable
+        );
+        let dead = FakeFetcher {
+            discovered: Err(IconValidationError::Format),
+            icon: Ok(sample_prepared()),
+        };
+        assert_eq!(
+            resolve_item_plan(&dead, &item(None, Some("https://radio.example"))).await,
+            ItemPlan::Permanent
+        );
+    }
+
+    #[tokio::test]
+    async fn icon_fetch_failures_keep_the_boundary_classification() {
+        let retryable = FakeFetcher {
+            discovered: Ok("https://radio.example/favicon.ico".to_owned()),
+            icon: Err(IconValidationError::Decode),
+        };
+        assert_eq!(
+            resolve_item_plan(&retryable, &item(None, Some("https://radio.example"))).await,
+            ItemPlan::Retryable
+        );
+        let permanent = FakeFetcher {
+            discovered: Ok("https://radio.example/favicon.ico".to_owned()),
+            icon: Err(IconValidationError::Format),
+        };
+        assert_eq!(
+            resolve_item_plan(&permanent, &item(None, Some("https://radio.example"))).await,
+            ItemPlan::Permanent
         );
     }
 }

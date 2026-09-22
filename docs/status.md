@@ -11,6 +11,22 @@ thumbnails or placeholders in the station list. Manual upload, replace, and
 confirmed removal preserve manual precedence over future catalog refreshes.
 Production mounts persistent storage but never starts an import.
 
+## RS-ICON-011: homepage favicon discovery (implemented locally, 2026-09-22)
+
+The first production import correctly reported 16,825 missing and 0 ready:
+the pinned production catalog release carries no explicit favicon URLs
+(`full_release` imports set no icon source), and the worker previously used
+only an already-stored `station_icons.source_url`, which was empty. The
+import now also applies the roadmap's second-priority source for stations
+with a homepage (15,810 of 16,825 in production): a bounded SSRF-checked
+homepage fetch, the first `<link rel="icon">`/`apple-touch-icon` target, or
+the `/favicon.ico` fallback, recorded as priority 1 below explicit catalog
+sources. Ready metadata is published through an upsert so stations without a
+metadata row become ready atomically; unsuccessful HTTP statuses classify as
+permanent and transport failures as retryable. Verified by `cargo fmt
+--check`, strict all-target/all-feature Clippy, and full `cargo test` (225
+passed; 15 PostgreSQL/live tests ignored as designed).
+
 ## RS-ICON-007: admin import and server delivery (implemented locally, 2026-09-22)
 
 `POST /api/v1/admin/icons/import` now requires an active administrator Bearer

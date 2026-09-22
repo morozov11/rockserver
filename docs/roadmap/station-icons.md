@@ -117,7 +117,7 @@ requirements for steps 3–5, not behavior of migrations or request handling.
 
 ## Шаг 4. Реализовать безопасный downloader и normalisation service
 
-**Статус:** реализовано локально 2026-09-22; финальная проверка всего изменения пройдена 2026-09-22 (закрыта в RS-ICON-010).
+**Статус:** реализовано локально 2026-09-22; финальная проверка всего изменения пройдена 2026-09-22 (закрыта в RS-ICON-010). Приоритет-2 источника — favicon с homepage станции (bounded SSRF-проверенный fetch, `<link rel="icon">`/`apple-touch-icon`, fallback `/favicon.ico`, `source_priority = 1`) — добавлен 2026-09-22 в RS-ICON-011 после того, как первый production-импорт показал 16825 missing из-за отсутствия явных URL в pinned-каталоге.
 
 **Цель:** безопасно превратить внешнюю favicon в готовый артефакт.
 
