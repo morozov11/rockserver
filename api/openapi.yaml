@@ -77,7 +77,7 @@ paths:
         - name: limit
           in: query
           required: false
-          schema: { type: integer, minimum: 1, maximum: 50, default: 25 }
+          schema: { type: integer, minimum: 1, maximum: 50, default: 50 }
         - name: offset
           in: query
           required: false
@@ -87,6 +87,132 @@ paths:
         "400": { description: Invalid query or pagination. }
         "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
         "503": { description: Catalog or administrator session persistence is unavailable. }
+  /api/v1/admin/icons/import:
+    get:
+      operationId: getLatestStationIconImport
+      summary: Read the latest durable station-icon import progress for the administrator console
+      security: [{ AdminBearer: [] }]
+      responses:
+        "200":
+          description: Latest safe counters, or null when no import has been started.
+          content:
+            application/json: { schema: { oneOf: [{ $ref: "#/components/schemas/StationIconImportProgress" }, { type: "null" }] } }
+        "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
+        "503": { description: Persistent icon storage or import metadata is unavailable. }
+    post:
+      operationId: startStationIconImport
+      summary: Start one administrator-authorized station-icon import snapshot
+      description: >-
+        Only a trusted first-party administrator browser may start this durable background job.
+        The response contains safe persisted counters; source URLs and image bytes are never returned.
+      security: [{ AdminBearer: [] }]
+      responses:
+        "202":
+          description: The import snapshot was created and its background worker was started.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/StationIconImportProgress" } }
+        "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
+        "403": { description: Request origin is not the trusted first-party administrator application. }
+        "503": { description: Persistent icon storage or import metadata is unavailable. }
+  /api/v1/admin/icons/import/{job_id}:
+    get:
+      operationId: getStationIconImportProgress
+      summary: Read safe persisted counters for one station-icon import job
+      security: [{ AdminBearer: [] }]
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Current or terminal progress counters.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/StationIconImportProgress" } }
+        "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
+        "404": { description: The job does not exist. }
+        "503": { description: Persistent icon storage or import metadata is unavailable. }
+  /api/v1/admin/stations/{station_id}/icon:
+    put:
+      operationId: replaceManualStationIcon
+      summary: Upload or replace one manual station-icon override
+      description: >-
+        The trusted first-party administrator browser sends one raw PNG, JPEG, WebP or ICO body.
+        RockServer applies the same two-MiB/signature/decode limits as automatic import and stores
+        only the prepared WebP result. The automatic source URL is retained but cannot overwrite
+        this manual override.
+      security: [{ AdminBearer: [] }]
+      parameters:
+        - name: station_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          image/png: { schema: { type: string, format: binary } }
+          image/jpeg: { schema: { type: string, format: binary } }
+          image/webp: { schema: { type: string, format: binary } }
+          image/x-icon: { schema: { type: string, format: binary } }
+      responses:
+        "204": { description: The prepared manual override was atomically published. }
+        "400": { description: Station identifier is invalid. }
+        "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
+        "403": { description: Request origin is not the trusted first-party administrator application. }
+        "404": { description: Station was not found. }
+        "413": { description: The raw upload exceeds two MiB. }
+        "422": { description: Image signature, decoding or dimensions are invalid. }
+        "503": { description: Persistent icon storage or metadata is unavailable. }
+    delete:
+      operationId: removeManualStationIcon
+      summary: Remove one manual station-icon override after explicit confirmation
+      security: [{ AdminBearer: [] }]
+      parameters:
+        - name: station_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirmation]
+              properties:
+                confirmation: { type: string, const: DELETE }
+      responses:
+        "204": { description: Manual override was detached; a future explicit import may use the retained automatic source. }
+        "400": { description: Station identifier is invalid. }
+        "401": { description: Bearer session is absent, expired, revoked, malformed, or invalid. }
+        "403": { description: Request origin is not the trusted first-party administrator application. }
+        "404": { description: No manual override exists for the station. }
+        "422": { description: Confirmation is missing or invalid. }
+        "503": { description: Persistent icon storage or metadata is unavailable. }
+  /api/v1/stations/{station_id}/icon:
+    get:
+      operationId: getStationIcon
+      summary: Deliver one server-hosted prepared station icon
+      description: >-
+        The endpoint returns only a normalized WebP artifact already stored by RockServer. It never
+        redirects to a provider source and supports strong ETag revalidation. A missing icon is 404
+        and is deliberately not cacheable.
+      parameters:
+        - name: station_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      responses:
+        "200":
+          description: Prepared square WebP artifact.
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, example: "public, max-age=86400, must-revalidate" } }
+          content:
+            image/webp: { schema: { type: string, format: binary } }
+        "304": { description: The supplied ETag matches the stored artifact. }
+        "404": { description: No ready stored icon exists for the station. }
   /api/v1/admin/devices:
     get:
       operationId: listAdminDevices
@@ -1186,6 +1312,20 @@ components:
       properties:
         username: { type: string, minLength: 3, maxLength: 64, pattern: "^[A-Za-z0-9._-]+$" }
         password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+    StationIconImportProgress:
+      type: object
+      additionalProperties: false
+      required: [id, status, selected, processed, ready, missing, retryable_error, permanent_error, skipped]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [running, completed, interrupted, failed] }
+        selected: { type: integer, minimum: 0 }
+        processed: { type: integer, minimum: 0 }
+        ready: { type: integer, minimum: 0 }
+        missing: { type: integer, minimum: 0 }
+        retryable_error: { type: integer, minimum: 0 }
+        permanent_error: { type: integer, minimum: 0 }
+        skipped: { type: integer, minimum: 0 }
     RenameDeviceRequest:
       type: object
       additionalProperties: false
@@ -2909,6 +3049,7 @@ components:
         - name
         - stream_url
         - homepage_url
+        - favicon_url
         - tags
         - language
         - country_code
@@ -2932,6 +3073,10 @@ components:
         homepage_url:
           type: [string, "null"]
           format: uri
+        favicon_url:
+          type: [string, "null"]
+          format: uri-reference
+          description: Same-origin prepared station icon path, present only for ready server-owned WebP artifacts.
         tags:
           type: array
           items:

@@ -36,6 +36,8 @@ pub mod persistence;
 pub mod providers;
 /// Deterministic station-search domain and catalog boundary.
 pub mod search;
+/// Persistent, atomic storage for normalized station-icon artifacts.
+pub mod station_icons;
 /// Structured tracing setup.
 pub mod telemetry;
 /// Provider-neutral voice-command and streaming speech boundaries.

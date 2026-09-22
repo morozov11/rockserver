@@ -30,6 +30,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let database_url = env::var(DATABASE_URL_ENV)?;
     let trusted_proxy_token = env::var(TRUSTED_PROXY_TOKEN_ENV)?;
     let account_store = PostgresAccountStore::connect(&database_url).await?;
+    rockserver::http::recover_station_icon_imports(&account_store).await;
     let admin_store = PostgresAdminStore::connect(&database_url).await?;
     let embedding_provider = embedding_provider_from_env()?;
     let language_classifier = match (&embedding_provider, semantic_language_filters_enabled()?) {

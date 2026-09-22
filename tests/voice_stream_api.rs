@@ -869,6 +869,7 @@ fn stations(count: usize) -> Vec<RankedStation> {
                 name: format!("Station {index}"),
                 stream_url: format!("https://streams.example.com/{index}.mp3"),
                 homepage_url: None,
+                favicon_url: None,
                 tags: vec!["rock".to_owned()],
                 language: None,
                 country_code: None,

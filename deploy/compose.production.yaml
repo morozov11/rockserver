@@ -3,6 +3,7 @@ services:
     image: ${ROCKSERVER_IMAGE:?ROCKSERVER_IMAGE must point to an approved immutable image}
     volumes:
       - /home/rockserver/logs:/var/log/rockserver
+      - /home/rockserver/station-icons:/var/lib/rockserver/station-icons
 
   catalog_seed:
     volumes:

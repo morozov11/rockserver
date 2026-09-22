@@ -94,6 +94,7 @@ struct Page<T> {
 /// SPA station view deliberately excludes stream URLs and persistence identifiers.
 #[derive(Serialize)]
 struct StationDto {
+    station_id: String,
     name: String,
     tags: Vec<String>,
     language: Option<String>,
@@ -103,6 +104,7 @@ struct StationDto {
 impl From<&Station> for StationDto {
     fn from(station: &Station) -> Self {
         Self {
+            station_id: station.id.clone(),
             name: station.name.clone(),
             tags: station.tags.clone(),
             language: station.language.clone(),
@@ -148,8 +150,12 @@ struct AuditDto {
     outcome: String,
 }
 
-fn page(query: &PageQuery, request_id: &str) -> Result<(u8, u32), Box<Response>> {
-    let limit = query.limit.unwrap_or(25);
+fn page(
+    query: &PageQuery,
+    request_id: &str,
+    default_limit: u8,
+) -> Result<(u8, u32), Box<Response>> {
+    let limit = query.limit.unwrap_or(default_limit);
     let offset = query.offset.unwrap_or(0);
     if !(1..=MAX_PAGE_SIZE).contains(&limit) || offset > MAX_OFFSET {
         return Err(Box::new(error_response(
@@ -181,6 +187,7 @@ pub(super) async fn stations(
             offset: query.offset,
         },
         &request_id,
+        50,
     ) {
         Ok(page) => page,
         Err(response) => return *response,
@@ -252,7 +259,7 @@ pub(super) async fn devices(
         Ok(session) => session,
         Err(response) => return response,
     };
-    let (limit, offset) = match page(&query, &request_id) {
+    let (limit, offset) = match page(&query, &request_id, 25) {
         Ok(page) => page,
         Err(response) => return *response,
     };
@@ -320,6 +327,7 @@ pub(super) async fn audit(
             offset: query.offset,
         },
         &request_id,
+        25,
     ) {
         Ok(page) => page,
         Err(response) => return *response,

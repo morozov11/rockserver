@@ -1,5 +1,147 @@
 # Task log
 
+## 2026-09-22 — RS-ICON-010: persistent production icon storage
+
+- Goal: make administrator-managed prepared icons durable through the standard
+  production deployment without introducing a deploy-time sync.
+- Result: Compose config now supplies `ROCKSERVER_STATION_ICON_DIR` and mounts
+  `/home/rockserver/station-icons` only into RockServer. The remote bootstrap
+  creates that directory with container UID `10001` ownership, and the deploy
+  regression protects the wiring. Deployment still never starts an import.
+- Checks: final whole-change verification passed 2026-09-22: `cargo fmt
+  --check`, strict all-target/all-feature Clippy, full `cargo test` (216
+  passed; 15 PostgreSQL/live-provider tests ignored as designed), `pnpm
+  typecheck`, `pnpm test` (11 passed), the OPS-001-D local regression suite,
+  and `ops-001-d.ps1 -Action deploy -DryRun`. This closes the verification
+  deferred by RS-ICON-002 through RS-ICON-006.
+- Status: **verified locally; production deploy pending.**
+
+## 2026-09-22 — RS-ICON-009: nullable server favicon URL in catalog/search
+
+- Goal: let clients use a RockServer icon URL only after the server has ready
+  metadata, while retaining a null/placeholder path for all other stations.
+- Result: PostgreSQL read queries now left-join ready icon metadata without
+  changing rank/order, and `Station`, public catalog, search and voice DTOs
+  serialize a nullable same-origin `favicon_url`. Offline catalogs remain null.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features --
+  -D warnings`, and `cargo test` passed. PostgreSQL integration tests remain
+  ignored because no disposable `TEST_DATABASE_URL` was supplied.
+- Status: **implemented locally; not deployed.**
+
+## 2026-09-22 — RS-ICON-008: manual icon upload, replace and confirmed removal
+
+- Goal: finish the administrator override path for stations with missing or
+  unsuitable automatic icons.
+- Result: added raw bounded image upload and confirmed removal routes under the
+  existing AdminBearer/Origin boundary, reusing the WebP normalizer and
+  preserving automatic source metadata. The Stations tab now exposes native
+  file selection and a browser confirmation dialog; removal never deletes a
+  potentially shared content-addressed file.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features --
+  -D warnings`, `cargo test`, `pnpm typecheck`, and `pnpm test` passed.
+  PostgreSQL integration tests remain ignored because no disposable
+  `TEST_DATABASE_URL` was supplied.
+- Status: **implemented locally; not deployed.**
+
+## 2026-09-22 — RS-ICON-007: administrator import control and server icon delivery
+
+- Goal: make the approved importer executable only from the authenticated
+  first-party administrator console, retain observable progress, and serve
+  prepared server-owned thumbnails.
+- Result: added protected start/latest/job-status routes, durable counter polling
+  after console reload, public ready-WebP delivery with ETag/404 semantics, and
+  station-list thumbnail/placeholder UI. The runtime opens storage only from
+  `ROCKSERVER_STATION_ICON_DIR`; startup merely marks abandoned work interrupted
+  and neither startup nor deployment starts network work. Manual
+  upload/replace/removal is delivered separately as RS-ICON-008.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features --
+  -D warnings`, and `cargo test` passed; the latter includes OpenAPI contract
+  coverage and leaves 10 PostgreSQL tests ignored because no disposable
+  `TEST_DATABASE_URL` was supplied (five credentialed live tests are also
+  ignored). `pnpm typecheck` and `pnpm test` passed.
+- Status: **implemented locally; not deployed.**
+
+## 2026-09-22 — RS-ICON-006: durable import coordinator
+
+- Goal: persist the work and progress behind the future admin button without
+  introducing a CLI, cron or startup import.
+- Result: migration `0023` adds one-active job and per-station item snapshots;
+  the coordinator claims items, stores safe terminal counts and interrupts
+  unfinished prior-process jobs without network work.
+- Checks: `cargo fmt` and `cargo check` passed; required full verification
+  remains pending the in-progress icon work.
+- Status: **implemented locally; consumed by RS-ICON-007 protected routes.**
+
+## 2026-09-22 — RS-ICON-005: bounded source validation and normalization
+
+- Goal: make icon download and manual upload share one safe raster boundary.
+- Result: only PNG/JPEG/WebP/ICO up to 2 MiB and 1,024×1,024/1,048,576 pixels
+  are accepted; the sole output is square WebP. The fetcher disables implicit
+  redirects, validates every destination and rejects local/private addresses.
+- Checks: `cargo check` passed after resolving the new `image` dependency;
+  full required verification remains pending the in-progress icon work.
+- Status: **implemented locally; no HTTP route or automatic execution.**
+
+## 2026-09-22 — RS-ICON-004: persistent WebP artifact storage
+
+- Goal: establish safe filesystem storage independently of metadata, HTTP and
+  external download.
+- Result: added a content-addressed storage trait and filesystem backend with
+  canonical keys, atomic publish, read/exists/delete operations and
+  deterministic temp-directory coverage.
+- Checks: `cargo fmt`, `cargo check`, and `cargo test` passed (160 library
+  tests plus regular suites); disposable PostgreSQL coverage is pending.
+- Status: **implemented locally; artifacts are not yet fetched or served.**
+
+## 2026-09-22 — RS-ICON-003: catalog icon sources
+
+- Goal: capture trustedly normalized icon-source URLs without exposing them to
+  clients.
+- Result: shared-catalog and Radio Browser icon fields populate internal
+  metadata. A source change flags a non-manual record for refresh while a
+  ready artifact remains available.
+- Checks: `cargo fmt`, `cargo check`, and `cargo test` passed (160 library
+  tests plus regular suites); disposable PostgreSQL coverage is pending.
+- Status: **implemented locally; no downloader, job, endpoint or UI yet.**
+
+## 2026-09-22 — RS-ICON-002: station-icon metadata schema
+
+- Goal: add the first compatible, schema-only foundation for server-owned
+  station icons.
+- Result: migration `0022` creates `station_icons` with status, source,
+  ready-WebP metadata, retry and manual-override fields, plus a due-import
+  index. It downloads no data and changes no existing station or stream IDs.
+- Checks: `cargo fmt`, `cargo check`, and `cargo test` passed (160 library
+  tests plus regular suites); disposable PostgreSQL coverage is pending.
+- Status: **implemented locally; no icon HTTP or admin behavior yet.**
+
+## 2026-09-22 — station icons: admin-operated import direction
+
+- Goal: revise the deferred icon roadmap so import is controlled from the
+  authenticated administrator console rather than a CLI, and the console
+  displays ready server-hosted icons.
+- Result: removed the CLI/bundle/deploy-sync path from the plan. The new
+  sequence records a single durable admin-started background job with saved
+  progress, same-origin polling at `https://alex.vault57.ru/admin`, station
+  thumbnails/placeholders, and a later manual upload/replace/remove override.
+  Deployment remains schema/storage-only and never starts network import. The
+  project context and service diagram now reflect this explicitly planned flow.
+- Checks: documentation review and `git diff --check` passed. Cargo and web
+  checks are not applicable because this task changes no executable code.
+- Status: **roadmap updated; icon implementation remains unstarted.**
+
+## 2026-09-22 — administrator station list: 50 rows per page
+
+- Goal: show 50 stations on each administrator-console page.
+- Result: the station endpoint, OpenAPI default, browser request, and pager
+  offset now use 50. The existing maximum remains 50; device and audit
+  pagination remain at 25.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features --
+  -D warnings`, and `cargo test` passed; the station-handler test confirms
+  the default response limit is 50. `pnpm typecheck` and `pnpm test` passed
+  (11 web UX regressions).
+- Status: **implemented locally.**
+
 ## 2026-09-17 — RS-9: target-only station name and future icon delivery
 
 - Goal: correct the RockCast fallback presentation for a station selected on

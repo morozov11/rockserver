@@ -8,7 +8,8 @@ export type BrowserAccount = { account_display_name: string; device_limit: numbe
 export type AdminPage<T> = { items: T[]; limit: number; offset: number; has_more: boolean };
 export type AdminDevice = { product: "RockCast" | "RockMobile"; device_type: string; display_name: string; status: string; created_at: string; last_seen_at?: string };
 export type AdminAuditEntry = { occurred_at: string; action: string; outcome: string };
-export type AdminStation = { name: string; tags: string[]; language?: string; country_code?: string; health: string };
+export type AdminStation = { station_id: string; name: string; tags: string[]; language?: string; country_code?: string; health: string };
+export type AdminIconJob = { id: string; status: "running" | "completed" | "interrupted" | "failed"; selected: number; processed: number; ready: number; missing: number; retryable_error: number; permanent_error: number; skipped: number };
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, { ...init, credentials: "same-origin", headers: { "Content-Type": "application/json", ...init.headers } });
@@ -44,7 +45,12 @@ export const adminApi = {
   logout(token: string) { return adminRequest<void>("/api/v1/admin/auth/logout", token, { method: "POST", body: "{}" }); },
   devices(token: string, offset: number) { return adminRequest<AdminPage<AdminDevice>>(`/api/v1/admin/devices?limit=25&offset=${offset}`, token); },
   audit(token: string, offset: number, filters: { from?: string; until?: string; action?: string; outcome?: string }) { const params = new URLSearchParams({ limit: "25", offset: String(offset) }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); }); return adminRequest<AdminPage<AdminAuditEntry>>(`/api/v1/admin/audit?${params}`, token); },
-  stations(token: string, offset: number, query: string) { const params = new URLSearchParams({ limit: "25", offset: String(offset) }); if (query.trim()) params.set("q", query.trim()); return adminRequest<AdminPage<AdminStation>>(`/api/v1/admin/stations?${params}`, token); },
+  stations(token: string, offset: number, query: string) { const params = new URLSearchParams({ limit: "50", offset: String(offset) }); if (query.trim()) params.set("q", query.trim()); return adminRequest<AdminPage<AdminStation>>(`/api/v1/admin/stations?${params}`, token); },
+  latestIconImport(token: string) { return adminRequest<AdminIconJob | null>("/api/v1/admin/icons/import", token); },
+  startIconImport(token: string) { return adminRequest<AdminIconJob>("/api/v1/admin/icons/import", token, { method: "POST", body: "{}" }); },
+  iconImport(token: string, jobId: string) { return adminRequest<AdminIconJob>(`/api/v1/admin/icons/import/${encodeURIComponent(jobId)}`, token); },
+  replaceStationIcon(token: string, stationId: string, file: File) { return adminRequest<void>(`/api/v1/admin/stations/${encodeURIComponent(stationId)}/icon`, token, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file }); },
+  removeStationIcon(token: string, stationId: string) { return adminRequest<void>(`/api/v1/admin/stations/${encodeURIComponent(stationId)}/icon`, token, { method: "DELETE", body: JSON.stringify({ confirmation: "DELETE" }) }); },
 };
 
 export const base64url = (bytes: ArrayBuffer | Uint8Array) => {

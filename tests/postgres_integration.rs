@@ -1963,6 +1963,7 @@ fn imported_station(
         id: format!("rb-{source_station_id}"),
         name: name.to_owned(),
         homepage_url: Some("https://example.com/imported-radio".to_owned()),
+        favicon_source_url: Some("https://icons.example.com/imported-radio.png".to_owned()),
         tags: tags.iter().map(|tag| (*tag).to_owned()).collect(),
         language: Some("en".to_owned()),
         country_code: Some("US".to_owned()),

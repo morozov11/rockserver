@@ -16,6 +16,7 @@ use crate::{
     search::{
         InMemoryStationRepository, SearchService, StationRepository, UnavailableStationRepository,
     },
+    station_icons::{FilesystemIconStorage, IconImportCoordinator, IconStorage},
     voice::{
         CommandInterpreter, DeterministicCommandInterpreter, SpeechRecognizers,
         UnavailableSpeechRecognizer,
@@ -49,6 +50,8 @@ mod pairing;
 mod search;
 #[path = "state.rs"]
 mod state;
+#[path = "station_icons.rs"]
+mod station_icons;
 #[path = "transport.rs"]
 mod transport;
 #[path = "voice.rs"]
@@ -66,9 +69,47 @@ pub const TEST_API_BEARER_TOKEN: &str = "rockserver-offline-test-token";
 pub const TRUSTED_PROXY_TOKEN_ENV: &str = "ROCKSERVER_TRUSTED_PROXY_TOKEN";
 /// Optional loopback-only origin accepted by administrator routes for explicit local development.
 pub const LOCAL_ADMIN_ORIGIN_ENV: &str = "ROCKSERVER_LOCAL_ADMIN_ORIGIN";
+/// Directory on the persistent server volume used for prepared station-icon WebP artifacts.
+pub const STATION_ICON_DIR_ENV: &str = "ROCKSERVER_STATION_ICON_DIR";
 
 /// Maximum duration the voice-command transport waits for query interpretation and search.
 pub const DEFAULT_VOICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Opens the optional persistent icon store configured for the production process.
+///
+/// Keeping this optional lets non-production routers retain their fully offline behavior; the
+/// protected administrator endpoint reports the feature as unavailable until the operator mounts
+/// and configures the persistent directory.
+fn station_icon_import_from_env(pool: sqlx::PgPool) -> Option<Arc<IconImportCoordinator>> {
+    let root = env::var(STATION_ICON_DIR_ENV).ok()?;
+    let storage: Arc<dyn IconStorage> = match FilesystemIconStorage::open(root) {
+        Ok(storage) => Arc::new(storage),
+        Err(error) => {
+            tracing::error!(%error, "station icon storage is unavailable");
+            return None;
+        }
+    };
+    match IconImportCoordinator::new(pool, storage) {
+        Ok(coordinator) => Some(Arc::new(coordinator)),
+        Err(error) => {
+            tracing::error!(%error, "station icon importer is unavailable");
+            None
+        }
+    }
+}
+
+/// Marks an unfinished server-local icon worker interrupted during process startup.
+///
+/// This recovery performs only a short metadata update and never starts a download; a trusted
+/// administrator must explicitly create the next import job from the console.
+pub async fn recover_station_icon_imports(account_store: &PostgresAccountStore) {
+    let Some(importer) = station_icon_import_from_env(account_store.pool()) else {
+        return;
+    };
+    if let Err(error) = importer.interrupt_running().await {
+        tracing::error!(%error, "could not recover interrupted station icon import");
+    }
+}
 
 /// Creates the application router with the default in-memory catalog backend.
 pub fn router() -> Router {
@@ -162,6 +203,7 @@ pub fn router_with_speech_recognizers_and_bearer_token(
         control_state_hub: Default::default(),
         control_store: None,
         control_session_resolver: None,
+        icon_import: None,
         control_timing: Default::default(),
     })
 }
@@ -193,6 +235,7 @@ pub fn router_with_search_service_and_native_session_resolver(
         control_state_hub: Default::default(),
         control_store: None,
         control_session_resolver: Some(session_resolver),
+        icon_import: None,
         control_timing: Default::default(),
     })
 }
@@ -228,6 +271,7 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
         Arc::new(account_store.clone());
     let control_store: Arc<dyn crate::device_control::DeviceControlStore> =
         Arc::new(PostgresDeviceControlStore::from_pool(account_store.pool()));
+    let icon_import = station_icon_import_from_env(account_store.pool());
     let control_commands = station_resolving_command_router(&search_service);
     build_router(AppState {
         search_service,
@@ -245,6 +289,7 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
         control_state_hub: Default::default(),
         control_store: Some(control_store),
         control_session_resolver: Some(control_session_resolver),
+        icon_import,
         control_timing: Default::default(),
     })
 }
@@ -288,6 +333,7 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_proxy_and_voice
         Arc::new(account_store.clone());
     let control_store: Arc<dyn crate::device_control::DeviceControlStore> =
         Arc::new(PostgresDeviceControlStore::from_pool(account_store.pool()));
+    let icon_import = station_icon_import_from_env(account_store.pool());
     let control_commands = station_resolving_command_router(&search_service);
     build_router(AppState {
         search_service,
@@ -305,6 +351,7 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_proxy_and_voice
         control_state_hub: Default::default(),
         control_store: Some(control_store),
         control_session_resolver: Some(control_session_resolver),
+        icon_import,
         control_timing: Default::default(),
     })
 }
@@ -339,6 +386,7 @@ pub fn router_with_device_voice_services(
         control_state_hub: Default::default(),
         control_store: Some(control_store),
         control_session_resolver: Some(session_resolver),
+        icon_import: None,
         control_timing: Default::default(),
     })
 }
@@ -385,6 +433,18 @@ fn build_router(state: AppState) -> Router {
             axum::routing::get(admin_console::stations),
         )
         .route(
+            "/api/v1/admin/icons/import",
+            axum::routing::get(station_icons::latest_import).post(station_icons::start_import),
+        )
+        .route(
+            "/api/v1/admin/icons/import/{job_id}",
+            axum::routing::get(station_icons::import_progress),
+        )
+        .route(
+            "/api/v1/admin/stations/{station_id}/icon",
+            axum::routing::put(station_icons::replace_manual).delete(station_icons::remove_manual),
+        )
+        .route(
             "/api/v1/admin/devices",
             axum::routing::get(admin_console::devices),
         )
@@ -404,6 +464,10 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/catalog/stations/{station_id}",
             axum::routing::get(catalog::public_catalog_get),
+        )
+        .route(
+            "/api/v1/stations/{station_id}/icon",
+            axum::routing::get(station_icons::public_icon),
         )
         .route("/api/v1/search", axum::routing::post(search::public_search))
         .route(
@@ -555,6 +619,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn public_icon_route_returns_a_non_cacheable_miss_without_configured_storage() {
+        let response = router()
+            .oneshot(
+                Request::get("/api/v1/stations/station-rock-001/icon")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    }
+
+    #[tokio::test]
     async fn protected_admin_station_read_model_requires_and_accepts_a_revocable_session() {
         let token = "admin-test-token";
         let store = Arc::new(FakeAdminStore::default());
@@ -593,6 +672,7 @@ mod tests {
             control_state_hub: Default::default(),
             control_store: None,
             control_session_resolver: None,
+            icon_import: None,
             control_timing: Default::default(),
         });
         let denied = app
@@ -605,9 +685,36 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+        let origin_rejected = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/admin/icons/import")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(origin_rejected.status(), StatusCode::FORBIDDEN);
+        let manual_icon_requires_configured_storage = app
+            .clone()
+            .oneshot(
+                Request::put("/api/v1/admin/stations/station-rock-001/icon")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .header("origin", "https://alex.vault57.ru")
+                    .header("x-forwarded-proto", "https")
+                    .body(Body::from("not an image"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            manual_icon_requires_configured_storage.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
         let allowed = app
             .oneshot(
-                Request::get("/api/v1/admin/stations?limit=1")
+                Request::get("/api/v1/admin/stations")
                     .header(header::AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -618,11 +725,14 @@ mod tests {
         assert_eq!(allowed.headers()[header::CACHE_CONTROL], "no-store");
         let body = allowed.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&body).unwrap()["items"]
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap()["limit"].as_u64(),
+            Some(50)
+        );
+        assert!(
+            !serde_json::from_slice::<serde_json::Value>(&body).unwrap()["items"]
                 .as_array()
                 .unwrap()
-                .len(),
-            1
+                .is_empty()
         );
     }
 
@@ -666,6 +776,7 @@ mod tests {
             control_state_hub: Default::default(),
             control_store: None,
             control_session_resolver: None,
+            icon_import: None,
             control_timing: Default::default(),
         });
         let refresh = Request::post("/api/v1/admin/auth/refresh")
@@ -753,6 +864,7 @@ mod tests {
             control_state_hub: Default::default(),
             control_store: None,
             control_session_resolver: None,
+            icon_import: None,
             control_timing: Default::default(),
         });
         let login = |password: &str| {

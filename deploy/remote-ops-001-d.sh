@@ -6,6 +6,7 @@ action="${1:?action required}"
 release_root="/opt/rockserver"
 env_file="$release_root/release.env"
 host_log_dir="/home/rockserver/logs"
+host_station_icon_dir="/home/rockserver/station-icons"
 deploy_lock="$release_root/.deploy.lock"
 
 fail() { printf '%s\n' "$1" >&2; exit 1; }
@@ -45,6 +46,9 @@ install_docker_if_requested() {
 }
 ensure_host_log_dir() {
   install -d -m 0750 -o 10001 "$host_log_dir"
+}
+ensure_host_station_icon_dir() {
+  install -d -m 0750 -o 10001 "$host_station_icon_dir"
 }
 ensure_low_memory_swap() {
   local memory_kib
@@ -93,6 +97,7 @@ bootstrap() {
   ensure_low_memory_swap
   install -d -m 0750 "$release_root" "$release_root/backups" "$release_root/releases" "$release_root/assets/onnx"
   ensure_host_log_dir
+  ensure_host_station_icon_dir
   install_owner_files "$stage"
   write_or_keep_secret POSTGRES_PASSWORD
   write_or_keep_secret ROCKSERVER_API_BEARER_TOKEN

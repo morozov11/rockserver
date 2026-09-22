@@ -338,6 +338,10 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         "/api/v1/admin/devices",
         "/api/v1/admin/audit",
         "/api/v1/admin/stations",
+        "/api/v1/admin/icons/import",
+        "/api/v1/admin/icons/import/{job_id}",
+        "/api/v1/admin/stations/{station_id}/icon",
+        "/api/v1/stations/{station_id}/icon",
         "/api/v1/auth/device-session",
         "/api/v1/auth/browser-logout",
         "/api/v1/browser/account",
@@ -365,6 +369,34 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
             .is_some(),
         "search path must define POST"
     );
+    let icon_import = value_at(&document, "paths")
+        .and_then(|paths| paths.get("/api/v1/admin/icons/import"))
+        .expect("station icon import path must exist");
+    assert!(icon_import.get("get").is_some());
+    assert!(icon_import.get("post").is_some());
+    assert!(
+        icon_import
+            .get("post")
+            .and_then(|operation| operation.get("security"))
+            .is_some(),
+        "icon import start must require the administrator bearer"
+    );
+    let icon_delivery = value_at(&document, "paths")
+        .and_then(|paths| paths.get("/api/v1/stations/{station_id}/icon"))
+        .and_then(|path| path.get("get"))
+        .expect("station icon delivery must define GET");
+    assert!(
+        icon_delivery
+            .get("responses")
+            .and_then(|responses| responses.get("304"))
+            .is_some(),
+        "station icon delivery must document ETag revalidation"
+    );
+    let manual_icon = value_at(&document, "paths")
+        .and_then(|paths| paths.get("/api/v1/admin/stations/{station_id}/icon"))
+        .expect("manual station icon path must exist");
+    assert!(manual_icon.get("put").is_some());
+    assert!(manual_icon.get("delete").is_some());
     let completion_operation = value_at(&document, "paths")
         .and_then(|paths| paths.get("/api/v1/pairing-requests/{request_id}/complete"))
         .and_then(|path| path.get("post"))

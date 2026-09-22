@@ -307,6 +307,15 @@ ON CONFLICT (source, source_station_id) DO UPDATE SET
         .bind(&station.homepage_url).bind(&station.tags).bind(&station.language).bind(&station.country_code)
         .bind(searchable_text(station)).bind(run_id).execute(&mut **transaction).await
         .map_err(|_| CatalogImportError::safe("PostgreSQL station upsert failed"))?;
+        sqlx::query(
+            "INSERT INTO station_icons (station_id, source_url, source_priority, status) VALUES ($1, $2, $3, CASE WHEN $2::text IS NULL THEN 'missing' ELSE 'pending' END) ON CONFLICT (station_id) DO UPDATE SET source_url = CASE WHEN station_icons.manual_override THEN station_icons.source_url ELSE EXCLUDED.source_url END, source_priority = CASE WHEN station_icons.manual_override THEN station_icons.source_priority ELSE EXCLUDED.source_priority END, refresh_needed = CASE WHEN station_icons.manual_override THEN station_icons.refresh_needed ELSE station_icons.source_url IS DISTINCT FROM EXCLUDED.source_url END, status = CASE WHEN station_icons.manual_override THEN station_icons.status WHEN station_icons.status = 'ready' THEN 'ready' ELSE EXCLUDED.status END, updated_at = now()",
+        )
+        .bind(&station.id)
+        .bind(&station.favicon_source_url)
+        .bind(if station.favicon_source_url.is_some() { 2_i16 } else { 0_i16 })
+        .execute(&mut **transaction)
+        .await
+        .map_err(|_| CatalogImportError::safe("PostgreSQL station icon source upsert failed"))?;
         if metadata_changed {
             sqlx::query("DELETE FROM station_embeddings WHERE station_id = $1")
                 .bind(&station.id)

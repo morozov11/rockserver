@@ -590,6 +590,7 @@ mod tests {
             control_state_hub: hub,
             control_store: None,
             control_session_resolver: Some(resolver),
+            icon_import: None,
             control_timing: ControlTiming {
                 registration_deadline: Duration::from_millis(100),
                 offline_ttl: ttl,

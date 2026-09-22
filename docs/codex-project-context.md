@@ -46,13 +46,20 @@
 - Импорт Radio Browser — отдельный bounded one-shot binary. Он не является HTTP
   handler-ом, не запускается при startup и не выполняется в readiness. Existing
   `import_runs` фиксирует каталоговые import runs.
-- Действующий OpenAPI **ещё не содержит** station-icon endpoint или `faviconUrl`
-  в `StationResult`; текущая server persistence/API не публикует готовые иконки.
-- `docs/roadmap/station-icons.md`, шаг 0, документально завершён; последующие
-  шаги ещё являются планом. Существующий `favicon_url` в mobile export сейчас
-  намеренно вставляется как `NULL`.
-- `GET /admin` сейчас только local read-only preview. Persisted administrator
-  principal, admin login/session и state-changing admin operations не реализованы.
+- OpenAPI declares `GET /api/v1/stations/{station_id}/icon`, protected durable
+  admin import start/status paths, and nullable `favicon_url` in station
+  responses. The endpoint serves only ready WebP artifacts from
+  `ROCKSERVER_STATION_ICON_DIR`; ready PostgreSQL stations expose its
+  same-origin path and every other station remains `null` for the client
+  placeholder.
+- `docs/roadmap/station-icons.md` steps 2–9 are implemented locally. Existing
+  mobile export `favicon_url` remains intentionally `NULL`; metrics, operator
+  diagnostics and post-deploy acceptance remain planned.
+- `GET /admin` — first-party Preact SPA с отдельным persisted administrator
+  principal, логином и short-lived revocable Bearer session. Its Stations tab
+  now starts an Origin-protected import, restores/polls persisted progress,
+  renders the server icon URL or a placeholder, and provides bounded manual
+  upload/replace/confirmed-removal controls.
 - Current user accounts/passkey/browser sessions — это **не** будущая роль
   оператора admin и не должны переиспользоваться для неё без отдельного решения.
 
@@ -102,8 +109,8 @@ Pinned client catalog -> local fallback when server is unavailable
 ### Station icons: утверждённый целевой контракт
 
 ```text
-catalog source/homepage/bundle
-        -> separate sync/backfill job
+catalog source/homepage/manual admin upload
+        -> explicit protected admin import job
         -> metadata in PostgreSQL + WebP file storage
         -> GET /api/v1/stations/{id}/icon
         -> faviconUrl only for ready files -> client cache/placeholder
@@ -243,30 +250,30 @@ Each task begins by re-validating its status and dependencies.
 
 ### RS-ICON
 
-> **Статус направления:** отложено владельцем 2026-09-01. План ниже сохраняется
-> как утверждённое будущее направление, но ни одну `RS-ICON-*` задачу нельзя
-> начинать без нового явного запроса владельца. Текущие client-side favicon
-> fallback-механизмы остаются переходным поведением.
+> **Статус направления:** владелец реактивировал направление 2026-09-22.
+> Импорт не имеет CLI, cron, startup- или deploy-side пути: только явный,
+> защищённый запуск durable background job из `https://alex.vault57.ru/admin`
+> с сохранённым прогрессом. Текущие client-side favicon fallback-механизмы
+> остаются переходным поведением до фактической реализации.
 
 | ID | Status | Scope and acceptance boundary |
 |---|---|---|
 | RS-ICON-001 | Complete (documentation) | Contract is recorded in `docs/roadmap/station-icons.md` step 0. Re-check it against OpenAPI/DTOs before code; it is not live behaviour. |
-| RS-ICON-002 | Planned | Add `station_icons` metadata migration and repository boundary. Schema-only migration; preserve existing station/stream IDs and counts. |
-| RS-ICON-003 | Planned | Extend shared/Radio Browser catalog import with normalized `favicon_source_url`; source changes schedule refresh but retain old ready icon. |
-| RS-ICON-004 | Planned | Implement storage trait/filesystem backend with safe keys, path/symlink protection, atomic writes, replacement and concurrency tests. It stores ready artifacts exclusively as WebP. |
-| RS-ICON-005 | Planned | Implement SSRF-safe downloader and normalizer with fake fetcher/storage/image boundaries, MIME/signature/decode limits, retry classification and backoff. Every accepted raster source is converted to square WebP <=256x256; source bytes are not retained. |
-| RS-ICON-006 | Planned | Implement resumable bounded `sync_station_icons` CLI/backfill: missing/stale/station/limit/concurrency/dry-run/retry modes, short transactions and worker claim/lease semantics. It must not become a migration or startup job. |
-| RS-ICON-007 | Planned | Add read-only WebP icon endpoint plus OpenAPI/router tests for ready `200 image/webp`, conditional `304`, missing `404`, headers and malformed IDs. |
+| RS-ICON-002 | Complete locally (uncommitted) | Added the schema-only `station_icons` migration; it preserves station/stream IDs and counts and performs no network I/O. Repository access remains the next step. |
+| RS-ICON-003 | Complete locally (uncommitted) | Shared and Radio Browser imports normalize `favicon_source_url`, persist it as internal metadata, and flag a changed automatic source for refresh while retaining a ready artifact. |
+| RS-ICON-004 | Complete locally (uncommitted) | Added content-addressed WebP storage with canonical keys, an atomic filesystem backend and deterministic storage tests. Downloader, endpoint and metadata publication remain separate steps. |
+| RS-ICON-005 | Complete locally (uncommitted) | Added bounded raster validation and WebP normalization plus a redirect-limited public-address fetcher. It blocks local/private/link-local DNS results; it is not callable until the admin job is added. |
+| RS-ICON-006 | Complete locally (uncommitted) | Added durable job/item persistence, one-active-job guard, snapshot selection, persisted counters and safe interruption semantics. It remains unreachable until the protected admin endpoints/UI are wired. |
+| RS-ICON-007 | Complete locally (uncommitted) | Read-only WebP icon endpoint, OpenAPI and router checks are wired; ready artifact integration coverage needs a disposable PostgreSQL database. |
 | RS-ICON-008 | Planned | Add nullable RockServer `faviconUrl` to domain/persistence/search/voice/public DTOs only for available ready files; preserve ranking/order and reverse-proxy public-base correctness. |
-| RS-ICON-009 | Planned | Build/import/verify versioned offline icon bundle with checksums, licensing/denylist/removal policy; binary assets stay out of Git. |
-| RS-ICON-010 | Planned | Wire a bounded bundle-import + missing/retryable sync into staging deployment with backup, persistent volume, coverage/endpoint verification and partial-success semantics. No database recreation. |
-| RS-ICON-011 | Planned; depends on RS-ADMIN-003/004 | Expose protected admin import/sync controls and durable job progress/history. A UI action starts a background bounded job and polls persisted state; it must never execute the full import inside one HTTP request. |
-| RS-ICON-012 | Deferred | Manual per-station override/upload/refresh/remove. It must never be overwritten by automatic source sync; define upload validation, audit and deletion semantics first. |
+| RS-ICON-009 | Complete locally (uncommitted) | Protected same-origin admin controls start import, poll durable progress/history, and show server-hosted thumbnail/placeholder in the station list. |
+| RS-ICON-010 | Complete locally (uncommitted) | Bounded raw raster upload, manual replace and explicitly confirmed removal reuse the normalizer; automatic source metadata survives and the request audit trail remains safe. |
+| RS-ICON-011 | Planned | Deploy compatible schema and persistent icon volume with backup, coverage/endpoint/admin smoke checks and partial-success semantics. Deploy never triggers import. |
 
-Recommended sequencing after the owner reactivates the icon direction:
-RS-ICON-002..010 proceed as bounded server/CLI work in listed order;
-RS-ICON-011 follows the admin and icon foundations. Do not start RS-ICON-012
-without an explicit product/security decision.
+Recommended sequencing: RS-ICON-002..007 establish safe server storage and
+read-only delivery; RS-ICON-009..010 add the administrator import and manual
+override controls. RS-ICON-008 remains the client catalog contract stage, and
+RS-ICON-011 deploys without triggering network work.
 
 ## Start prompt for a future Codex task
 

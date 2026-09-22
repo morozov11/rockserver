@@ -60,9 +60,12 @@ OPS-001-D, а не публикацией из этого репозитория
 
 Docker volumes не являются backup. PostgreSQL не должен получать host bind mount с неясным
 ownership; backup-файлы не должны храниться в repository, image или обычном service volume.
-Production bootstrap/deploy creates `/home/rockserver/logs` with ownership for the container UID
-`10001` before Compose starts. Both the RockServer service and the one-shot catalog/vector seed
-job write their structured file logs there; console output remains available through Docker logs.
+Production bootstrap/deploy creates `/home/rockserver/logs` and
+`/home/rockserver/station-icons` with ownership for the container UID `10001` before Compose
+starts. Both the RockServer service and the one-shot catalog/vector seed job write their
+structured file logs there; console output remains available through Docker logs. The icon
+directory is mounted only into RockServer, so administrator-imported WebP artifacts survive
+container replacement; deployment itself never starts an icon import.
 RockServer rotates its own JSON file daily and removes only files named `rockserver.log.*` that are
 older than 14 days. Set the non-secret `ROCKSERVER_LOG_RETENTION_DAYS` outside Git to choose a
 different retention period from 1 to 3650 days.

@@ -278,6 +278,7 @@ impl From<CatalogStation> for ImportedStation {
             id: station.id.clone(),
             name: station.name,
             homepage_url: station.homepage_url,
+            favicon_source_url: station.favicon_url,
             tags: station.tags,
             language: station.language,
             country_code: station.country_code,

@@ -109,6 +109,7 @@ candidates AS (
         s.name,
         primary_stream.stream_url,
         s.homepage_url,
+        COALESCE(icon.status = 'ready', false) AS favicon_ready,
         s.tags,
         s.language,
         s.country_code,
@@ -174,6 +175,7 @@ candidates AS (
         ORDER BY is_primary DESC, id ASC
         LIMIT 1
     ) AS primary_stream ON true
+    LEFT JOIN station_icons AS icon ON icon.station_id = s.id
     LEFT JOIN station_embeddings AS station_embedding
       ON station_embedding.station_id = s.id
      AND station_embedding.model = $8
@@ -212,6 +214,7 @@ SELECT
     name,
     stream_url,
     homepage_url,
+    favicon_ready,
     tags,
     language,
     country_code,
@@ -330,7 +333,7 @@ impl StationRepository for PostgresStationRepository {
         after_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Station>, RepositoryError> {
-        sqlx::query_as::<_, PublicStationRow>("SELECT s.id, s.name, ss.stream_url, s.homepage_url, s.tags, s.language, s.country_code, ss.codec, ss.bitrate_kbps, ss.health FROM stations s JOIN station_streams ss ON ss.station_id = s.id AND ss.is_primary WHERE ($1::text IS NULL OR s.id > $1) ORDER BY s.id LIMIT $2")
+        sqlx::query_as::<_, PublicStationRow>("SELECT s.id, s.name, ss.stream_url, s.homepage_url, COALESCE(i.status = 'ready', false) AS favicon_ready, s.tags, s.language, s.country_code, ss.codec, ss.bitrate_kbps, ss.health FROM stations s JOIN station_streams ss ON ss.station_id = s.id AND ss.is_primary LEFT JOIN station_icons i ON i.station_id = s.id WHERE ($1::text IS NULL OR s.id > $1) ORDER BY s.id LIMIT $2")
             .bind(after_id).bind(i64::try_from(limit).unwrap_or(50)).fetch_all(&self.pool).await
             .map_err(|error| RepositoryError::new("public catalog listing", error))?
             .into_iter().map(Station::try_from).collect::<Result<Vec<_>, _>>().map_err(|error| RepositoryError::new("public catalog row conversion", error))
@@ -343,8 +346,9 @@ impl StationRepository for PostgresStationRepository {
         limit: usize,
     ) -> Result<Vec<Station>, RepositoryError> {
         sqlx::query_as::<_, PublicStationRow>(
-            "SELECT s.id, s.name, ss.stream_url, s.homepage_url, s.tags, s.language, s.country_code, ss.codec, ss.bitrate_kbps, ss.health \
+            "SELECT s.id, s.name, ss.stream_url, s.homepage_url, COALESCE(i.status = 'ready', false) AS favicon_ready, s.tags, s.language, s.country_code, ss.codec, ss.bitrate_kbps, ss.health \
              FROM stations s JOIN station_streams ss ON ss.station_id = s.id AND ss.is_primary \
+             LEFT JOIN station_icons i ON i.station_id = s.id \
              WHERE s.retired_at IS NULL AND ($1::text IS NULL OR lower(s.name) LIKE '%' || lower($1) || '%' OR EXISTS (SELECT 1 FROM unnest(s.tags) AS tag WHERE lower(tag) LIKE '%' || lower($1) || '%')) \
              AND ($2::text IS NULL OR s.id > $2) ORDER BY s.id LIMIT $3",
         )
@@ -361,7 +365,7 @@ impl StationRepository for PostgresStationRepository {
     }
 
     async fn get_public(&self, id: &str) -> Result<Option<Station>, RepositoryError> {
-        sqlx::query_as::<_, PublicStationRow>("SELECT s.id, s.name, ss.stream_url, s.homepage_url, s.tags, s.language, s.country_code, ss.codec, ss.bitrate_kbps, ss.health FROM stations s JOIN station_streams ss ON ss.station_id = s.id AND ss.is_primary WHERE s.id = $1")
+        sqlx::query_as::<_, PublicStationRow>("SELECT s.id, s.name, ss.stream_url, s.homepage_url, COALESCE(i.status = 'ready', false) AS favicon_ready, s.tags, s.language, s.country_code, ss.codec, ss.bitrate_kbps, ss.health FROM stations s JOIN station_streams ss ON ss.station_id = s.id AND ss.is_primary LEFT JOIN station_icons i ON i.station_id = s.id WHERE s.id = $1")
             .bind(id).fetch_optional(&self.pool).await.map_err(|error| RepositoryError::new("public catalog get", error))?
             .map(Station::try_from).transpose().map_err(|error| RepositoryError::new("public catalog row conversion", error))
     }
@@ -373,6 +377,7 @@ struct PublicStationRow {
     name: String,
     stream_url: String,
     homepage_url: Option<String>,
+    favicon_ready: bool,
     tags: Vec<String>,
     language: Option<String>,
     country_code: Option<String>,
@@ -390,11 +395,15 @@ impl TryFrom<PublicStationRow> for Station {
             "unknown" => StationHealth::Unknown,
             _ => return Err(RowConversionError::InvalidHealth(row.health)),
         };
+        let favicon_url = row
+            .favicon_ready
+            .then(|| format!("/api/v1/stations/{}/icon", row.id));
         Ok(Station {
             id: row.id,
             name: row.name,
             stream_url: row.stream_url,
             homepage_url: row.homepage_url,
+            favicon_url,
             tags: row.tags,
             language: row.language,
             country_code: row.country_code,
@@ -414,6 +423,7 @@ struct StationRow {
     name: String,
     stream_url: String,
     homepage_url: Option<String>,
+    favicon_ready: bool,
     tags: Vec<String>,
     language: Option<String>,
     country_code: Option<String>,
@@ -455,6 +465,9 @@ impl TryFrom<StationRow> for RankedStation {
                 )
             },
         );
+        let favicon_url = row
+            .favicon_ready
+            .then(|| format!("/api/v1/stations/{}/icon", row.id));
 
         Ok(Self {
             reason,
@@ -464,6 +477,7 @@ impl TryFrom<StationRow> for RankedStation {
                 name: row.name,
                 stream_url: row.stream_url,
                 homepage_url: row.homepage_url,
+                favicon_url,
                 tags: row.tags,
                 language: row.language,
                 country_code: row.country_code,
@@ -585,6 +599,7 @@ mod tests {
             name: "Test Station".to_owned(),
             stream_url: "https://streams.example.com/test.mp3".to_owned(),
             homepage_url: None,
+            favicon_ready: true,
             tags: vec!["rock".to_owned()],
             language: Some("en".to_owned()),
             country_code: Some("US".to_owned()),
@@ -599,6 +614,10 @@ mod tests {
 
         assert_eq!(ranked.station.health, StationHealth::Degraded);
         assert_eq!(ranked.station.bitrate_kbps, Some(192));
+        assert_eq!(
+            ranked.station.favicon_url.as_deref(),
+            Some("/api/v1/stations/station-test/icon")
+        );
         assert_eq!(ranked.score, 0.5);
     }
 

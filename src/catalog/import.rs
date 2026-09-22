@@ -17,6 +17,8 @@ pub struct ImportedStation {
     pub name: String,
     /// Valid HTTP(S) station homepage, when supplied.
     pub homepage_url: Option<String>,
+    /// Valid HTTP(S) icon source URL, retained only for controlled server-side import.
+    pub favicon_source_url: Option<String>,
     /// Sorted, deduplicated searchable tags.
     pub tags: Vec<String>,
     /// Normalized ISO 639-style language code, when supplied.
@@ -549,6 +551,7 @@ mod tests {
             id: format!("test-{id}"),
             name: format!("Station {id}"),
             homepage_url: None,
+            favicon_source_url: None,
             tags: vec!["rock".to_owned()],
             language: Some("en".to_owned()),
             country_code: Some("US".to_owned()),

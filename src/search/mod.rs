@@ -103,6 +103,8 @@ pub struct Station {
     pub stream_url: String,
     /// Optional public home page for the station.
     pub homepage_url: Option<String>,
+    /// Server-owned prepared icon URL, present only when a ready artifact exists.
+    pub favicon_url: Option<String>,
     /// Normalized searchable station tags.
     pub tags: Vec<String>,
     /// ISO 639 language code, when known.
@@ -255,6 +257,7 @@ impl InMemoryStationRepository {
                             name: station.name.clone(),
                             stream_url: stream.stream_url.clone(),
                             homepage_url: station.homepage_url.clone(),
+                            favicon_url: None,
                             tags: station.tags.clone(),
                             language: station.language.clone(),
                             country_code: station.country_code.clone(),
@@ -826,6 +829,7 @@ fn station(id: &str, name: &str, stream_url: &str, metadata: StationMetadata<'_>
         name: name.to_owned(),
         stream_url: stream_url.to_owned(),
         homepage_url: metadata.homepage_url.map(str::to_owned),
+        favicon_url: None,
         tags: metadata.tags.iter().map(|tag| (*tag).to_owned()).collect(),
         language: metadata.language.map(str::to_owned),
         country_code: metadata.country_code.map(str::to_owned),

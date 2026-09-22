@@ -203,6 +203,7 @@ impl TryFrom<FullReleaseStation> for ImportedStation {
                 url.to_ascii_lowercase().starts_with("http://")
                     || url.to_ascii_lowercase().starts_with("https://")
             }),
+            favicon_source_url: None,
             tags,
             language: row.language,
             country_code: row.country_code,

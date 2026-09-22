@@ -26,6 +26,8 @@ async fn successful_search_returns_normalized_query_and_station_results() {
             .is_some_and(|url| url.starts_with("http"))
     );
     assert_eq!(station["health"], "unknown");
+    assert!(station.get("favicon_url").is_some());
+    assert!(station["favicon_url"].is_null());
 }
 
 #[tokio::test]

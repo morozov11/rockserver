@@ -303,6 +303,8 @@ struct RadioBrowserStationDto {
     #[serde(default)]
     homepage: String,
     #[serde(default)]
+    favicon: String,
+    #[serde(default)]
     tags: String,
     #[serde(default)]
     countrycode: String,
@@ -348,6 +350,7 @@ impl TryFrom<RadioBrowserStationDto> for ImportedStation {
             source_station_id: source_station_id.clone(),
             name,
             homepage_url: normalized_url(&dto.homepage, false),
+            favicon_source_url: normalized_url(&dto.favicon, false),
             tags: normalized_tags(&dto.tags),
             language: normalized_language(&dto.languagecodes),
             country_code: normalized_country_code(&dto.countrycode),
@@ -459,6 +462,7 @@ mod tests {
             "name": "  Test   Radio  ",
             "url_resolved": "https://stream.example.com/live#fragment",
             "homepage": "ftp://invalid.example.com",
+            "favicon": "https://icons.example.com/test.png",
             "tags": " Rock, jazz,rock,  Classic   Rock ",
             "countrycode": "us",
             "languagecodes": "EN,eng",
@@ -483,6 +487,10 @@ mod tests {
             "https://stream.example.com/live"
         );
         assert_eq!(first.homepage_url, None);
+        assert_eq!(
+            first.favicon_source_url.as_deref(),
+            Some("https://icons.example.com/test.png")
+        );
         assert_eq!(first.tags, ["classic rock", "jazz", "rock"]);
         assert_eq!(first.language.as_deref(), Some("en"));
         assert_eq!(first.country_code.as_deref(), Some("US"));

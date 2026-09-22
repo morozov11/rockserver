@@ -160,6 +160,7 @@ fn station(id: &str, name: &str, stream_url: &str, tags: &[&str]) -> Station {
         name: name.to_owned(),
         stream_url: stream_url.to_owned(),
         homepage_url: None,
+        favicon_url: None,
         tags: tags.iter().map(|tag| tag.to_string()).collect(),
         language: Some("en".to_owned()),
         country_code: Some("GB".to_owned()),
