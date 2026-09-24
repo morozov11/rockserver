@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { api, browserAuthenticationOptions, browserRegistrationOptions, serializeAuthentication, serializeRegistration, type ApiError, type BrowserAccount, type BrowserDevice, type PairingPreview } from "./api";
+import { api, browserAuthenticationOptions, browserRegistrationOptions, serializeAuthentication, serializeRegistration, type ApiError, type BrowserAccount, type BrowserDevice, type PairingPreview, type YandexHomeSensor } from "./api";
 import { AdminApp } from "./admin";
 import "./style.css";
 
@@ -172,7 +172,7 @@ function PublicApp() {
         <button className="secondary" onClick={() => setRegistrationName("Rock account")} disabled={authBusy}>Использовать «Rock account»</button><button onClick={register} disabled={authBusy}>{authBusy ? "Создаём…" : "Создать аккаунт с passkey"}</button><button className="link-button" onClick={returnFromRegistration} disabled={authBusy}>У меня уже есть аккаунт</button></section>}
     {message && <p role="alert">{message}</p>}<footer>Passkey и данные сессии не сохраняются в браузере.</footer></main>;
 
-  if (!isPairing || showCabinet) return <AccountCentre account={account} accountState={accountState} accountName={authenticatedAccountName} accountMessage={accountMessage || message} authBusy={authBusy} deviceBusy={deviceBusy} logoutBusy={logoutBusy} justConnected={justConnected} onAuthenticate={authenticate} onRegister={openRegistration} onRetry={refreshAccount} onRename={rename} onRevoke={revoke} onLogout={logout} />;
+  if (!isPairing || showCabinet) return <AccountCentre account={account} accountState={accountState} accountName={authenticatedAccountName} accountMessage={accountMessage || message} csrf={csrf} authBusy={authBusy} deviceBusy={deviceBusy} logoutBusy={logoutBusy} justConnected={justConnected} onAuthenticate={authenticate} onRegister={openRegistration} onRetry={refreshAccount} onRename={rename} onRevoke={revoke} onLogout={logout} />;
   const deviceType = deviceProductName(preview?.device_type ?? "");
   return <main><header><span>ROCK</span><h1>Подключение устройства</h1></header>
     {preview && pairingState !== "approved" && <section><p className="eyebrow">Проверьте, что это ваше устройство</p><h2>{deviceName(preview)}</h2><dl><div><dt>Проверочная фраза</dt><dd aria-label={`Проверочная фраза: ${preview.verification_phrase}`}>{preview.verification_phrase}</dd></div><div><dt>Короткий код</dt><dd aria-label={`Короткий код: ${preview.short_code}`}>{preview.short_code}</dd></div><div><dt>Действует до</dt><dd>{formatDate(preview.expires_at)}</dd></div></dl></section>}
@@ -185,7 +185,7 @@ function PublicApp() {
 }
 
 /** Renders the safe browser account and native-device cabinet. */
-function AccountCentre({ account, accountState, accountName, accountMessage, authBusy, deviceBusy, logoutBusy, justConnected, onAuthenticate, onRegister, onRetry, onRename, onRevoke, onLogout }: { account?: BrowserAccount; accountState: AccountState; accountName: string; accountMessage: string; authBusy: boolean; deviceBusy: string; logoutBusy: boolean; justConnected?: JustConnected; onAuthenticate: () => Promise<void>; onRegister: () => void; onRetry: () => Promise<void>; onRename: (device: BrowserDevice) => Promise<void>; onRevoke: (device: BrowserDevice) => Promise<void>; onLogout: () => Promise<void>; }) {
+function AccountCentre({ account, accountState, accountName, accountMessage, csrf, authBusy, deviceBusy, logoutBusy, justConnected, onAuthenticate, onRegister, onRetry, onRename, onRevoke, onLogout }: { account?: BrowserAccount; accountState: AccountState; accountName: string; accountMessage: string; csrf: string; authBusy: boolean; deviceBusy: string; logoutBusy: boolean; justConnected?: JustConnected; onAuthenticate: () => Promise<void>; onRegister: () => void; onRetry: () => Promise<void>; onRename: (device: BrowserDevice) => Promise<void>; onRevoke: (device: BrowserDevice) => Promise<void>; onLogout: () => Promise<void>; }) {
   if (accountState === "loading") return <main aria-busy="true"><header><span>ROCK</span><h1>Rock-аккаунт</h1></header><section role="status"><h2>Загружаем аккаунт…</h2><p>Проверяем вход в этом браузере.</p></section></main>;
   if (accountState === "unavailable") return <main><header><span>ROCK</span><h1>Rock-аккаунт</h1></header><section role="alert"><h2>Сервис временно недоступен</h2><p>{accountMessage || "Попробуйте обновить данные позже."}</p><button onClick={onRetry}>Повторить</button></section></main>;
   if (accountState === "expired") return <main><header><span>ROCK</span><h1>Rock-аккаунт</h1></header><section role="alert"><h2>Сессия браузера завершена</h2><p>Войдите с passkey ещё раз, чтобы увидеть устройства.</p><button onClick={onAuthenticate} disabled={authBusy}>{authBusy ? "Проверяем…" : "Войти с passkey"}</button></section></main>;
@@ -220,7 +220,36 @@ function AccountCentre({ account, accountState, accountName, accountMessage, aut
         </ul>
       )}
     </section>
+    <YandexHome account={account} csrf={csrf} onChanged={onRetry} />
     <section><h2>Как подключить новое устройство</h2><p>Откройте RockMobile или RockCast на устройстве и начните подключение из приложения. Браузер подтверждает устройство, но не является RockMobile или RockCast и не считается текущим native-устройством.</p></section>
     <section><h2>Безопасность доступа</h2><p>Passkey подтверждает вход в этот браузер. «Отключить» завершает native-сессии выбранного устройства, но не завершает вход в текущем браузере; для него используйте действие ниже.</p><p>Сервер не удаляет passkey из браузера или Google Password Manager. Старый ключ удаляйте вручную только после успешного входа новым ключом. Одинаковое имя «RockServer user» само по себе не доказывает, что запись старая.</p></section>
     <section><h2>Вход в браузере</h2><button className="secondary" onClick={onLogout} disabled={logoutBusy}>{logoutBusy ? "Выходим…" : "Выйти из браузера"}</button>{accountMessage && <p role="status">{accountMessage}</p>}</section><footer>Passkey и данные сессии не сохраняются в браузере.</footer></main>;
+}
+
+/** Lets an authenticated account link Yandex Smart Home and read its temperature properties. */
+function YandexHome({ account, csrf, onChanged }: { account: BrowserAccount; csrf: string; onChanged: () => Promise<void> }) {
+  const [sensors, setSensors] = useState<YandexHomeSensor[]>([]);
+  const [loading, setLoading] = useState(account.yandex_home_connected);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const load = async () => {
+    setLoading(true); setMessage("");
+    try { setSensors((await api.yandexHomeSensors()).sensors); }
+    catch (error) { setSensors([]); setMessage((error as ApiError)?.code === "yandex_home_reconnect_required" ? "Доступ к Яндекс Дому истёк. Подключите его снова." : "Не удалось получить данные Яндекс Дома."); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { if (account.yandex_home_connected) void load(); else { setSensors([]); setLoading(false); } }, [account.yandex_home_connected]);
+  const connect = async () => {
+    setBusy(true); setMessage("");
+    try { location.assign((await api.yandexHomeAuthorization(csrf)).authorization_url); }
+    catch { setMessage("Не удалось открыть подключение Яндекс Дома. Повторите позже."); setBusy(false); }
+  };
+  const disconnect = async () => {
+    if (!window.confirm("Отключить Яндекс Дом? RockServer перестанет видеть показания датчиков.")) return;
+    setBusy(true); setMessage("");
+    try { await api.disconnectYandexHome(csrf); await onChanged(); }
+    catch { setMessage("Не удалось отключить Яндекс Дом. Повторите позже."); }
+    finally { setBusy(false); }
+  };
+  return <section><p className="eyebrow">Умный дом</p><h2>Яндекс Алиса</h2>{account.yandex_home_connected ? <><p>Яндекс Дом подключён. RockServer запрашивает только доступные показания температуры.</p>{loading ? <p role="status">Обновляем показания…</p> : sensors.length ? <ul className="sensors" aria-label="Температурные датчики Яндекс Дома">{sensors.map(sensor => <li key={`${sensor.room_name ?? ""}-${sensor.device_name}`}><strong>{sensor.device_name}</strong><span>{sensor.room_name && `${sensor.room_name} · `}{sensor.temperature} {sensor.unit}</span>{sensor.updated_at && <small>Обновлено {formatDate(sensor.updated_at)}</small>}</li>)}</ul> : !message && <p role="status">Датчиков температуры с доступными показаниями не найдено.</p>}<button className="secondary" onClick={() => void load()} disabled={loading || busy}>{loading ? "Обновляем…" : "Обновить показания"}</button><button className="danger" onClick={() => void disconnect()} disabled={busy}>{busy ? "Отключаем…" : "Отключить Яндекс Дом"}</button></> : <><p>Подключите аккаунт Яндекса, чтобы видеть температуру с датчиков, доступных в приложении «Дом с Алисой».</p><button onClick={() => void connect()} disabled={busy || !csrf}>{busy ? "Открываем Яндекс…" : "Подключить Яндекс Дом"}</button></>}{message && <p role="alert">{message}</p>}</section>;
 }

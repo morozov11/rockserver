@@ -2,6 +2,33 @@
 
 Last updated: 2026-09-24
 
+## YANDEX-HOME-002: deployment configuration (implemented, 2026-09-24)
+
+The protected OPS-001-D release path now carries `YANDEX_HOME_CLIENTID` and
+`YANDEX_HOME_SECRET` from the ignored root `.env` into the root-only VPS
+`release.env`, and Compose passes them only to the RockServer service. Values
+remain allowlisted, absent when unset, replaced on a later deploy, and omitted
+from summaries. Verified by the deployment-script regression suite, `cargo fmt
+--check`, strict all-target/all-feature Clippy, and `cargo test` (172 library
+tests; PostgreSQL and live-provider tests remain explicitly ignored).
+
+## YANDEX-HOME-001: user-linked temperature sensors (implemented, 2026-09-24)
+
+Signed-in browser accounts can now connect Yandex Smart Home through OAuth and
+read only retrievable `devices.properties.float` temperature properties. The
+link uses a one-time, account-bound state, and the user is returned to the
+account cabinet after consent. OAuth access tokens are AES-256-GCM ciphertext
+at rest, never returned by the API or rendered in the browser; a rejected or
+invalid provider token is revoked and requires a new connection. The cabinet
+shows only device/room labels, current temperature, unit, and source update
+time. The implementation requires `YANDEX_HOME_CLIENTID` and
+`YANDEX_HOME_SECRET`, plus the exact registered callback
+`https://rockplatform.win/api/v1/browser/yandex-home/callback`.
+
+Verified: `cargo fmt --check`, strict all-target/all-feature Clippy, `cargo
+test` (172 library tests; PostgreSQL and live-provider tests remain explicitly
+ignored), `pnpm build`, and `pnpm test` (11 passed).
+
 ## RS-ICON-012: false icon-import failure reduction (implemented locally, 2026-09-24)
 
 Production sampling of the first import job (3,919 processed: 44% ready,

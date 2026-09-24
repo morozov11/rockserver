@@ -88,6 +88,7 @@ Production values находятся вне Git: например, в root-owned
 | `ROCKSERVER_API_BEARER_TOKEN` | secret | `__INJECTED_OUTSIDE_GIT__`; случайный уникальный production credential минимум 32 bytes |
 | `RUST_LOG` | non-secret | безопасный уровень без request body, credentials или personal data |
 | `YANDEX_AI_API_KEY`, `YANDEX_FOLDER_ID` | optional secret/restricted configuration | отсутствуют, пока провайдер не утверждён; оба задаются вместе |
+| `YANDEX_HOME_CLIENTID`, `YANDEX_HOME_SECRET` | optional OAuth client configuration | задаются вместе для пользовательского read-only подключения Яндекс Дома; не выводятся и не хранятся в Git |
 | `ROCKSERVER_ONNX_*`, `ORT_DYLIB_PATH` | restricted paths/settings | только локально смонтированные, проверенные runtime assets; не URL для download |
 
 The service now requires `ROCKSERVER_API_BEARER_TOKEN` and `DATABASE_URL` at startup. It does not
@@ -205,10 +206,11 @@ use that exact local tag. There is no `latest`, remote Git build/
 pull, GitHub, GHCR, external registry, or registry credential in the staging path.
 
 The launcher reads the ignored root `.env` and copies only allowlisted `YANDEX_AI_API_KEY`,
-`YANDEX_FOLDER_ID`, `YANDEX_SPEECHKIT_API_KEY`, and `YANDEX_SPEECHKIT_FOLDER_ID`; absent
+`YANDEX_FOLDER_ID`, `YANDEX_SPEECHKIT_API_KEY`, `YANDEX_SPEECHKIT_FOLDER_ID`,
+`YANDEX_HOME_CLIENTID`, and `YANDEX_HOME_SECRET`; absent
 optional values are omitted. It writes one UTF-8 env entry per line; the remote root-owned
 `/opt/rockserver/release.env` is mode `0600`. Repeated runs replace only owner-controlled settings
-and those four optional Yandex entries while preserving generated `POSTGRES_PASSWORD`,
+and those six optional Yandex entries while preserving generated `POSTGRES_PASSWORD`,
 `ROCKSERVER_API_BEARER_TOKEN`, and database settings. No secret value appears in summaries or
 release metadata. The VPS creates a custom-format backup, runs embedded migrations and then imports
 the bundled checksum-pinned complete SQLite catalog after PostgreSQL is healthy, before the service

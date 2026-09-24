@@ -13,7 +13,7 @@ pub use crate::account_cleanup::{
     CleanupAccount, CleanupActionResult, CleanupCounts, CleanupDependency, CleanupError,
     CleanupPreview,
 };
-pub use account_postgres::{AdminDeviceReadModel, PostgresAccountStore};
+pub use account_postgres::{AdminDeviceReadModel, EncryptedYandexHomeToken, PostgresAccountStore};
 pub use admin_postgres::PostgresAdminStore;
 pub use device_control_postgres::PostgresDeviceControlStore;
 pub use embedding_postgres::PostgresEmbeddingStore;

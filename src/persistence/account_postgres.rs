@@ -57,3 +57,6 @@ mod passkeys;
 mod rate_limits;
 #[path = "account_postgres/rows.rs"]
 mod rows;
+#[path = "account_postgres/yandex_home.rs"]
+mod yandex_home;
+pub use yandex_home::EncryptedYandexHomeToken;

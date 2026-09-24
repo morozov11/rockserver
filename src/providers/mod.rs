@@ -11,6 +11,8 @@ pub mod deterministic_embedding;
 pub mod onnx_e5;
 /// Radio Browser HTTP client and deterministic DTO normalization.
 pub mod radio_browser;
+/// Read-only Yandex Smart Home OAuth and sensor adapter.
+pub mod yandex_home;
 /// Yandex AI Studio adapter for structured radio-intent generation.
 pub mod yandex_llm;
 /// Local-configuration Yandex SpeechKit adapter for voice streaming.

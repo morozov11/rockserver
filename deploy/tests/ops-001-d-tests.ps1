@@ -24,17 +24,17 @@ try {
     Test-Ops001DInventoryValues $inventory | Out-Null
     Assert-Throws { Test-Ops001DInventoryValues ([ordered]@{ SshUser = 'deploy'; SshHost = 'host'; Domain = 'domain'; SshPassword = 'must-not-exist' }) | Out-Null } 'SshPassword was accepted'
 
-    @('YANDEX_AI_API_KEY=secret', 'UNRELATED_SECRET=nope', 'YANDEX_FOLDER_ID=folder', 'YANDEX_SPEECHKIT_API_KEY=speech') | Set-Content "$temp/.env"
+    @('YANDEX_AI_API_KEY=secret', 'UNRELATED_SECRET=nope', 'YANDEX_FOLDER_ID=folder', 'YANDEX_SPEECHKIT_API_KEY=speech', 'YANDEX_HOME_CLIENTID=home-client', 'YANDEX_HOME_SECRET=home-secret') | Set-Content "$temp/.env"
     $env = Get-Ops001DAllowedYandexEnvironment "$temp/.env"
-    if ($env.Keys.Count -ne 3 -or $env.Contains('UNRELATED_SECRET')) { throw 'allowed-env filter failed' }
+    if ($env.Keys.Count -ne 5 -or $env.Contains('UNRELATED_SECRET') -or -not $env.Contains('YANDEX_HOME_CLIENTID') -or -not $env.Contains('YANDEX_HOME_SECRET')) { throw 'allowed-env filter failed' }
     $safe = Format-Ops001DSafeSummary -Environment $env -Commit 'safe' -ImageId 'safe' -Readiness 'passed'
-    if ($safe -match 'secret|folder|speech|nope') { throw 'safe summary exposed a secret value' }
+    if ($safe -match 'secret|folder|speech|home-client|nope') { throw 'safe summary exposed a secret value' }
 
     $catalog = [pscustomobject]@{ Version = 'v1-test'; Count = 41; Sha256 = ('a' * 64) }
     $ownerPath = Join-Path $temp 'owner.env'
     Write-Ops001DOwnerEnvironmentFile -Path $ownerPath -Domain 'api.example.test' -Catalog $catalog -Yandex $env -OnnxEnabled $false
     $ownerLines = [IO.File]::ReadAllLines($ownerPath)
-    if ($ownerLines.Count -ne 7 -or $ownerLines[0] -ne 'ROCKSERVER_DOMAIN=api.example.test' -or $ownerLines[1] -ne 'OPS001D_CATALOG_VERSION=v1-test' -or $ownerLines[2] -ne 'OPS001D_CATALOG_COUNT=41' -or $ownerLines[3] -ne ('OPS001D_CATALOG_SHA256=' + ('a' * 64))) { throw 'owner.env entries were not serialized as distinct correct lines' }
+    if ($ownerLines.Count -ne 9 -or $ownerLines[0] -ne 'ROCKSERVER_DOMAIN=api.example.test' -or $ownerLines[1] -ne 'OPS001D_CATALOG_VERSION=v1-test' -or $ownerLines[2] -ne 'OPS001D_CATALOG_COUNT=41' -or $ownerLines[3] -ne ('OPS001D_CATALOG_SHA256=' + ('a' * 64)) -or $ownerLines -notcontains 'YANDEX_HOME_CLIENTID=home-client' -or $ownerLines -notcontains 'YANDEX_HOME_SECRET=home-secret') { throw 'owner.env entries were not serialized as distinct correct lines' }
     if (($ownerLines -join "`n") -match 'UNRELATED_SECRET|nope') { throw 'owner.env included a non-allowlisted value' }
     $ownerBytes = [IO.File]::ReadAllBytes($ownerPath)
     if ($ownerBytes -contains [byte]13) { throw 'owner.env must use Linux LF line endings for remote shell parsing' }
@@ -94,6 +94,8 @@ try {
     if ($remote -notmatch '\[\^\[:cntrl:\]\]\*\$') { throw 'owner.env control-character validation is missing' }
     if ($compose -notmatch 'import_full_catalog.*backfill_embeddings' -or $compose -notmatch 'ROCKSERVER_LOG_DIR: /var/log/rockserver' -or $compose -notmatch 'ROCKSERVER_SEMANTIC_PROVIDER: onnx-e5-local' -or $compose -notmatch 'ORT_DYLIB_PATH') { throw 'first-deploy ONNX backfill or seed logging is not wired' }
     if ($compose -notmatch 'ROCKSERVER_LOG_RETENTION_DAYS: \$\{ROCKSERVER_LOG_RETENTION_DAYS:-14\}') { throw 'RockServer log retention is not configured for production' }
+    $ownerValidation = (($remote -split "`n" | Where-Object { $_ -match 'grep -Ev' }) -join "`n")
+    if ($compose -notmatch 'YANDEX_HOME_CLIENTID: \$\{YANDEX_HOME_CLIENTID:-\}' -or $compose -notmatch 'YANDEX_HOME_SECRET: \$\{YANDEX_HOME_SECRET:-\}' -or $ownerValidation -notmatch 'YANDEX_HOME_CLIENTID' -or $ownerValidation -notmatch 'YANDEX_HOME_SECRET') { throw 'Yandex Home OAuth environment is not deployed safely' }
     if ($compose -notmatch 'ROCKSERVER_ONNX_INTRA_THREADS: \$\{ROCKSERVER_ONNX_INTRA_THREADS:-2\}') { throw 'ONNX CPU thread default must be a positive integer' }
     if ($productionCompose -notmatch '/home/rockserver/logs:/var/log/rockserver' -or $remote -notmatch 'host_log_dir="/home/rockserver/logs"' -or $remote -notmatch 'ensure_host_log_dir') { throw 'persistent host log directory is not wired for production' }
     if ($compose -notmatch 'ROCKSERVER_STATION_ICON_DIR: /var/lib/rockserver/station-icons' -or $productionCompose -notmatch '/home/rockserver/station-icons:/var/lib/rockserver/station-icons' -or $remote -notmatch 'host_station_icon_dir="/home/rockserver/station-icons"' -or $remote -notmatch 'ensure_host_station_icon_dir') { throw 'persistent station-icon directory is not wired for production' }

@@ -375,6 +375,8 @@ pub fn is_safe_audit_event(event_type: &str) -> bool {
             | "operator_account_deactivated"
             | "operator_device_revoked"
             | "operator_passkey_revoked"
+            | "yandex_home_connected"
+            | "yandex_home_disconnected"
     )
 }
 

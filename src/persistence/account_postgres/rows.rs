@@ -59,6 +59,12 @@ pub(super) async fn revoke_account_dependencies(
     .bind(user_id)
     .execute(&mut **transaction)
     .await?;
+    sqlx::query(
+        "UPDATE yandex_home_connections SET revoked_at = now(), updated_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(user_id)
+    .execute(&mut **transaction)
+    .await?;
     let account_identities = sqlx::query(
         "UPDATE account_identities SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
     )

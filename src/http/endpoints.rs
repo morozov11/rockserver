@@ -13,6 +13,7 @@ use tracing::Level;
 use crate::{
     device_control_command::CommandRouter,
     persistence::{PostgresAccountStore, PostgresAdminStore, PostgresDeviceControlStore},
+    providers::yandex_home::YandexHomeClient,
     search::{
         InMemoryStationRepository, SearchService, StationRepository, UnavailableStationRepository,
     },
@@ -56,6 +57,8 @@ mod station_icons;
 mod transport;
 #[path = "voice.rs"]
 mod voice;
+#[path = "yandex_home.rs"]
+mod yandex_home;
 
 pub use health::{HealthResponse, HealthStatus};
 use state::{AppState, PublicLimitState};
@@ -204,6 +207,7 @@ pub fn router_with_speech_recognizers_and_bearer_token(
         control_store: None,
         control_session_resolver: None,
         icon_import: None,
+        yandex_home: None,
         control_timing: Default::default(),
     })
 }
@@ -236,6 +240,7 @@ pub fn router_with_search_service_and_native_session_resolver(
         control_store: None,
         control_session_resolver: Some(session_resolver),
         icon_import: None,
+        yandex_home: None,
         control_timing: Default::default(),
     })
 }
@@ -290,6 +295,7 @@ pub fn router_with_speech_recognizers_bearer_account_store_and_proxy(
         control_store: Some(control_store),
         control_session_resolver: Some(control_session_resolver),
         icon_import,
+        yandex_home: None,
         control_timing: Default::default(),
     })
 }
@@ -315,10 +321,12 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_and_proxy(
         account_store,
         admin_store,
         trusted_proxy_token,
+        None,
     )
 }
 
 /// Creates the production router with an explicit typed voice-command interpreter.
+#[allow(clippy::too_many_arguments)]
 pub fn router_with_speech_recognizers_bearer_account_admin_store_proxy_and_voice_interpreter(
     search_service: SearchService,
     voice_services: (SpeechRecognizers, Arc<dyn CommandInterpreter>),
@@ -327,6 +335,7 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_proxy_and_voice
     account_store: PostgresAccountStore,
     admin_store: PostgresAdminStore,
     trusted_proxy_token: impl Into<String>,
+    yandex_home: Option<YandexHomeClient>,
 ) -> Router {
     let (speech_recognizers, voice_command_interpreter) = voice_services;
     let control_session_resolver: Arc<dyn crate::auth::NativeSessionResolver> =
@@ -352,6 +361,7 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_proxy_and_voice
         control_store: Some(control_store),
         control_session_resolver: Some(control_session_resolver),
         icon_import,
+        yandex_home: yandex_home.map(Arc::new),
         control_timing: Default::default(),
     })
 }
@@ -387,6 +397,7 @@ pub fn router_with_device_voice_services(
         control_store: Some(control_store),
         control_session_resolver: Some(session_resolver),
         icon_import: None,
+        yandex_home: None,
         control_timing: Default::default(),
     })
 }
@@ -509,6 +520,22 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/browser/account",
             axum::routing::get(account::browser_account),
+        )
+        .route(
+            "/api/v1/browser/yandex-home/authorize",
+            axum::routing::post(yandex_home::begin_authorization),
+        )
+        .route(
+            "/api/v1/browser/yandex-home/callback",
+            axum::routing::get(yandex_home::authorization_callback),
+        )
+        .route(
+            "/api/v1/browser/yandex-home/sensors",
+            axum::routing::get(yandex_home::sensors),
+        )
+        .route(
+            "/api/v1/browser/yandex-home",
+            axum::routing::delete(yandex_home::disconnect),
         )
         .route(
             "/api/v1/auth/browser-logout",
@@ -673,6 +700,7 @@ mod tests {
             control_store: None,
             control_session_resolver: None,
             icon_import: None,
+            yandex_home: None,
             control_timing: Default::default(),
         });
         let denied = app
@@ -777,6 +805,7 @@ mod tests {
             control_store: None,
             control_session_resolver: None,
             icon_import: None,
+            yandex_home: None,
             control_timing: Default::default(),
         });
         let refresh = Request::post("/api/v1/admin/auth/refresh")
@@ -865,6 +894,7 @@ mod tests {
             control_store: None,
             control_session_resolver: None,
             icon_import: None,
+            yandex_home: None,
             control_timing: Default::default(),
         });
         let login = |password: &str| {

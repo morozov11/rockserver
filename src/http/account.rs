@@ -25,6 +25,7 @@ struct BrowserAccountDto {
     account_display_name: String,
     device_limit: u8,
     devices: Vec<BrowserDeviceDto>,
+    yandex_home_connected: bool,
 }
 
 #[derive(Serialize)]
@@ -150,8 +151,11 @@ pub(super) async fn browser_account(State(state): State<AppState>, headers: Head
             );
         }
     };
-    match store.list_browser_devices(user_id).await {
-        Ok(devices) => {
+    match (
+        store.list_browser_devices(user_id).await,
+        store.has_yandex_home_connection(user_id).await,
+    ) {
+        (Ok(devices), Ok(yandex_home_connected)) => {
             let mut response = with_request_id(
                 Json(BrowserAccountDto {
                     account_display_name,
@@ -167,6 +171,7 @@ pub(super) async fn browser_account(State(state): State<AppState>, headers: Head
                             session_status: device.session_status,
                         })
                         .collect(),
+                    yandex_home_connected,
                 })
                 .into_response(),
                 &request_id,
@@ -176,7 +181,7 @@ pub(super) async fn browser_account(State(state): State<AppState>, headers: Head
                 .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             response
         }
-        Err(_) => error_response(
+        (Err(_), _) | (_, Err(_)) => error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "auth_unavailable",
             "Account service is unavailable.",
@@ -187,7 +192,7 @@ pub(super) async fn browser_account(State(state): State<AppState>, headers: Head
 }
 
 /// Validates a browser state-changing request and derives its account owner from cookie and CSRF proofs.
-async fn browser_mutation_owner(
+pub(super) async fn browser_mutation_owner(
     state: &AppState,
     headers: &HeaderMap,
     request_id: &str,

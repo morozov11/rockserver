@@ -7,6 +7,7 @@ use rockserver::{
         DATABASE_URL_ENV, PostgresAccountStore, PostgresAdminStore, repository_from_env,
     },
     providers::embedding_provider_from_env,
+    providers::yandex_home::YandexHomeClient,
     providers::yandex_llm::YandexLlmProvider,
     providers::yandex_speechkit::YandexSpeechKitRecognizer,
     providers::yandex_speechkit_streaming::YandexSpeechKitStreamingRecognizer,
@@ -83,6 +84,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let streaming_speech_recognizer = YandexSpeechKitStreamingRecognizer::optional_from_env()?
         .map(|provider| Arc::new(provider) as Arc<dyn rockserver::voice::StreamingSpeechRecognizer>)
         .unwrap_or(unavailable);
+    let yandex_home = YandexHomeClient::optional_from_env()?;
     serve(
         listener,
         rockserver::http::router_with_speech_recognizers_bearer_account_admin_store_proxy_and_voice_interpreter(
@@ -99,6 +101,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             account_store,
             admin_store,
             trusted_proxy_token,
+            yandex_home,
         ),
         shutdown_signal(),
     )

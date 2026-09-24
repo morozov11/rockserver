@@ -354,6 +354,76 @@ paths:
               schema: { $ref: "#/components/schemas/BrowserAccount" }
         "401": { description: Browser session cookie is absent, expired, or invalid. }
         "403": { description: Request did not arrive through the trusted first-party proxy. }
+  /api/v1/browser/yandex-home/authorize:
+    post:
+      operationId: beginYandexHomeAuthorization
+      summary: Create a one-time Yandex OAuth authorization URL for the signed-in browser account
+      security:
+        - RockserverBrowserCookie: []
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "200":
+          description: A provider authorization URL. It must be opened immediately and never persisted by the browser.
+          headers:
+            Cache-Control: { schema: { type: string, example: no-store } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/YandexHomeAuthorization" }
+        "401": { description: Browser session is absent or expired. }
+        "403": { description: Trusted proxy, origin, or CSRF proof is missing. }
+        "503": { description: Yandex integration or account persistence is unavailable. }
+  /api/v1/browser/yandex-home/callback:
+    get:
+      operationId: completeYandexHomeAuthorization
+      summary: Consume a one-time OAuth state, store the encrypted Yandex token, and redirect to the account cabinet
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema: { type: string, maxLength: 2048 }
+        - name: state
+          in: query
+          required: false
+          schema: { type: string, maxLength: 128 }
+      responses:
+        "302": { description: Redirect to the user account cabinet after success or failure. }
+  /api/v1/browser/yandex-home/sensors:
+    get:
+      operationId: getYandexHomeTemperatureSensors
+      summary: Read current retrievable temperature properties from the signed-in account's linked Yandex home
+      security:
+        - RockserverBrowserCookie: []
+      responses:
+        "200":
+          description: Safe temperature readings; OAuth tokens and provider identifiers are never returned.
+          headers:
+            Cache-Control: { schema: { type: string, example: no-store } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/YandexHomeSensors" }
+        "401": { description: Browser session is absent or expired. }
+        "404": { description: Yandex Smart Home is not connected. }
+        "409": { description: Stored authorization must be reconnected. }
+        "502": { description: Yandex Smart Home is temporarily unavailable. }
+  /api/v1/browser/yandex-home:
+    delete:
+      operationId: disconnectYandexHome
+      summary: Revoke the signed-in account's stored Yandex Smart Home authorization
+      security:
+        - RockserverBrowserCookie: []
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "204": { description: Stored Yandex authorization was revoked if present. }
+        "401": { description: Browser session is absent or expired. }
+        "403": { description: Trusted proxy, origin, or CSRF proof is missing. }
   /api/v1/auth/browser-logout:
     post:
       operationId: logoutBrowserSession
@@ -1335,7 +1405,7 @@ components:
     BrowserAccount:
       type: object
       additionalProperties: false
-      required: [account_display_name, device_limit, devices]
+      required: [account_display_name, device_limit, devices, yandex_home_connected]
       properties:
         account_display_name: { type: string, minLength: 1, maxLength: 128 }
         device_limit: { type: integer, const: 50 }
@@ -1343,6 +1413,32 @@ components:
           type: array
           maxItems: 50
           items: { $ref: "#/components/schemas/BrowserDevice" }
+        yandex_home_connected: { type: boolean }
+    YandexHomeAuthorization:
+      type: object
+      additionalProperties: false
+      required: [authorization_url]
+      properties:
+        authorization_url: { type: string, format: uri, writeOnly: true }
+    YandexHomeSensors:
+      type: object
+      additionalProperties: false
+      required: [sensors]
+      properties:
+        sensors:
+          type: array
+          maxItems: 301
+          items: { $ref: "#/components/schemas/YandexHomeSensor" }
+    YandexHomeSensor:
+      type: object
+      additionalProperties: false
+      required: [device_name, temperature, unit]
+      properties:
+        device_name: { type: string, minLength: 1, maxLength: 256 }
+        room_name: { type: [string, "null"], minLength: 1, maxLength: 256 }
+        temperature: { type: number }
+        unit: { type: string, enum: ["°C", K] }
+        updated_at: { type: [string, "null"], format: date-time }
     BrowserDevice:
       type: object
       additionalProperties: false

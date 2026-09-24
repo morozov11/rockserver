@@ -1,5 +1,39 @@
 # Task log
 
+## YANDEX-HOME-002 — 2026-09-24 — deploy Yandex Home OAuth configuration
+
+- Goal: ensure the newly configured Yandex Home OAuth client reaches the
+  production container through the standard protected release path.
+- Result: OPS-001-D allowlists only `YANDEX_HOME_CLIENTID` and
+  `YANDEX_HOME_SECRET` in addition to its existing Yandex configuration, writes
+  them into root-only `release.env`, and passes them only to RockServer.
+  Subsequent deploys replace either value or remove it when absent; no value is
+  written to Git or the deploy summary.
+- Checks: `deploy/tests/ops-001-d-tests.ps1`; `cargo fmt --check`; `cargo
+  clippy --all-targets --all-features -- -D warnings`; `cargo test` (172
+  library tests; 10 PostgreSQL and 5 live provider tests ignored by explicit
+  gates).
+- Status: **complete.**
+
+## YANDEX-HOME-001 — 2026-09-24 — user-linked Yandex Smart Home temperatures
+
+- Goal: let a signed-in Rock account link its Yandex Smart Home and view
+  temperature sensors exposed through the platform.
+- Scope: read-only `iot:view` OAuth flow, account-bound state persistence,
+  encrypted reusable token storage, safe browser API, temperature extraction,
+  user-cabinet controls, OpenAPI, and configuration documentation. No device
+  control or `iot:control` capability was added.
+- Result: the browser begins OAuth through a CSRF-protected endpoint; the
+  callback consumes its state once and persists AES-256-GCM ciphertext only.
+  The sensor endpoint returns readable float-temperature properties and no
+  provider identifiers or tokens. A rejected token is revoked, and users can
+  disconnect the integration from their cabinet.
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features --
+  -D warnings`; `cargo test` (172 library tests; 10 PostgreSQL and 5 live
+  provider tests ignored by their explicit gates); `pnpm build`; `pnpm test`
+  (11 passed).
+- Status: **complete.**
+
 ## 2026-09-24 — RS-ICON-012: reduce false icon-import failures
 
 - Goal: cut the false error rate of the administrator-started icon import
