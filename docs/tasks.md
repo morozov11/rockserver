@@ -1,5 +1,13 @@
 # Task log
 
+## YANDEX-HOME-004 — 2026-09-24 — fix cross-site OAuth callback cookie drop and frontend feedback
+
+- Goal: resolve OAuth redirect failure returning `/?yandex_home=failed` when linking Yandex Smart Home, and display meaningful error/success feedback in the web cabinet.
+- Scope: update session cookie `SameSite` policy in `src/http/auth.rs`, relax cookie requirement in `src/http/yandex_home.rs`, add diagnostic logs, parse `yandex_home` query parameter and display alert in `web/src/app.tsx`.
+- Result: `rockserver_browser` cookie is now issued with `SameSite=Lax`, allowing it to accompany top-level OAuth GET callbacks from `oauth.yandex.ru`. The callback handler verifies the single-use unguessable OAuth state from PostgreSQL and validates cookie ownership if present without failing if a browser blocks cross-site cookies. The frontend shows a status message and cleans up the URL.
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`; `cargo test`; `pnpm typecheck`; `vite build`; `web/tests/ux-regression.mjs` (11 passed).
+- Status: **implemented (ready for deployment).**
+
 ## YANDEX-HOME-003 — 2026-09-24 — fix SQL syntax in yandex_home PostgreSQL queries
 
 - Goal: eliminate the 503 `auth_unavailable` error returned by `GET /api/v1/browser/account` caused by SQL syntax errors in the Yandex Home persistence module.

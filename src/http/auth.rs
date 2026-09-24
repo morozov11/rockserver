@@ -318,7 +318,7 @@ pub(super) async fn registration_verify(
             .into_response(),
         &request_id,
     );
-    response.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&format!("rockserver_browser={session_token}; Path=/; Max-Age=1800; HttpOnly; Secure; SameSite=Strict")).expect("generated cookie is valid"));
+    response.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&format!("rockserver_browser={session_token}; Path=/; Max-Age=1800; HttpOnly; Secure; SameSite=Lax")).expect("generated cookie is valid"));
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -566,7 +566,7 @@ pub(super) async fn authentication_verify(
         Json(json!({"csrf_token": csrf_token})).into_response(),
         &request_id,
     );
-    response.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&format!("rockserver_browser={session_token}; Path=/; Max-Age=1800; HttpOnly; Secure; SameSite=Strict")).expect("generated cookie is valid"));
+    response.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&format!("rockserver_browser={session_token}; Path=/; Max-Age=1800; HttpOnly; Secure; SameSite=Lax")).expect("generated cookie is valid"));
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));

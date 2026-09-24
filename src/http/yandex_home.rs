@@ -94,12 +94,12 @@ pub(super) async fn authorization_callback(
     Query(query): Query<CallbackQuery>,
 ) -> Response {
     if !trusted_proxy_header_matches(&headers, state.trusted_proxy_token.as_deref()) {
+        tracing::warn!("Yandex OAuth callback rejected: untrusted proxy header");
         return Redirect::to("/?yandex_home=failed").into_response();
     }
-    let (Some(client), Some(store), Some(cookie), Some(oauth_state), Some(code)) = (
+    let (Some(client), Some(store), Some(oauth_state), Some(code)) = (
         state.yandex_home.as_ref(),
         state.account_store.as_ref(),
-        cookie_value(&headers, "rockserver_browser"),
         query
             .state
             .filter(|value| !value.is_empty() && value.len() <= 128),
@@ -107,22 +107,36 @@ pub(super) async fn authorization_callback(
             .code
             .filter(|value| !value.is_empty() && value.len() <= 2048),
     ) else {
+        tracing::warn!("Yandex OAuth callback rejected: missing client, store, state, or code");
         return Redirect::to("/?yandex_home=failed").into_response();
-    };
-    let browser_user = match store.browser_session_user(&token_hash(cookie)).await {
-        Ok(Some(user_id)) => user_id,
-        _ => return Redirect::to("/?yandex_home=failed").into_response(),
     };
     let owner = match store
         .consume_yandex_home_oauth_state(&token_hash(&oauth_state))
         .await
     {
-        Ok(Some(user_id)) if user_id == browser_user => user_id,
-        _ => return Redirect::to("/?yandex_home=failed").into_response(),
+        Ok(Some(user_id)) => user_id,
+        Ok(None) => {
+            tracing::warn!("Yandex OAuth callback rejected: OAuth state expired or not found");
+            return Redirect::to("/?yandex_home=failed").into_response();
+        }
+        Err(err) => {
+            tracing::error!(error = %err, "Yandex OAuth callback failed to consume OAuth state");
+            return Redirect::to("/?yandex_home=failed").into_response();
+        }
     };
+    if let Some(cookie) = cookie_value(&headers, "rockserver_browser")
+        && let Ok(Some(browser_user)) = store.browser_session_user(&token_hash(cookie)).await
+        && browser_user != owner
+    {
+        tracing::warn!(%owner, %browser_user, "Yandex OAuth callback rejected: session cookie belongs to a different user");
+        return Redirect::to("/?yandex_home=failed").into_response();
+    }
     let (ciphertext, nonce) = match client.exchange_code(&code).await {
         Ok(token) => token,
-        Err(_) => return Redirect::to("/?yandex_home=failed").into_response(),
+        Err(err) => {
+            tracing::error!(error = %err, "Yandex OAuth code exchange failed");
+            return Redirect::to("/?yandex_home=failed").into_response();
+        }
     };
     match store
         .save_yandex_home_connection(
@@ -134,8 +148,18 @@ pub(super) async fn authorization_callback(
         )
         .await
     {
-        Ok(true) => Redirect::to("/?yandex_home=connected").into_response(),
-        _ => Redirect::to("/?yandex_home=failed").into_response(),
+        Ok(true) => {
+            tracing::info!(%owner, "Yandex Smart Home connected successfully");
+            Redirect::to("/?yandex_home=connected").into_response()
+        }
+        Ok(false) => {
+            tracing::warn!(%owner, "Yandex Smart Home connection could not be saved");
+            Redirect::to("/?yandex_home=failed").into_response()
+        }
+        Err(err) => {
+            tracing::error!(error = %err, %owner, "Failed to persist Yandex Smart Home connection");
+            Redirect::to("/?yandex_home=failed").into_response()
+        }
     }
 }
 
