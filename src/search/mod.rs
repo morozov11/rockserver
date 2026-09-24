@@ -680,12 +680,18 @@ impl SearchService {
         log_input: bool,
     ) -> Result<SearchOutcome, RepositoryError> {
         let parser_started_at = Instant::now();
-        let intent = match self
-            .query_parser
-            .parse(&input)
-            .await
-            .and_then(validate_intent)
-        {
+        // Query parsing (which may call external LLM) and local text embedding generation
+        // are independent: the embedding only needs the raw query text. Run them concurrently
+        // via `tokio::join!` so local embedding generation finishes during the network round-trip.
+        let (parse_result, (embedding, embedding_elapsed_ms)) =
+            tokio::join!(self.query_parser.parse(&input), async {
+                let start = Instant::now();
+                let embedding = self.query_embedding(&input.query).await;
+                (embedding, start.elapsed().as_millis())
+            },);
+        let parser_elapsed_ms = parser_started_at.elapsed().as_millis();
+
+        let intent = match parse_result.and_then(validate_intent) {
             Ok(intent) => intent,
             Err(error) => {
                 tracing::warn!(%error, "query parser failed; using deterministic metadata fallback");
@@ -713,15 +719,13 @@ impl SearchService {
                 intent = deterministic;
             } else {
                 // Partial fallback: keep provider's hard genre tags, but use deterministic
-                // `terms` for token/sub-tokен and trigram name matching.
+                // `terms` for token/sub-token and trigram name matching.
                 intent.terms = deterministic.terms;
                 intent.raw_query = deterministic.raw_query;
                 intent.core_term_count = deterministic.core_term_count;
             }
         }
 
-        let embedding_started_at = Instant::now();
-        let embedding = self.query_embedding(&input.query).await;
         let request_terms = tokenize(&input.query);
         if intent.language.is_none()
             && !has_explicit_country_request(&request_terms)
@@ -743,7 +747,7 @@ impl SearchService {
         let query = SearchQuery::from_intent(input.query, input.locale, intent);
         if log_input {
             tracing::debug!(
-                parser_elapsed_ms = parser_started_at.elapsed().as_millis(),
+                parser_elapsed_ms,
                 original = %query.original,
                 terms = ?query.terms,
                 tags = ?query.tags,
@@ -758,7 +762,7 @@ impl SearchService {
                 &query,
                 constraints,
                 embedding.as_ref(),
-                embedding_started_at.elapsed().as_millis(),
+                embedding_elapsed_ms,
                 log_input,
             )
             .await?;

@@ -2,6 +2,15 @@
 
 Last updated: 2026-09-24
 
+## SEARCH-PERF-001: voice search timeout latency optimization (implemented, 2026-09-24)
+
+Resolved voice search timeout failures (504 `search_timeout`) in RockCast and RockMobile:
+1. `src/providers/yandex_llm.rs`: switched default LLM model from `"yandexgpt"` to `"yandexgpt-lite"` to reduce generation round-trip latency, set `DEFAULT_TIMEOUT_MS` to 4,500 ms (4.5s), and hardened environment parsing against empty string overrides.
+2. `src/search/mod.rs`: parallelized query parsing (`self.query_parser.parse`) and local text embedding (`self.query_embedding`) via `tokio::join!`, completely hiding the ~150ms ONNX embedding computation behind the external network round-trip.
+3. `src/persistence/postgres.rs`: marked `candidates` and `scored` CTEs in `SEARCH_SQL` as `MATERIALIZED`, preventing PostgreSQL 17 from re-evaluating correlated subqueries (`regexp_split_to_table`, `similarity()`, FTS matching) across candidate rows during ranking and filtering. Cuts catalog search query time from ~850–1060ms down to ~147ms (~7x speedup).
+4. `deploy/compose.yaml`, `deploy/ops-001-d.psm1`, `deploy/remote-ops-001-d.sh`: allowlisted `YANDEX_LLM_MODEL` and `YANDEX_LLM_TIMEOUT_MS` for optional operator overrides through `release.env`.
+Verification passed: `cargo fmt --check`, strict all-targets/all-features Clippy, `cargo test` (172 tests passed), and `deploy/tests/ops-001-d-tests.ps1`.
+
 ## YANDEX-HOME-005: all-property sensor extraction and multi-metric device cards (deployed, 2026-09-24)
 
 Broadened Yandex Smart Home sensor extraction from single-metric temperature filters to all devices and sensor properties with available readings:

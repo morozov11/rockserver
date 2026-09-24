@@ -22,9 +22,9 @@ pub const TIMEOUT_MS_ENV: &str = "YANDEX_LLM_TIMEOUT_MS";
 pub const DEFAULT_ENDPOINT: &str =
     "https://llm.api.cloud.yandex.net/foundationModels/v1/completion";
 /// Default model identifier used with the configured folder ID.
-pub const DEFAULT_MODEL: &str = "yandexgpt";
+pub const DEFAULT_MODEL: &str = "yandexgpt-lite";
 /// Default whole-request timeout for one bounded intent parse.
-pub const DEFAULT_TIMEOUT_MS: u64 = 3_000;
+pub const DEFAULT_TIMEOUT_MS: u64 = 4_500;
 
 const MIN_TIMEOUT_MS: u64 = 100;
 const MAX_TIMEOUT_MS: u64 = 10_000;
@@ -90,7 +90,9 @@ impl YandexLlmConfig {
         if !is_identifier(&folder_id) {
             return Err(YandexLlmConfigError::InvalidFolderId);
         }
-        let model = lookup(MODEL_ENV).unwrap_or_else(|| DEFAULT_MODEL.to_owned());
+        let model = lookup(MODEL_ENV)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_MODEL.to_owned());
         if !is_identifier(&model) {
             return Err(YandexLlmConfigError::InvalidModel);
         }
@@ -130,7 +132,7 @@ fn is_identifier(value: &str) -> bool {
 }
 
 fn parse_timeout(value: Option<String>) -> Result<u64, YandexLlmConfigError> {
-    let timeout = match value {
+    let timeout = match value.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
         Some(value) => value
             .parse::<u64>()
             .map_err(|_| YandexLlmConfigError::InvalidTimeout)?,
@@ -361,8 +363,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        API_KEY_ENV, DEFAULT_MODEL, FOLDER_ID_ENV, LlmProvider, LlmRequest, MODEL_ENV,
-        TIMEOUT_MS_ENV, YandexLlmConfig, YandexLlmConfigError, YandexLlmProvider,
+        API_KEY_ENV, DEFAULT_MODEL, DEFAULT_TIMEOUT_MS, FOLDER_ID_ENV, LlmProvider, LlmRequest,
+        MODEL_ENV, TIMEOUT_MS_ENV, YandexLlmConfig, YandexLlmConfigError, YandexLlmProvider,
     };
     use crate::search::{MAX_LLM_INTENT_JSON_BYTES, QueryParserInput};
 
@@ -386,6 +388,23 @@ mod tests {
         assert!(format!("{config:?}").contains("[REDACTED]"));
         assert!(!format!("{config:?}").contains("secret-key"));
         assert_eq!(config.model, DEFAULT_MODEL);
+        assert_eq!(config.timeout, Duration::from_millis(DEFAULT_TIMEOUT_MS));
+
+        let empty_override = YandexLlmConfig::from_lookup(|name| match name {
+            API_KEY_ENV => Some("secret-key".to_owned()),
+            FOLDER_ID_ENV => Some("folder_123".to_owned()),
+            MODEL_ENV => Some("   ".to_owned()),
+            TIMEOUT_MS_ENV => Some("".to_owned()),
+            _ => None,
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(empty_override.model, DEFAULT_MODEL);
+        assert_eq!(
+            empty_override.timeout,
+            Duration::from_millis(DEFAULT_TIMEOUT_MS)
+        );
+
         let error = YandexLlmConfig::from_lookup(|name| match name {
             API_KEY_ENV => Some("secret-key".to_owned()),
             FOLDER_ID_ENV => Some("folder_123".to_owned()),
@@ -420,7 +439,7 @@ mod tests {
         );
         assert_eq!(
             request.body["modelUri"],
-            "gpt://folder_123/yandexgpt/latest"
+            "gpt://folder_123/yandexgpt-lite/latest"
         );
         assert_eq!(request.body["completionOptions"]["stream"], false);
         assert_eq!(

@@ -103,7 +103,7 @@ prefiltered AS MATERIALIZED (
 candidate_ids AS (
     SELECT id FROM prefiltered
 ),
-candidates AS (
+candidates AS MATERIALIZED (
     SELECT
         s.id,
         s.name,
@@ -183,7 +183,7 @@ candidates AS (
      AND station_embedding.dimension = $10
      AND $7::text IS NOT NULL
     WHERE primary_stream.health <> 'degraded'
-), scored AS (
+), scored AS MATERIALIZED (
     SELECT
         *,
         (

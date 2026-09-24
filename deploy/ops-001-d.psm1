@@ -42,7 +42,7 @@ function Test-Ops001DInventoryValues {
 function Get-Ops001DAllowedYandexEnvironment {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
-    $allowed = @('YANDEX_AI_API_KEY', 'YANDEX_FOLDER_ID', 'YANDEX_SPEECHKIT_API_KEY', 'YANDEX_SPEECHKIT_FOLDER_ID', 'YANDEX_HOME_CLIENTID', 'YANDEX_HOME_SECRET')
+    $allowed = @('YANDEX_AI_API_KEY', 'YANDEX_FOLDER_ID', 'YANDEX_LLM_MODEL', 'YANDEX_LLM_TIMEOUT_MS', 'YANDEX_SPEECHKIT_API_KEY', 'YANDEX_SPEECHKIT_FOLDER_ID', 'YANDEX_HOME_CLIENTID', 'YANDEX_HOME_SECRET')
     $result = [ordered]@{}
     if (-not (Test-Path -LiteralPath $Path)) { return $result }
     foreach ($line in Get-Content -LiteralPath $Path -ErrorAction Stop) {
