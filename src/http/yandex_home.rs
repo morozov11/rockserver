@@ -28,7 +28,32 @@ struct AuthorizationUrlDto {
 
 #[derive(Serialize)]
 struct SensorsDto {
+    devices: Vec<DeviceDto>,
     sensors: Vec<SensorDto>,
+}
+
+#[derive(Serialize)]
+struct DeviceDto {
+    id: String,
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    room_name: Option<String>,
+    properties: Vec<PropertyDto>,
+}
+
+#[derive(Serialize)]
+struct PropertyDto {
+    property_type: String,
+    instance: String,
+    name: String,
+    value: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unit: Option<String>,
+    formatted_value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated_at: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -36,8 +61,14 @@ struct SensorDto {
     device_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     room_name: Option<String>,
-    temperature: f64,
-    unit: &'static str,
+    property: String,
+    name: String,
+    value: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unit: Option<String>,
+    formatted_value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     updated_at: Option<String>,
 }
@@ -217,25 +248,58 @@ pub(super) async fn sensors(State(state): State<AppState>, headers: HeaderMap) -
         Err(_) => return auth_unavailable(&request_id),
     };
     match client
-        .temperature_sensors(&connection.ciphertext, &connection.nonce)
+        .home_devices(&connection.ciphertext, &connection.nonce)
         .await
     {
-        Ok(sensors) => no_store(with_request_id(
-            Json(SensorsDto {
-                sensors: sensors
-                    .into_iter()
-                    .map(|sensor| SensorDto {
-                        device_name: sensor.device_name,
-                        room_name: sensor.room_name,
-                        temperature: sensor.temperature,
-                        unit: sensor.unit,
-                        updated_at: sensor.updated_at,
-                    })
-                    .collect(),
-            })
-            .into_response(),
-            &request_id,
-        )),
+        Ok(devices) => {
+            let mut flat_sensors = Vec::new();
+            let mut devices_dto = Vec::new();
+            for device in devices {
+                let mut prop_dtos = Vec::new();
+                for prop in device.properties {
+                    let temp = if prop.instance == "temperature" {
+                        prop.value.as_f64()
+                    } else {
+                        None
+                    };
+                    flat_sensors.push(SensorDto {
+                        device_name: device.name.clone(),
+                        room_name: device.room_name.clone(),
+                        property: prop.instance.clone(),
+                        name: prop.name.clone(),
+                        value: prop.value.clone(),
+                        unit: prop.unit.clone(),
+                        formatted_value: prop.formatted_value.clone(),
+                        temperature: temp,
+                        updated_at: prop.updated_at.clone(),
+                    });
+                    prop_dtos.push(PropertyDto {
+                        property_type: prop.property_type,
+                        instance: prop.instance,
+                        name: prop.name,
+                        value: prop.value,
+                        unit: prop.unit,
+                        formatted_value: prop.formatted_value,
+                        updated_at: prop.updated_at,
+                    });
+                }
+                devices_dto.push(DeviceDto {
+                    id: device.id,
+                    name: device.name,
+                    device_type: device.device_type,
+                    room_name: device.room_name,
+                    properties: prop_dtos,
+                });
+            }
+            no_store(with_request_id(
+                Json(SensorsDto {
+                    devices: devices_dto,
+                    sensors: flat_sensors,
+                })
+                .into_response(),
+                &request_id,
+            ))
+        }
         Err(YandexHomeError::AuthorizationRejected | YandexHomeError::StoredTokenInvalid) => {
             let _ = store.revoke_yandex_home_connection(user_id).await;
             error_response(

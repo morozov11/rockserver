@@ -5,7 +5,10 @@ export type RegistrationOptions = { challenge_id: string; options: Omit<PublicKe
 export type AuthenticationOptions = { challenge_id: string; options: Omit<PublicKeyCredentialRequestOptions, "challenge" | "allowCredentials"> & { challenge: string; allowCredentials?: Array<PublicKeyCredentialDescriptor & { id: string }>; } };
 export type BrowserDevice = { device_id: string; device_display_name: string; device_type: string; connected_at: string; last_seen_at?: string; session_status: "active" | "inactive" };
 export type BrowserAccount = { account_display_name: string; device_limit: number; devices: BrowserDevice[]; yandex_home_connected: boolean };
-export type YandexHomeSensor = { device_name: string; room_name?: string; temperature: number; unit: "°C" | "K"; updated_at?: string };
+export type YandexHomeProperty = { property_type: string; instance: string; name: string; value: unknown; unit?: string; formatted_value: string; updated_at?: string };
+export type YandexHomeDevice = { id: string; name: string; device_type?: string; room_name?: string; properties: YandexHomeProperty[] };
+export type YandexHomeSensor = { device_name: string; room_name?: string; property: string; name: string; value: unknown; unit?: string; formatted_value: string; temperature?: number; updated_at?: string };
+export type YandexHomeSensorsResponse = { devices: YandexHomeDevice[]; sensors: YandexHomeSensor[] };
 export type AdminPage<T> = { items: T[]; limit: number; offset: number; has_more: boolean };
 export type AdminDevice = { product: "RockCast" | "RockMobile"; device_type: string; display_name: string; status: string; created_at: string; last_seen_at?: string };
 export type AdminAuditEntry = { occurred_at: string; action: string; outcome: string };
@@ -28,7 +31,7 @@ export const api = {
   browserSession() { return request<{ account_display_name: string; csrf_token: string }>("/api/v1/auth/browser-session", { method: "POST", body: "{}" }); },
   browserAccount() { return request<BrowserAccount>("/api/v1/browser/account"); },
   yandexHomeAuthorization(csrfToken: string) { return request<{ authorization_url: string }>("/api/v1/browser/yandex-home/authorize", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: "{}" }); },
-  yandexHomeSensors() { return request<{ sensors: YandexHomeSensor[] }>("/api/v1/browser/yandex-home/sensors"); },
+  yandexHomeSensors() { return request<YandexHomeSensorsResponse>("/api/v1/browser/yandex-home/sensors"); },
   disconnectYandexHome(csrfToken: string) { return request<void>("/api/v1/browser/yandex-home", { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } }); },
   renameDevice(deviceId: string, device_display_name: string, csrfToken: string) { return request<void>(`/api/v1/browser/devices/${encodeURIComponent(deviceId)}`, { method: "PATCH", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ device_display_name }) }); },
   revokeDevice(deviceId: string, csrfToken: string) { return request<void>(`/api/v1/browser/devices/${encodeURIComponent(deviceId)}`, { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } }); },

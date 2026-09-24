@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { api, browserAuthenticationOptions, browserRegistrationOptions, serializeAuthentication, serializeRegistration, type ApiError, type BrowserAccount, type BrowserDevice, type PairingPreview, type YandexHomeSensor } from "./api";
+import { api, browserAuthenticationOptions, browserRegistrationOptions, serializeAuthentication, serializeRegistration, type ApiError, type BrowserAccount, type BrowserDevice, type PairingPreview, type YandexHomeDevice } from "./api";
 import { AdminApp } from "./admin";
 import "./style.css";
 
@@ -232,9 +232,9 @@ function AccountCentre({ account, accountState, accountName, accountMessage, csr
     <section><h2>Вход в браузере</h2><button className="secondary" onClick={onLogout} disabled={logoutBusy}>{logoutBusy ? "Выходим…" : "Выйти из браузера"}</button>{accountMessage && <p role="status">{accountMessage}</p>}</section><footer>Passkey и данные сессии не сохраняются в браузере.</footer></main>;
 }
 
-/** Lets an authenticated account link Yandex Smart Home and read its temperature properties. */
+/** Lets an authenticated account link Yandex Smart Home and read its sensor properties. */
 function YandexHome({ account, csrf, onChanged, initialStatus }: { account: BrowserAccount; csrf: string; onChanged: () => Promise<void>; initialStatus?: string }) {
-  const [sensors, setSensors] = useState<YandexHomeSensor[]>([]);
+  const [devices, setDevices] = useState<YandexHomeDevice[]>([]);
   const [loading, setLoading] = useState(account.yandex_home_connected);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(() => {
@@ -244,11 +244,17 @@ function YandexHome({ account, csrf, onChanged, initialStatus }: { account: Brow
   });
   const load = async () => {
     setLoading(true); setMessage("");
-    try { setSensors((await api.yandexHomeSensors()).sensors); }
-    catch (error) { setSensors([]); setMessage((error as ApiError)?.code === "yandex_home_reconnect_required" ? "Доступ к Яндекс Дому истёк. Подключите его снова." : "Не удалось получить данные Яндекс Дома."); }
-    finally { setLoading(false); }
+    try {
+      const res = await api.yandexHomeSensors();
+      setDevices(res.devices ?? []);
+    } catch (error) {
+      setDevices([]);
+      setMessage((error as ApiError)?.code === "yandex_home_reconnect_required" ? "Доступ к Яндекс Дому истёк. Подключите его снова." : "Не удалось получить данные Яндекс Дома.");
+    } finally {
+      setLoading(false);
+    }
   };
-  useEffect(() => { if (account.yandex_home_connected) void load(); else { setSensors([]); setLoading(false); } }, [account.yandex_home_connected]);
+  useEffect(() => { if (account.yandex_home_connected) void load(); else { setDevices([]); setLoading(false); } }, [account.yandex_home_connected]);
   const connect = async () => {
     setBusy(true); setMessage("");
     try { location.assign((await api.yandexHomeAuthorization(csrf)).authorization_url); }
@@ -261,5 +267,22 @@ function YandexHome({ account, csrf, onChanged, initialStatus }: { account: Brow
     catch { setMessage("Не удалось отключить Яндекс Дом. Повторите позже."); }
     finally { setBusy(false); }
   };
-  return <section><p className="eyebrow">Умный дом</p><h2>Яндекс Алиса</h2>{account.yandex_home_connected ? <><p>Яндекс Дом подключён. RockServer запрашивает только доступные показания температуры.</p>{loading ? <p role="status">Обновляем показания…</p> : sensors.length ? <ul className="sensors" aria-label="Температурные датчики Яндекс Дома">{sensors.map(sensor => <li key={`${sensor.room_name ?? ""}-${sensor.device_name}`}><strong>{sensor.device_name}</strong><span>{sensor.room_name && `${sensor.room_name} · `}{sensor.temperature} {sensor.unit}</span>{sensor.updated_at && <small>Обновлено {formatDate(sensor.updated_at)}</small>}</li>)}</ul> : !message && <p role="status">Датчиков температуры с доступными показаниями не найдено.</p>}<button className="secondary" onClick={() => void load()} disabled={loading || busy}>{loading ? "Обновляем…" : "Обновить показания"}</button><button className="danger" onClick={() => void disconnect()} disabled={busy}>{busy ? "Отключаем…" : "Отключить Яндекс Дом"}</button></> : <><p>Подключите аккаунт Яндекса, чтобы видеть температуру с датчиков, доступных в приложении «Дом с Алисой».</p><button onClick={() => void connect()} disabled={busy || !csrf}>{busy ? "Открываем Яндекс…" : "Подключить Яндекс Дом"}</button></>}{message && <p role="alert">{message}</p>}</section>;
+  return <section><p className="eyebrow">Умный дом</p><h2>Яндекс Алиса</h2>{account.yandex_home_connected ? <><p>Яндекс Дом подключён. Показания датчиков и устройств:</p>{loading ? <p role="status">Обновляем показания…</p> : devices.length ? <ul className="sensors" aria-label="Датчики и устройства Яндекс Дома">{devices.map(device => {
+    const latestUpdate = device.properties.map(p => p.updated_at).filter((t): t is string => Boolean(t)).sort().reverse()[0];
+    return <li key={device.id}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "0.5rem" }}>
+        <strong>{device.name}</strong>
+        {device.room_name && <small style={{ color: "#8ca0b0" }}>{device.room_name}</small>}
+      </div>
+      <div style={{ display: "grid", gap: "0.25rem", margin: "0.35rem 0" }}>
+        {device.properties.map(prop => (
+          <div key={prop.instance} style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem" }}>
+            <span style={{ fontWeight: "normal", color: "#d0dce5", fontSize: "0.9em" }}>{prop.name}:</span>
+            <span style={{ color: "#b8f2ce", fontWeight: 700 }}>{prop.formatted_value}</span>
+          </div>
+        ))}
+      </div>
+      {latestUpdate && <small>Обновлено {formatDate(latestUpdate)}</small>}
+    </li>;
+  })}</ul> : !message && <p role="status">Датчиков с доступными показаниями не найдено.</p>}<button className="secondary" onClick={() => void load()} disabled={loading || busy}>{loading ? "Обновляем…" : "Обновить показания"}</button><button className="danger" onClick={() => void disconnect()} disabled={busy}>{busy ? "Отключаем…" : "Отключить Яндекс Дом"}</button></> : <><p>Подключите аккаунт Яндекса, чтобы видеть показания датчиков, доступных в приложении «Дом с Алисой».</p><button onClick={() => void connect()} disabled={busy || !csrf}>{busy ? "Открываем Яндекс…" : "Подключить Яндекс Дом"}</button></>}{message && <p role="alert">{message}</p>}</section>;
 }

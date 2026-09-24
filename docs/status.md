@@ -2,6 +2,15 @@
 
 Last updated: 2026-09-24
 
+## YANDEX-HOME-005: all-property sensor extraction and multi-metric device cards (implemented, 2026-09-24)
+
+Broadened Yandex Smart Home sensor extraction from single-metric temperature filters to all devices and sensor properties with available readings:
+1. `src/providers/yandex_home.rs`: removed the `retrievable: true` restriction (which discarded battery-powered Zigbee sensors like Climate and Temperature sensors that report `retrievable: false` but hold valid cached measurements in `state.value`), and removed the `instance == "temperature"` filter. Implemented `parse_home_devices` and `home_devices`, extracting temperature, humidity, battery level, voltage, power, amperage, CO₂, pressure, and formatting units and localized property names.
+2. `src/http/yandex_home.rs`: extended `/api/v1/browser/yandex-home/sensors` to return structured `devices` with their full property lists alongside a backward-compatible flat `sensors` array.
+3. `api/openapi.yaml`: updated contract schemas (`YandexHomeSensors`, `YandexHomeDevice`, `YandexHomeDeviceProperty`, `YandexHomeSensor`).
+4. `web/src/api.ts` & `web/src/app.tsx`: updated web client types and user cabinet rendering to display device cards with room labels, all sensor metrics (temperature, humidity, battery, etc.), and latest update timestamps.
+Verification passed: `cargo fmt --check`, strict Clippy, `cargo test` (including openapi contract checks), `pnpm typecheck`, `vite build`, and `ux-regression.mjs` (11 passed).
+
 ## YANDEX-HOME-004: cross-site OAuth callback cookie relaxation and web status notifications (deployed, 2026-09-24)
 
 Fixed the Yandex Smart Home OAuth callback failure (`/?yandex_home=failed`):

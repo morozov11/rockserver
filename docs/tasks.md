@@ -1,5 +1,13 @@
 # Task log
 
+## YANDEX-HOME-005 — 2026-09-24 — extract all sensor properties and render multi-metric device cards
+
+- Goal: eliminate restrictive temperature-only and `retrievable: true` filters so that all sensors (including battery-powered Zigbee climate sensors) and all properties (humidity, battery, voltage, power, etc.) are extracted and presented in the cabinet.
+- Scope: update provider parsing in `src/providers/yandex_home.rs`, HTTP DTOs in `src/http/yandex_home.rs`, OpenAPI schema in `api/openapi.yaml`, and frontend client and presentation in `web/src/api.ts` and `web/src/app.tsx`.
+- Result: battery Zigbee sensors (reporting `retrievable: false`) and multi-property devices (e.g. Climate with temperature, humidity, and battery level; humidifier; smart plugs with electrical readings) are parsed with localized names and units. Web cabinet displays device cards with all active metrics.
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`; `cargo test` (including openapi contract checks); `pnpm typecheck`; `vite build`; `web/tests/ux-regression.mjs` (11 passed).
+- Status: **implemented (ready for deployment).**
+
 ## YANDEX-HOME-004 — 2026-09-24 — fix cross-site OAuth callback cookie drop and frontend feedback
 
 - Goal: resolve OAuth redirect failure returning `/?yandex_home=failed` when linking Yandex Smart Home, and display meaningful error/success feedback in the web cabinet.

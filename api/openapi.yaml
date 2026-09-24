@@ -393,13 +393,13 @@ paths:
         "302": { description: Redirect to the user account cabinet after success or failure. }
   /api/v1/browser/yandex-home/sensors:
     get:
-      operationId: getYandexHomeTemperatureSensors
-      summary: Read current retrievable temperature properties from the signed-in account's linked Yandex home
+      operationId: getYandexHomeSensors
+      summary: Read current sensor readings from the signed-in account's linked Yandex home
       security:
         - RockserverBrowserCookie: []
       responses:
         "200":
-          description: Safe temperature readings; OAuth tokens and provider identifiers are never returned.
+          description: Safe sensor readings; OAuth tokens and provider identifiers are never returned.
           headers:
             Cache-Control: { schema: { type: string, example: no-store } }
           content:
@@ -1423,21 +1423,53 @@ components:
     YandexHomeSensors:
       type: object
       additionalProperties: false
-      required: [sensors]
+      required: [devices, sensors]
       properties:
-        sensors:
+        devices:
           type: array
           maxItems: 301
+          items: { $ref: "#/components/schemas/YandexHomeDevice" }
+        sensors:
+          type: array
+          maxItems: 1000
           items: { $ref: "#/components/schemas/YandexHomeSensor" }
+    YandexHomeDevice:
+      type: object
+      additionalProperties: false
+      required: [id, name, properties]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 256 }
+        name: { type: string, minLength: 1, maxLength: 256 }
+        device_type: { type: [string, "null"], maxLength: 256 }
+        room_name: { type: [string, "null"], maxLength: 256 }
+        properties:
+          type: array
+          items: { $ref: "#/components/schemas/YandexHomeDeviceProperty" }
+    YandexHomeDeviceProperty:
+      type: object
+      additionalProperties: false
+      required: [property_type, instance, name, formatted_value]
+      properties:
+        property_type: { type: string, minLength: 1, maxLength: 128 }
+        instance: { type: string, minLength: 1, maxLength: 128 }
+        name: { type: string, minLength: 1, maxLength: 128 }
+        value: {}
+        unit: { type: [string, "null"], maxLength: 64 }
+        formatted_value: { type: string, minLength: 1, maxLength: 256 }
+        updated_at: { type: [string, "null"], format: date-time }
     YandexHomeSensor:
       type: object
       additionalProperties: false
-      required: [device_name, temperature, unit]
+      required: [device_name, property, name, formatted_value]
       properties:
         device_name: { type: string, minLength: 1, maxLength: 256 }
         room_name: { type: [string, "null"], minLength: 1, maxLength: 256 }
-        temperature: { type: number }
-        unit: { type: string, enum: ["°C", K] }
+        property: { type: string, minLength: 1, maxLength: 128 }
+        name: { type: string, minLength: 1, maxLength: 128 }
+        value: {}
+        unit: { type: [string, "null"], maxLength: 64 }
+        formatted_value: { type: string, minLength: 1, maxLength: 256 }
+        temperature: { type: [number, "null"] }
         updated_at: { type: [string, "null"], format: date-time }
     BrowserDevice:
       type: object

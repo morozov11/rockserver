@@ -41,6 +41,40 @@ impl fmt::Debug for YandexHomeClient {
     }
 }
 
+/// A safe sensor property with its value, unit, and timestamp.
+#[derive(Clone, Debug, PartialEq)]
+pub struct YandexSensorProperty {
+    /// Internal property type, e.g. "devices.properties.float" or "devices.properties.event".
+    pub property_type: String,
+    /// Property instance identifier, e.g. "temperature", "humidity", "battery_level".
+    pub instance: String,
+    /// Human-friendly localized name, e.g. "Температура", "Влажность", "Заряд батареи".
+    pub name: String,
+    /// Numeric or string sensor value.
+    pub value: Value,
+    /// Human-friendly unit symbol, e.g. "°C", "%", "В", "Вт", "А".
+    pub unit: Option<String>,
+    /// Pre-formatted string value with unit, e.g. "14.1 °C", "69 %", "90 %", "220 В".
+    pub formatted_value: String,
+    /// Last update in RFC 3339 format if available.
+    pub updated_at: Option<String>,
+}
+
+/// A device in the user's Yandex Smart Home with its collected sensor properties.
+#[derive(Clone, Debug, PartialEq)]
+pub struct YandexHomeDevice {
+    /// Device identifier assigned by Yandex.
+    pub id: String,
+    /// User-assigned device name, e.g. "Климат", "Температура", "Увлажнитель".
+    pub name: String,
+    /// Yandex device type, e.g. "devices.types.sensor.climate", "devices.types.humidifier".
+    pub device_type: Option<String>,
+    /// User-visible room name when assigned to a room.
+    pub room_name: Option<String>,
+    /// All sensor properties with available readings.
+    pub properties: Vec<YandexSensorProperty>,
+}
+
 /// A safe temperature reading returned to a signed-in Rock account.
 #[derive(Clone, Debug, PartialEq)]
 pub struct YandexTemperatureSensor {
@@ -141,12 +175,12 @@ impl YandexHomeClient {
         Ok(self.encrypt_token(&token.access_token))
     }
 
-    /// Decrypts a token and returns every readable float-temperature property in the user's home.
-    pub async fn temperature_sensors(
+    /// Decrypts a token and returns all devices with readable sensor properties in the user's home.
+    pub async fn home_devices(
         &self,
         ciphertext: &[u8],
         nonce: &[u8],
-    ) -> Result<Vec<YandexTemperatureSensor>, YandexHomeError> {
+    ) -> Result<Vec<YandexHomeDevice>, YandexHomeError> {
         let token = self.decrypt_token(ciphertext, nonce)?;
         let response = self
             .http
@@ -167,7 +201,43 @@ impl YandexHomeClient {
             .json::<Value>()
             .await
             .map_err(|_| YandexHomeError::UpstreamUnavailable)?;
-        Ok(temperature_sensors(&value))
+        Ok(parse_home_devices(&value))
+    }
+
+    /// Decrypts a token and returns temperature readings in the user's home.
+    pub async fn temperature_sensors(
+        &self,
+        ciphertext: &[u8],
+        nonce: &[u8],
+    ) -> Result<Vec<YandexTemperatureSensor>, YandexHomeError> {
+        let devices = self.home_devices(ciphertext, nonce).await?;
+        let mut sensors = Vec::new();
+        for device in devices {
+            for prop in device.properties {
+                if prop.instance == "temperature"
+                    && let Some(temp) = prop.value.as_f64()
+                {
+                    let unit = if prop.unit.as_deref() == Some("K") {
+                        "K"
+                    } else {
+                        "°C"
+                    };
+                    sensors.push(YandexTemperatureSensor {
+                        device_name: device.name.clone(),
+                        room_name: device.room_name.clone(),
+                        temperature: temp,
+                        unit,
+                        updated_at: prop.updated_at,
+                    });
+                }
+            }
+        }
+        sensors.sort_by(|left, right| {
+            left.room_name
+                .cmp(&right.room_name)
+                .then_with(|| left.device_name.cmp(&right.device_name))
+        });
+        Ok(sensors)
     }
 
     fn from_lookup(
@@ -238,7 +308,8 @@ fn callback_url() -> String {
     format!("{ORIGIN}{CALLBACK_PATH}")
 }
 
-fn temperature_sensors(value: &Value) -> Vec<YandexTemperatureSensor> {
+/// Parses devices and their sensor properties from Yandex Smart Home user/info response.
+pub fn parse_home_devices(value: &Value) -> Vec<YandexHomeDevice> {
     let rooms: std::collections::HashMap<&str, &str> = value
         .get("rooms")
         .and_then(Value::as_array)
@@ -246,94 +317,271 @@ fn temperature_sensors(value: &Value) -> Vec<YandexTemperatureSensor> {
         .flatten()
         .filter_map(|room| Some((room.get("id")?.as_str()?, room.get("name")?.as_str()?)))
         .collect();
-    let mut sensors = Vec::new();
+    let mut devices = Vec::new();
     for device in value
         .get("devices")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
     {
+        let Some(device_id) = device.get("id").and_then(Value::as_str) else {
+            continue;
+        };
         let Some(device_name) = device.get("name").and_then(Value::as_str) else {
             continue;
         };
+        let device_type = device
+            .get("type")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         let room_name = device
             .get("room")
             .and_then(Value::as_str)
             .and_then(|room| rooms.get(room).copied())
             .map(str::to_owned);
+
+        let mut properties = Vec::new();
         for property in device
             .get("properties")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
         {
-            let valid_temperature = property.get("type").and_then(Value::as_str)
-                == Some("devices.properties.float")
-                && property
-                    .pointer("/parameters/instance")
-                    .and_then(Value::as_str)
-                    == Some("temperature")
-                && property.pointer("/state/instance").and_then(Value::as_str)
-                    == Some("temperature")
-                && property
-                    .get("retrievable")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-            let Some(temperature) = valid_temperature
-                .then(|| property.pointer("/state/value").and_then(Value::as_f64))
-                .flatten()
-            else {
+            let property_type = property
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_owned();
+
+            let instance = property
+                .pointer("/parameters/instance")
+                .or_else(|| property.pointer("/state/instance"))
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_owned();
+
+            let Some(state_val) = property.pointer("/state/value") else {
                 continue;
             };
-            let unit = match property.pointer("/parameters/unit").and_then(Value::as_str) {
-                Some("unit.temperature.kelvin") => "K",
-                _ => "°C",
-            };
+            if state_val.is_null() {
+                continue;
+            }
+
+            let raw_unit = property.pointer("/parameters/unit").and_then(Value::as_str);
+            let unit = format_unit(raw_unit);
+            let name = format_property_name(&instance);
+            let formatted_value = format_value(state_val, unit.as_deref());
+
             let updated_at = property
                 .get("last_updated")
+                .or_else(|| property.get("state_changed_at"))
                 .and_then(Value::as_f64)
+                .filter(|&secs| secs > 0.0)
                 .and_then(|seconds| OffsetDateTime::from_unix_timestamp(seconds as i64).ok())
                 .and_then(|time| time.format(&Rfc3339).ok());
-            sensors.push(YandexTemperatureSensor {
-                device_name: device_name.to_owned(),
-                room_name: room_name.clone(),
-                temperature,
+
+            properties.push(YandexSensorProperty {
+                property_type,
+                instance,
+                name,
+                value: state_val.clone(),
                 unit,
+                formatted_value,
                 updated_at,
             });
         }
+
+        properties.sort_by_key(|p| property_priority(&p.instance));
+
+        if !properties.is_empty() {
+            devices.push(YandexHomeDevice {
+                id: device_id.to_owned(),
+                name: device_name.to_owned(),
+                device_type,
+                room_name,
+                properties,
+            });
+        }
     }
-    sensors.sort_by(|left, right| {
+
+    devices.sort_by(|left, right| {
         left.room_name
             .cmp(&right.room_name)
-            .then_with(|| left.device_name.cmp(&right.device_name))
+            .then_with(|| left.name.cmp(&right.name))
     });
-    sensors
+    devices
+}
+
+fn format_unit(raw_unit: Option<&str>) -> Option<String> {
+    match raw_unit? {
+        "unit.temperature.celsius" => Some("°C".to_owned()),
+        "unit.temperature.kelvin" => Some("K".to_owned()),
+        "unit.percent" => Some("%".to_owned()),
+        "unit.volt" => Some("В".to_owned()),
+        "unit.watt" => Some("Вт".to_owned()),
+        "unit.ampere" => Some("А".to_owned()),
+        "unit.pressure.mmhg" => Some("мм рт. ст.".to_owned()),
+        "unit.pressure.pascal" => Some("Па".to_owned()),
+        "unit.pressure.bar" => Some("бар".to_owned()),
+        "unit.ppm" => Some("ppm".to_owned()),
+        "unit.density.mcg_m3" => Some("мкг/м³".to_owned()),
+        "unit.illumination.lux" => Some("лк".to_owned()),
+        "unit.meter.cubic_meter" => Some("м³".to_owned()),
+        "unit.meter.kilowatt_hour" => Some("кВт·ч".to_owned()),
+        other => Some(other.strip_prefix("unit.").unwrap_or(other).to_owned()),
+    }
+}
+
+fn format_property_name(instance: &str) -> String {
+    match instance {
+        "temperature" => "Температура".to_owned(),
+        "humidity" => "Влажность".to_owned(),
+        "battery_level" => "Заряд батареи".to_owned(),
+        "co2_level" => "Уровень CO₂".to_owned(),
+        "pressure" => "Давление".to_owned(),
+        "voltage" => "Напряжение".to_owned(),
+        "power" => "Мощность".to_owned(),
+        "amperage" => "Сила тока".to_owned(),
+        "pm1_density" => "PM1".to_owned(),
+        "pm2.5_density" => "PM2.5".to_owned(),
+        "pm10_density" => "PM10".to_owned(),
+        "tvoc" => "ЛОВ (TVOC)".to_owned(),
+        "water_level" => "Уровень воды".to_owned(),
+        "illumination" => "Освещённость".to_owned(),
+        "gas_concentration" => "Концентрация газа".to_owned(),
+        "smoke_concentration" => "Концентрация дыма".to_owned(),
+        "meter" => "Счётчик".to_owned(),
+        "vibration" => "Вибрация".to_owned(),
+        "open" => "Открытие".to_owned(),
+        "motion" => "Движение".to_owned(),
+        "leak" => "Протечка".to_owned(),
+        "button" => "Кнопка".to_owned(),
+        "voice_activity" => "Голосовая активность".to_owned(),
+        "signal_level" => "Уровень сигнала".to_owned(),
+        other => other.replace('_', " "),
+    }
+}
+
+fn format_value(value: &Value, unit: Option<&str>) -> String {
+    let base = match value {
+        Value::Number(num) => num.to_string(),
+        Value::String(s) => match s.as_str() {
+            "opened" => "Открыто".to_owned(),
+            "closed" => "Закрыто".to_owned(),
+            "detected" => "Обнаружено".to_owned(),
+            "not_detected" => "Не обнаружено".to_owned(),
+            "click" => "Нажатие".to_owned(),
+            "double_click" => "Двойное нажатие".to_owned(),
+            "long_press" => "Удержание".to_owned(),
+            "leak" => "Протечка".to_owned(),
+            "dry" => "Сухо".to_owned(),
+            "vibration" => "Вибрация".to_owned(),
+            other => other.to_owned(),
+        },
+        Value::Bool(b) => {
+            if *b {
+                "Да".to_owned()
+            } else {
+                "Нет".to_owned()
+            }
+        }
+        other => other.to_string(),
+    };
+    if let Some(unit) = unit {
+        format!("{base} {unit}")
+    } else {
+        base
+    }
+}
+
+fn property_priority(instance: &str) -> u32 {
+    match instance {
+        "temperature" => 1,
+        "humidity" => 2,
+        "pressure" => 3,
+        "co2_level" => 4,
+        "pm2.5_density" => 5,
+        "pm10_density" => 6,
+        "pm1_density" => 7,
+        "tvoc" => 8,
+        "battery_level" => 9,
+        "voltage" => 10,
+        "power" => 11,
+        "amperage" => 12,
+        "water_level" => 13,
+        "illumination" => 14,
+        _ => 50,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{YandexHomeClient, YandexHomeError, temperature_sensors};
+    use super::{YandexHomeClient, YandexHomeError, parse_home_devices};
     use serde_json::json;
 
     #[test]
-    fn parses_only_retrievable_temperature_properties() {
-        let sensors = temperature_sensors(&json!({
-            "rooms": [{"id": "room-1", "name": "Кухня"}],
-            "devices": [{
-                "name": "Датчик",
-                "room": "room-1",
-                "properties": [
-                    {"type":"devices.properties.float","retrievable":true,"parameters":{"instance":"temperature","unit":"unit.temperature.celsius"},"state":{"instance":"temperature","value":22.5},"last_updated":1700000000},
-                    {"type":"devices.properties.float","retrievable":false,"parameters":{"instance":"temperature"},"state":{"instance":"temperature","value":99}}
-                ]
-            }]
+    fn parses_home_devices_and_properties() {
+        let devices = parse_home_devices(&json!({
+            "rooms": [{"id": "room-1", "name": "Спальня"}],
+            "devices": [
+                {
+                    "id": "dev-1",
+                    "name": "Климат",
+                    "type": "devices.types.sensor.climate",
+                    "room": "room-1",
+                    "properties": [
+                        {
+                            "type": "devices.properties.float",
+                            "reportable": true,
+                            "retrievable": false,
+                            "parameters": {"instance": "battery_level", "unit": "unit.percent"},
+                            "state": {"instance": "battery_level", "value": 90},
+                            "last_updated": 1700000000
+                        },
+                        {
+                            "type": "devices.properties.float",
+                            "reportable": true,
+                            "retrievable": false,
+                            "parameters": {"instance": "temperature", "unit": "unit.temperature.celsius"},
+                            "state": {"instance": "temperature", "value": 14.1},
+                            "last_updated": 1700000000
+                        },
+                        {
+                            "type": "devices.properties.float",
+                            "reportable": true,
+                            "retrievable": false,
+                            "parameters": {"instance": "humidity", "unit": "unit.percent"},
+                            "state": {"instance": "humidity", "value": 69},
+                            "last_updated": 1700000000
+                        },
+                        {
+                            "type": "devices.properties.float",
+                            "parameters": {"instance": "signal_level"},
+                            "state": null
+                        }
+                    ]
+                },
+                {
+                    "id": "dev-empty",
+                    "name": "Лампочка",
+                    "type": "devices.types.light",
+                    "properties": []
+                }
+            ]
         }));
-        assert_eq!(sensors.len(), 1);
-        assert_eq!(sensors[0].device_name, "Датчик");
-        assert_eq!(sensors[0].room_name.as_deref(), Some("Кухня"));
-        assert_eq!(sensors[0].temperature, 22.5);
-        assert_eq!(sensors[0].unit, "°C");
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].name, "Климат");
+        assert_eq!(devices[0].room_name.as_deref(), Some("Спальня"));
+        assert_eq!(devices[0].properties.len(), 3);
+        assert_eq!(devices[0].properties[0].instance, "temperature");
+        assert_eq!(devices[0].properties[0].name, "Температура");
+        assert_eq!(devices[0].properties[0].formatted_value, "14.1 °C");
+        assert_eq!(devices[0].properties[1].instance, "humidity");
+        assert_eq!(devices[0].properties[1].name, "Влажность");
+        assert_eq!(devices[0].properties[1].formatted_value, "69 %");
+        assert_eq!(devices[0].properties[2].instance, "battery_level");
+        assert_eq!(devices[0].properties[2].name, "Заряд батареи");
+        assert_eq!(devices[0].properties[2].formatted_value, "90 %");
     }
 
     #[test]
