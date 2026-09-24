@@ -2,9 +2,9 @@
 
 Last updated: 2026-09-24
 
-## YANDEX-HOME-003: fix PostgreSQL string concatenation syntax error in yandex_home store (implemented locally, 2026-09-24)
+## YANDEX-HOME-003: fix PostgreSQL string concatenation syntax error in yandex_home store (deployed, 2026-09-24)
 
-All 6 SQL statements in `src/persistence/account_postgres/yandex_home.rs` previously contained literal `+` string-concatenation characters, causing PostgreSQL syntax errors (`syntax error at or near "WHERE"`) during `GET /api/v1/browser/account` when evaluating `store.has_yandex_home_connection(user_id)`. Replaced the stray `+` symbols with standard Rust string line continuations (`\`) and added an opt-in integration test in `tests/postgres_integration.rs` covering all 6 methods of the Yandex Home connection store. Verification passed: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`.
+All 6 SQL statements in `src/persistence/account_postgres/yandex_home.rs` previously contained literal `+` string-concatenation characters, causing PostgreSQL syntax errors (`syntax error at or near "WHERE"`) during `GET /api/v1/browser/account` when evaluating `store.has_yandex_home_connection(user_id)`. Replaced the stray `+` symbols with standard Rust string line continuations (`\`) and added an opt-in integration test in `tests/postgres_integration.rs` covering all 6 methods of the Yandex Home connection store. Verification passed: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test`. Production release `bc15226` succeeded and public `https://rockplatform.win/health/ready` returned `{"status":"ok"}`.
 
 ## YANDEX-HOME-002: deployment configuration (deployed, 2026-09-24)
 

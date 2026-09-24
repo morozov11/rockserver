@@ -5,8 +5,8 @@
 - Goal: eliminate the 503 `auth_unavailable` error returned by `GET /api/v1/browser/account` caused by SQL syntax errors in the Yandex Home persistence module.
 - Scope: fix string line continuations in `src/persistence/account_postgres/yandex_home.rs` and add an integration test in `tests/postgres_integration.rs`.
 - Result: removed literal `+` artifacts from all 6 queries in `yandex_home.rs`. Calls to `has_yandex_home_connection` now execute cleanly against PostgreSQL without syntax errors.
-- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`; `cargo test`.
-- Status: **implemented locally.**
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`; `cargo test`; production release `bc15226` succeeded and public `https://rockplatform.win/health/ready` returned `{"status":"ok"}`.
+- Status: **deployed.**
 
 ## YANDEX-HOME-002 — 2026-09-24 — deploy Yandex Home OAuth configuration
 
