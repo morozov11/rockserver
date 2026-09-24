@@ -12,10 +12,15 @@ browser state changes, and the OpenAPI server URL. Origin-dependent tests now
 reference the constants. `rockplatform.win` resolves through a Cloudflare
 proxy, so certificate issuance and forwarded client IPs must be verified
 during the first deploy. Verification passed: `cargo fmt --check`, strict
-all-target/all-feature Clippy, and full `cargo test` (225 passed). Next step:
-bootstrap the new host, deploy, re-bootstrap the administrator, and restart
-the station-icon import. The RS-ICON-011 homepage favicon discovery is
-included in the release but not yet deployed to any host.
+all-target/all-feature Clippy, and full `cargo test` (225 passed).
+**Production deploy:** the new host `217.60.60.57` was bootstrapped and
+released with commit `a8f21aa` on 2026-09-24 (`status=succeeded`,
+`readiness=passed`, RS-ICON-011 included). The fresh database seeded 16,825
+stations with 0 failures; public checks on `https://rockplatform.win`
+confirm `/health/ready` 200, search 200 with `favicon_url: null`
+everywhere, unknown-station icon `404`, and `/admin` 200. Remaining
+operator steps: re-bootstrap the administrator account and start the first
+station-icon import from the Stations tab.
 
 ## Station-icon direction (replanned, 2026-09-22)
 

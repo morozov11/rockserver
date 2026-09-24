@@ -16,8 +16,18 @@
 - Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features --
   -D warnings`, and `cargo test` passed (225 tests; 15 PostgreSQL/live
   tests ignored as designed).
-- Status: **domain change implemented locally; new-host bootstrap and deploy
-  pending new-host credentials.**
+- Production deploy: host `217.60.60.57` (root, fresh ed25519 deploy key;
+  the old host `194.87.26.66` is untouched with its key preserved as
+  `rockserver_ed25519.old-host`) was bootstrapped with
+  `ops-001-d.ps1 -Action bootstrap -InstallDocker` on 2026-09-24 and
+  released with `-Action deploy` for commit `a8f21aa`: `status=succeeded`,
+  `readiness=passed`, including the RS-ICON-011 release. The fresh database
+  seeded 16,825 stations with 0 failures, then embeddings backfilled.
+  Independently confirmed on `https://rockplatform.win` (Cloudflare-proxied
+  DNS, certificate issued through it): `/health/ready` 200, search 200 with
+  `favicon_url: null` everywhere, unknown-station icon `404`, `/admin` 200.
+- Status: **deployed to production on 2026-09-24; the administrator must be
+  re-bootstrapped and the first station-icon import started explicitly.**
 
 ## 2026-09-22 — RS-ICON-011: homepage favicon discovery for the icon import
 
