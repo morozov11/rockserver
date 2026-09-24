@@ -2,13 +2,13 @@
 
 Last updated: 2026-09-24
 
-## YANDEX-HOME-004: cross-site OAuth callback cookie relaxation and web status notifications (implemented, 2026-09-24)
+## YANDEX-HOME-004: cross-site OAuth callback cookie relaxation and web status notifications (deployed, 2026-09-24)
 
 Fixed the Yandex Smart Home OAuth callback failure (`/?yandex_home=failed`):
 1. `src/http/auth.rs`: updated browser session cookie `rockserver_browser` from `SameSite=Strict` to `SameSite=Lax`, enabling browsers to send session cookies on top-level cross-site navigation redirects back from `oauth.yandex.ru`.
 2. `src/http/yandex_home.rs`: relaxed callback cookie requirement; the single-use, unguessable cryptographic OAuth state consumed from the database authoritatively binds the callback to the owner account. If a cookie is present, it verifies that it matches the owner. Added structured logging for callback failures.
 3. `web/src/app.tsx`: added handling of `yandex_home` query parameter (`connected` / `failed`), cleaned up the URL via `history.replaceState`, and displayed a clear Russian-language status message in the Yandex Home section of the account cabinet.
-Verification passed: `cargo fmt --check`, strict Clippy, `cargo test`, `pnpm typecheck`, `vite build`, and `ux-regression.mjs` (11 passed).
+Verification passed: `cargo fmt --check`, strict Clippy, `cargo test`, `pnpm typecheck`, `vite build`, and `ux-regression.mjs` (11 passed). Production release `d977ded` succeeded and public `https://rockplatform.win/health/ready` returned `{"status":"ok"}`.
 
 ## YANDEX-HOME-003: fix PostgreSQL string concatenation syntax error in yandex_home store (deployed, 2026-09-24)
 
