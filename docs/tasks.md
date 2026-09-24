@@ -1,5 +1,39 @@
 # Task log
 
+## 2026-09-24 — RS-ICON-012: reduce false icon-import failures
+
+- Goal: cut the false error rate of the administrator-started icon import
+  after production sampling showed ~49% of processed items ended in
+  retryable/permanent errors.
+- Result: a 60-station random sample of failed items probed from the VPS
+  attributed ~33% to homepages heavier than the 256 KiB inspection bound,
+  ~32% to sites answering normally with a browser-like User-Agent (the
+  fetcher sent none and was blocked), ~17% to dead domains and the rest to
+  403/404/500. Fixes: the fetcher now sends a browser-like User-Agent, the
+  homepage inspection limit rose to 1 MiB, and sources exceeding a fixed
+  byte limit classify as permanent instead of retryable forever; only
+  transport-level failures stay retryable. Stations without a ready icon
+  remain eligible for every new job, so a rerun retries all previous false
+  failures.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features --
+  -D warnings`, and `cargo test` passed (225 tests; 15 PostgreSQL/live
+  tests ignored as designed).
+- Status: **implemented locally; production deploy pending.**
+## WEB-ADMIN-UI-001 — 2026-09-24 — desktop-first administrator console
+
+- Goal: replace the narrow, mobile-oriented administrator presentation with a
+  normal desktop operations console without changing user cabinets.
+- Scope: `/admin` Preact markup and scoped CSS only; sidebar navigation, session
+  header, table layouts, filters, pagination, station import controls, and
+  administrator login presentation. No API or public/user-cabinet behavior
+  changes.
+- Result: admin screens now use a wide workspace with persistent navigation,
+  responsive table overflow, clearer status treatments, and a separate login
+  composition. No Tailwind dependency was added because existing CSS is enough
+  for this isolated UI.
+- Checks: `pnpm build`; `pnpm test` (11 passed).
+- Status: **complete.**
+
 ## 2026-09-23 — RS-DOMAIN-001: production move to rockplatform.win
 
 - Goal: relocate the public deployment to the new `rockplatform.win` domain

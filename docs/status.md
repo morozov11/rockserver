@@ -2,6 +2,29 @@
 
 Last updated: 2026-09-24
 
+## RS-ICON-012: false icon-import failure reduction (implemented locally, 2026-09-24)
+
+Production sampling of the first import job (3,919 processed: 44% ready,
+23% retryable, 27% permanent) showed that about two thirds of the errors
+were artifacts of the fetcher: homepages heavier than the 256 KiB
+inspection bound and sites that block requests without a User-Agent. The
+fetcher now sends a browser-like User-Agent, the homepage limit is 1 MiB,
+and oversized sources classify as permanent rather than infinitely
+retryable; transport failures remain the only retryable class. Dead domains
+(~17% of the sample) stay permanent by design. Verification passed:
+`cargo fmt --check`, strict all-target/all-feature Clippy, and full
+`cargo test` (225 passed). Deployment and a rerun job are pending.
+
+## WEB-ADMIN-UI-001: desktop-first administrator console (implemented, 2026-09-24)
+
+The `/admin` console now uses an isolated desktop-first layout with a persistent
+sidebar, top-level session controls, wide table views, clearer station import
+controls, and a dedicated administrator login card. The user account cabinet,
+pairing screens, API calls, and interaction behavior were left unchanged.
+The implementation intentionally uses scoped CSS instead of adding Tailwind or
+another runtime dependency. Verification passed: `pnpm build` and
+`pnpm test` (11 UX regression tests).
+
 ## RS-DOMAIN-001: production move to rockplatform.win (deployed, 2026-09-24)
 
 The production deployment relocated from `alex.vault57.ru` to `rockplatform.win`

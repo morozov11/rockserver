@@ -25,7 +25,10 @@ use uuid::Uuid;
 /// Maximum accepted encoded source or administrator-upload byte size.
 pub const MAX_SOURCE_BYTES: usize = 2 * 1024 * 1024;
 /// Maximum homepage HTML bytes inspected while resolving a favicon candidate.
-const MAX_HOMEPAGE_BYTES: usize = 256 * 1024;
+///
+/// One MiB: production sampling showed a third of failing homepages simply
+/// exceeded the earlier 256 KiB bound while being otherwise valid.
+const MAX_HOMEPAGE_BYTES: usize = 1024 * 1024;
 const MAX_SOURCE_PIXELS: u32 = 1_048_576;
 const MAX_SOURCE_DIMENSION: u32 = 1_024;
 const ICON_DIMENSION: u32 = 256;
@@ -200,10 +203,15 @@ pub struct SafeIconFetcher {
 
 impl SafeIconFetcher {
     /// Creates a fetcher with bounded request time and no implicit redirects.
+    ///
+    /// A browser-like User-Agent is sent because many station sites block empty
+    /// or tool-like agents outright; production sampling showed that a third of
+    /// otherwise-failing homepages answer normally with one.
     pub fn new() -> Result<Self, IconStorageError> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .redirect(Policy::none())
+            .user_agent("Mozilla/5.0 (compatible; RockServer station-icon fetcher)")
             .build()
             .map_err(|_| IconStorageError::Unavailable)?;
         Ok(Self { client })
@@ -766,8 +774,9 @@ enum ItemPlan {
 ///
 /// Source priority follows the roadmap order: an explicit catalog icon URL wins (2), a favicon
 /// discovered on the station homepage is the fallback (1), and neither leaves the item missing.
-/// Transport-level failures are retryable; unusable URLs (invalid, non-public, unsuccessful
-/// response) are permanent so a dead icon address cannot loop forever.
+/// Only transport-level failures are retryable; unusable URLs (invalid, non-public,
+/// unsuccessfully answered) and sources exceeding a fixed byte limit are permanent so a dead
+/// address or oversized payload cannot loop forever.
 async fn resolve_item_plan(fetcher: &dyn IconSourceFetcher, item: &IconJobItem) -> ItemPlan {
     let (source, source_priority) = match item.source_url.as_deref() {
         Some(source) => (source.to_owned(), 2),
@@ -775,7 +784,7 @@ async fn resolve_item_plan(fetcher: &dyn IconSourceFetcher, item: &IconJobItem) 
             None => return ItemPlan::Missing,
             Some(homepage) => match fetcher.discover_homepage_icon(homepage).await {
                 Ok(discovered) => (discovered, 1),
-                Err(IconValidationError::Decode | IconValidationError::Size) => {
+                Err(IconValidationError::Decode) => {
                     return ItemPlan::Retryable;
                 }
                 Err(_) => return ItemPlan::Permanent,
@@ -788,7 +797,7 @@ async fn resolve_item_plan(fetcher: &dyn IconSourceFetcher, item: &IconJobItem) 
             source_url: source,
             source_priority,
         },
-        Err(IconValidationError::Decode | IconValidationError::Size) => ItemPlan::Retryable,
+        Err(IconValidationError::Decode) => ItemPlan::Retryable,
         Err(_) => ItemPlan::Permanent,
     }
 }
@@ -1100,6 +1109,14 @@ mod tests {
             resolve_item_plan(&dead, &item(None, Some("https://radio.example"))).await,
             ItemPlan::Permanent
         );
+        let oversized = FakeFetcher {
+            discovered: Err(IconValidationError::Size),
+            icon: Ok(sample_prepared()),
+        };
+        assert_eq!(
+            resolve_item_plan(&oversized, &item(None, Some("https://radio.example"))).await,
+            ItemPlan::Permanent
+        );
     }
 
     #[tokio::test]
@@ -1118,6 +1135,14 @@ mod tests {
         };
         assert_eq!(
             resolve_item_plan(&permanent, &item(None, Some("https://radio.example"))).await,
+            ItemPlan::Permanent
+        );
+        let oversized = FakeFetcher {
+            discovered: Ok("https://radio.example/favicon.ico".to_owned()),
+            icon: Err(IconValidationError::Size),
+        };
+        assert_eq!(
+            resolve_item_plan(&oversized, &item(None, Some("https://radio.example"))).await,
             ItemPlan::Permanent
         );
     }
