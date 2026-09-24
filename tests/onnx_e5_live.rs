@@ -2,7 +2,7 @@
 
 #![cfg(feature = "onnx-local")]
 
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 use rockserver::{
     providers::onnx_e5::{DIMENSION, OnnxE5Config, OnnxE5EmbeddingProvider},
@@ -26,4 +26,29 @@ async fn embeds_local_multilingual_query_with_safe_logs() {
     tracing::info!(%test_id, elapsed_ms = started.elapsed().as_millis(), dimension = embedding.provenance().dimension, "local E5 live test completed");
     assert_eq!(embedding.provenance().dimension, DIMENSION);
     assert!(embedding.values().iter().all(|value| value.is_finite()));
+}
+
+/// Runs concurrent inferences to verify that the session pool handles multiple requests concurrently.
+#[tokio::test]
+#[ignore = "requires local ONNX E5 assets and ORT_DYLIB_PATH; no network is used"]
+async fn embeds_concurrent_queries_with_session_pool() {
+    let provider = Arc::new(
+        OnnxE5EmbeddingProvider::load(&OnnxE5Config::from_env().expect("local E5 configuration"))
+            .expect("local E5 model must load"),
+    );
+    let mut handles = Vec::new();
+    for query in [
+        "спокойный джаз",
+        "rock radio",
+        "electronic music",
+        "классика",
+    ] {
+        let p = Arc::clone(&provider);
+        handles.push(tokio::spawn(async move { p.embed(query).await }));
+    }
+    for handle in handles {
+        let res = handle.await.expect("join failed").expect("embed failed");
+        assert_eq!(res.provenance().dimension, DIMENSION);
+        assert!(res.values().iter().all(|value| value.is_finite()));
+    }
 }

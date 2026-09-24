@@ -2,6 +2,24 @@
 
 Last updated: 2026-09-24
 
+## SRCH-001: non-blocking ONNX inference and session pool (implemented locally, 2026-09-24)
+
+Made local ONNX Runtime inference non-blocking for the Tokio async runtime and added concurrent multi-session inference support:
+1. `src/providers/onnx_e5.rs`: added `session_pool_size` (defaulting to CPU parallelism clamped between 1 and 4, configurable via `ROCKSERVER_ONNX_SESSION_POOL_SIZE`). Implemented `SessionPool` with semaphore backpressure (`tokio::sync::Semaphore`) and an RAII `PooledItem` guard that returns the session to the pool before releasing the semaphore permit (even on error or thread panic).
+2. Offloaded CPU-heavy tokenization, tensor construction, `Session::run(...)`, and mean-pooling to `tokio::task::spawn_blocking`, leaving Tokio worker threads completely unblocked for WebSocket audio streaming and HTTP request handling.
+3. Hardened inference error handling by mapping task panics and task cancellation to safe `EmbeddingProviderError` summaries without exposing sensitive query text in error logs.
+4. Added unit test suite in `src/providers/onnx_e5.rs` covering bounded pool defaults, environment parsing/lookups, config validation, high-concurrency bounded execution, panic recovery/session recycling, input prefixing, and mean pooling L2 normalization. Extended `tests/onnx_e5_live.rs` with concurrent session pool smoke coverage.
+Verification passed: `cargo fmt --check`, strict all-targets/all-features Clippy (`cargo clippy --all-targets --all-features -- -D warnings`), `cargo test` (172 tests passed), and `cargo test --all-features` (179 tests passed, 0 failed).
+
+## SEARCH-ROADMAP-001: voice search and vector retrieval roadmap (recorded, 2026-09-24)
+
+Audited search architecture and voice pipeline following the comprehensive technical review from 2026-08-29. Decomposed 14 findings into an actionable multi-phase task matrix for autonomous agents and published [`docs/roadmap/voice-search-improvements.md`](roadmap/voice-search-improvements.md):
+1. Phase 1 (P0): Runtime unblocking and ANN retriever correctness (`SRCH-001` non-blocking ONNX inference via `spawn_blocking`/pool, `SRCH-002` HNSW ANN retriever CTE in PostgreSQL, `SRCH-003` prefilter ordering fix, and `SRCH-004` lexical gate for language classifier).
+2. Phase 2 (P1): Ranking fusion and intent resilience (`SRCH-005` Reciprocal Rank Fusion (RRF), `SRCH-006` conversational noise query stripping, `SRCH-007` dynamic taxonomy synchronization from DB, and `SRCH-008` LLM circuit breaker / LRU intent cache).
+3. Phase 3 (P1, RockCast repository boundary): `RC-VOICE-001` Polyphase/windowed anti-aliasing resampling (48->16 kHz) and client-side VAD.
+4. Phase 4 (P2): Operations and evaluation (`SRCH-009` incremental hashed embedding backfill, `SRCH-010` model version migration, `SRCH-011` golden evaluation dataset with Recall@K/MRR, and `SRCH-012` log privacy and telemetry).
+Documentation-only planning task; no runtime or schema behavior changed.
+
 ## SEARCH-PERF-001: voice search timeout latency optimization (deployed, 2026-09-24)
 
 Resolved voice search timeout failures (504 `search_timeout`) in RockCast and RockMobile:

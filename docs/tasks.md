@@ -1,5 +1,21 @@
 # Task log
 
+## SRCH-001 — 2026-09-24 — non-blocking ONNX inference and session pool
+
+- Goal: isolate CPU-intensive ONNX embedding inference from Tokio runtime worker threads and enable concurrent search inference without serializing on a single mutex.
+- Scope: update `OnnxE5Config` and `OnnxE5EmbeddingProvider` in `src/providers/onnx_e5.rs`, add session pool with semaphore backpressure and RAII cleanup, offload tokenization and inference to `tokio::task::spawn_blocking`, and extend unit tests and live test harness in `tests/onnx_e5_live.rs`.
+- Result: inference sessions are pre-allocated in a bounded pool sized by CPU parallelism (1..=4) or `ROCKSERVER_ONNX_SESSION_POOL_SIZE`. Calls to `embed` and `embed_document` asynchronously acquire a pool permit without blocking OS threads, run on Tokio's blocking thread pool, and guarantee session recycling even upon worker panic or cancellation.
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`; `cargo test` (172 unit/integration tests passed) and `cargo test --all-features` (179 tests passed, 0 failed, 17 external/live tests safely ignored).
+- Status: **complete.**
+
+## SEARCH-ROADMAP-001 — 2026-09-24 — document voice search and vector retrieval modernization roadmap
+
+- Goal: decompose the 14 technical findings from the 2026-08-29 audit into modular, actionable tasks with clear acceptance criteria and verification steps so they can be assigned to autonomous coding agents.
+- Scope: create `docs/roadmap/voice-search-improvements.md` defining 13 discrete tasks (`SRCH-001` through `SRCH-012` in `rockserver` and `RC-VOICE-001` in `rockcast`), update `docs/status.md` and `docs/tasks.md`.
+- Result: documented 4-phase roadmap covering non-blocking ONNX inference, true HNSW vector retrieval, prefilter order fixes, lexical language gates, RRF hybrid fusion, intent query cleaning, dynamic taxonomy sync, LLM circuit breakers/caching, anti-aliased resampling, incremental backfill, and golden offline eval sets.
+- Checks: links verified against codebase, repository boundary rules maintained, documentation updated.
+- Status: **complete.**
+
 ## SEARCH-PERF-001 — 2026-09-24 — optimize search pipeline latency to eliminate voice command timeouts
 
 - Goal: prevent voice search requests from exceeding the 5.0s contract timeout (`search_timeout_ms: 5000`) in RockCast and RockMobile by reducing LLM parsing, embedding, and database query latencies.
