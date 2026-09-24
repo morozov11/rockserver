@@ -1,26 +1,31 @@
 # Project status
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
 
-## RS-DOMAIN-001: production move to rockplatform.win (implemented locally, 2026-09-23)
+## RS-DOMAIN-001: production move to rockplatform.win (deployed, 2026-09-24)
 
-The production deployment is relocating from `alex.vault57.ru` to
-`rockplatform.win` on a new host with fresh credentials and a fresh database;
-the old host and its data remain untouched. The domain-bound constants are
-updated: the WebAuthn RP id/origin, the first-party origin accepted for
-browser state changes, and the OpenAPI server URL. Origin-dependent tests now
-reference the constants. `rockplatform.win` resolves through a Cloudflare
-proxy, so certificate issuance and forwarded client IPs must be verified
-during the first deploy. Verification passed: `cargo fmt --check`, strict
-all-target/all-feature Clippy, and full `cargo test` (225 passed).
-**Production deploy:** the new host `217.60.60.57` was bootstrapped and
-released with commit `a8f21aa` on 2026-09-24 (`status=succeeded`,
-`readiness=passed`, RS-ICON-011 included). The fresh database seeded 16,825
-stations with 0 failures; public checks on `https://rockplatform.win`
-confirm `/health/ready` 200, search 200 with `favicon_url: null`
-everywhere, unknown-station icon `404`, and `/admin` 200. Remaining
-operator steps: re-bootstrap the administrator account and start the first
-station-icon import from the Stations tab.
+The production deployment relocated from `alex.vault57.ru` to `rockplatform.win`
+on a new host with fresh credentials and a fresh database; the old host and its
+data remain untouched. The domain-bound constants are updated: the WebAuthn RP
+id/origin, the first-party origin accepted for browser state changes, and the
+OpenAPI server URL. Origin-dependent tests reference the constants.
+`rockplatform.win` resolves through a Cloudflare proxy; the Let's Encrypt
+certificate was issued through it without changes. Verification passed:
+`cargo fmt --check`, strict all-target/all-feature Clippy, and full
+`cargo test` (225 passed). **Production deploy:** host `217.60.60.57` was
+bootstrapped and released with commit `a8f21aa`, then `84cb4eb` (adds the
+previously missing `bootstrap_admin` binary to the deployment image), both
+`status=succeeded` with `readiness=passed`. The fresh database seeded 16,825
+stations with 0 failures. Public checks on `https://rockplatform.win`:
+`/health/ready` 200, search 200, unknown-station icon `404`, `/admin` 200.
+The administrator was bootstrapped and login verified (200 Bearer). The first
+station-icon import was started through the protected admin API and homepage
+favicon discovery is producing ready artifacts: after the first ~150 processed
+items the persisted counters showed `ready=52` with `missing=30`,
+`retryable_error=32`, `permanent_error=37`; a ready icon is served as
+`200 image/webp` with a strong ETag and `304` on `If-None-Match`. The import
+job continues in the background over all 16,825 stations; its saved progress
+is visible on the Stations tab.
 
 ## Station-icon direction (replanned, 2026-09-22)
 

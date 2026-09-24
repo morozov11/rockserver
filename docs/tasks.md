@@ -26,8 +26,28 @@
   Independently confirmed on `https://rockplatform.win` (Cloudflare-proxied
   DNS, certificate issued through it): `/health/ready` 200, search 200 with
   `favicon_url: null` everywhere, unknown-station icon `404`, `/admin` 200.
-- Status: **deployed to production on 2026-09-24; the administrator must be
-  re-bootstrapped and the first station-icon import started explicitly.**
+- Follow-up: the deployment image did not contain the `bootstrap_admin`
+  binary, so commit `84cb4eb` added it to the Dockerfile build and runtime
+  copy and was deployed (`readiness=passed`). The administrator was then
+  bootstrapped with the ignored local `.env` credentials and login verified
+  through the public API (200 Bearer).
+- Status: **deployed to production on 2026-09-24.**
+
+## 2026-09-24 — first production station-icon import started
+
+- Goal: begin the actual icon backlog on the new deployment using the
+  RS-ICON-011 homepage favicon discovery.
+- Result: the protected `POST /api/v1/admin/icons/import` created job
+  `e456a311-29aa-417d-813e-5d4b05a6ddb7` selecting all 16,825 stations.
+  Early persisted counters after ~150 processed items: `ready=52`,
+  `missing=30`, `retryable_error=32`, `permanent_error=37` — homepage
+  discovery is producing ready artifacts. A ready icon is publicly served
+  as `200 image/webp` (28,256 bytes) with a strong ETag and returns `304`
+  on a matching `If-None-Match`. The job continues in the background; its
+  saved progress is visible on the Stations tab of the admin console.
+- Checks: live counters read through the protected admin API; public icon
+  delivery verified with `200`/`304` conditional requests.
+- Status: **running; completion to be observed via the admin console.**
 
 ## 2026-09-22 — RS-ICON-011: homepage favicon discovery for the icon import
 
