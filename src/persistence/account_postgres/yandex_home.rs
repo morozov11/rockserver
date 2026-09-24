@@ -20,7 +20,8 @@ impl PostgresAccountStore {
         state_hash: &SecretHash,
     ) -> Result<bool, sqlx::Error> {
         let inserted = sqlx::query(
-            "INSERT INTO yandex_home_oauth_states (state_hash, user_id, expires_at) +             SELECT $1, id, now() + interval '10 minutes' FROM users WHERE id = $2 AND status = 'active'",
+            "INSERT INTO yandex_home_oauth_states (state_hash, user_id, expires_at) \
+             SELECT $1, id, now() + interval '10 minutes' FROM users WHERE id = $2 AND status = 'active'",
         )
         .bind(state_hash.as_bytes())
         .bind(user_id)
@@ -35,7 +36,9 @@ impl PostgresAccountStore {
         state_hash: &SecretHash,
     ) -> Result<Option<Uuid>, sqlx::Error> {
         sqlx::query_scalar(
-            "DELETE FROM yandex_home_oauth_states s USING users u +             WHERE s.state_hash = $1 AND s.user_id = u.id AND s.expires_at > now() AND u.status = 'active' +             RETURNING s.user_id",
+            "DELETE FROM yandex_home_oauth_states s USING users u \
+             WHERE s.state_hash = $1 AND s.user_id = u.id AND s.expires_at > now() AND u.status = 'active' \
+             RETURNING s.user_id",
         )
         .bind(state_hash.as_bytes())
         .fetch_optional(&self.pool)
@@ -50,7 +53,10 @@ impl PostgresAccountStore {
     ) -> Result<bool, sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
         let updated = sqlx::query(
-            "INSERT INTO yandex_home_connections (user_id, access_token_ciphertext, nonce) +             SELECT id, $2, $3 FROM users WHERE id = $1 AND status = 'active' +             ON CONFLICT (user_id) DO UPDATE SET access_token_ciphertext = EXCLUDED.access_token_ciphertext, +             nonce = EXCLUDED.nonce, updated_at = now(), revoked_at = NULL",
+            "INSERT INTO yandex_home_connections (user_id, access_token_ciphertext, nonce) \
+             SELECT id, $2, $3 FROM users WHERE id = $1 AND status = 'active' \
+             ON CONFLICT (user_id) DO UPDATE SET access_token_ciphertext = EXCLUDED.access_token_ciphertext, \
+             nonce = EXCLUDED.nonce, updated_at = now(), revoked_at = NULL",
         )
         .bind(user_id)
         .bind(&token.ciphertext)
@@ -76,7 +82,8 @@ impl PostgresAccountStore {
         user_id: Uuid,
     ) -> Result<Option<EncryptedYandexHomeToken>, sqlx::Error> {
         sqlx::query_as::<_, YandexHomeConnectionRow>(
-            "SELECT c.access_token_ciphertext, c.nonce FROM yandex_home_connections c +             JOIN users u ON u.id = c.user_id WHERE c.user_id = $1 AND c.revoked_at IS NULL AND u.status = 'active'",
+            "SELECT c.access_token_ciphertext, c.nonce FROM yandex_home_connections c \
+             JOIN users u ON u.id = c.user_id WHERE c.user_id = $1 AND c.revoked_at IS NULL AND u.status = 'active'",
         )
         .bind(user_id)
         .fetch_optional(&self.pool)
@@ -87,7 +94,8 @@ impl PostgresAccountStore {
     /// Reports whether the signed-in account has an active Yandex Smart Home link.
     pub async fn has_yandex_home_connection(&self, user_id: Uuid) -> Result<bool, sqlx::Error> {
         sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM yandex_home_connections c JOIN users u ON u.id = c.user_id +             WHERE c.user_id = $1 AND c.revoked_at IS NULL AND u.status = 'active')",
+            "SELECT EXISTS (SELECT 1 FROM yandex_home_connections c JOIN users u ON u.id = c.user_id \
+             WHERE c.user_id = $1 AND c.revoked_at IS NULL AND u.status = 'active')",
         )
         .bind(user_id)
         .fetch_one(&self.pool)
@@ -98,7 +106,8 @@ impl PostgresAccountStore {
     pub async fn revoke_yandex_home_connection(&self, user_id: Uuid) -> Result<bool, sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
         let updated = sqlx::query(
-            "UPDATE yandex_home_connections SET revoked_at = now(), updated_at = now() +             WHERE user_id = $1 AND revoked_at IS NULL",
+            "UPDATE yandex_home_connections SET revoked_at = now(), updated_at = now() \
+             WHERE user_id = $1 AND revoked_at IS NULL",
         )
         .bind(user_id)
         .execute(&mut *transaction)
