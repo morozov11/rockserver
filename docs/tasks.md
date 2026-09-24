@@ -12,8 +12,9 @@
 - Checks: `deploy/tests/ops-001-d-tests.ps1`; `cargo fmt --check`; `cargo
   clippy --all-targets --all-features -- -D warnings`; `cargo test` (172
   library tests; 10 PostgreSQL and 5 live provider tests ignored by explicit
-  gates).
-- Status: **complete.**
+  gates); production release `a6e029b` succeeded and public readiness returned
+  `{"status":"ok"}`.
+- Status: **deployed.**
 
 ## YANDEX-HOME-001 — 2026-09-24 — user-linked Yandex Smart Home temperatures
 
@@ -31,8 +32,9 @@
 - Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features --
   -D warnings`; `cargo test` (172 library tests; 10 PostgreSQL and 5 live
   provider tests ignored by their explicit gates); `pnpm build`; `pnpm test`
-  (11 passed).
-- Status: **complete.**
+  (11 passed); production release `a6e029b` succeeded and public readiness
+  returned `{"status":"ok"}`.
+- Status: **deployed.**
 
 ## 2026-09-24 — RS-ICON-012: reduce false icon-import failures
 

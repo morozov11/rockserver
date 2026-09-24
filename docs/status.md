@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-24
 
-## YANDEX-HOME-002: deployment configuration (implemented, 2026-09-24)
+## YANDEX-HOME-002: deployment configuration (deployed, 2026-09-24)
 
 The protected OPS-001-D release path now carries `YANDEX_HOME_CLIENTID` and
 `YANDEX_HOME_SECRET` from the ignored root `.env` into the root-only VPS
@@ -11,8 +11,10 @@ remain allowlisted, absent when unset, replaced on a later deploy, and omitted
 from summaries. Verified by the deployment-script regression suite, `cargo fmt
 --check`, strict all-target/all-feature Clippy, and `cargo test` (172 library
 tests; PostgreSQL and live-provider tests remain explicitly ignored).
+Production release `a6e029b` succeeded and public
+`https://rockplatform.win/health/ready` returned `{"status":"ok"}`.
 
-## YANDEX-HOME-001: user-linked temperature sensors (implemented, 2026-09-24)
+## YANDEX-HOME-001: user-linked temperature sensors (deployed, 2026-09-24)
 
 Signed-in browser accounts can now connect Yandex Smart Home through OAuth and
 read only retrievable `devices.properties.float` temperature properties. The
