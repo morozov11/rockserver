@@ -402,10 +402,10 @@ mod tests {
             ceremony: WebAuthnCeremony::Authentication,
             challenge: "challenge",
             expected_challenge: "challenge",
-            origin: "https://alex.vault57.ru",
-            expected_origin: "https://alex.vault57.ru",
-            rp_id: "alex.vault57.ru",
-            expected_rp_id: "alex.vault57.ru",
+            origin: super::webauthn::ORIGIN,
+            expected_origin: super::webauthn::ORIGIN,
+            rp_id: super::webauthn::RP_ID,
+            expected_rp_id: super::webauthn::RP_ID,
             client_data_type: "webauthn.get",
         };
         assert_eq!(validate_webauthn_client_data(&valid), Ok(()));
@@ -414,9 +414,9 @@ mod tests {
             challenge: "challenge",
             expected_challenge: "challenge",
             origin: "https://evil.example",
-            expected_origin: "https://alex.vault57.ru",
-            rp_id: "alex.vault57.ru",
-            expected_rp_id: "alex.vault57.ru",
+            expected_origin: super::webauthn::ORIGIN,
+            rp_id: super::webauthn::RP_ID,
+            expected_rp_id: super::webauthn::RP_ID,
             client_data_type: "webauthn.get",
         };
         assert_eq!(

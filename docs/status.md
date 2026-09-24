@@ -1,11 +1,26 @@
 # Project status
 
-Last updated: 2026-09-22
+Last updated: 2026-09-23
+
+## RS-DOMAIN-001: production move to rockplatform.win (implemented locally, 2026-09-23)
+
+The production deployment is relocating from `alex.vault57.ru` to
+`rockplatform.win` on a new host with fresh credentials and a fresh database;
+the old host and its data remain untouched. The domain-bound constants are
+updated: the WebAuthn RP id/origin, the first-party origin accepted for
+browser state changes, and the OpenAPI server URL. Origin-dependent tests now
+reference the constants. `rockplatform.win` resolves through a Cloudflare
+proxy, so certificate issuance and forwarded client IPs must be verified
+during the first deploy. Verification passed: `cargo fmt --check`, strict
+all-target/all-feature Clippy, and full `cargo test` (225 passed). Next step:
+bootstrap the new host, deploy, re-bootstrap the administrator, and restart
+the station-icon import. The RS-ICON-011 homepage favicon discovery is
+included in the release but not yet deployed to any host.
 
 ## Station-icon direction (replanned, 2026-09-22)
 
 The approved icon plan has no CLI, cron, startup, or deployment sync path. A
-protected administrator at `https://alex.vault57.ru/admin` starts a durable
+protected administrator at `https://rockplatform.win/admin` starts a durable
 background import job, polls its persisted counters, and sees server-hosted
 thumbnails or placeholders in the station list. Manual upload, replace, and
 confirmed removal preserve manual precedence over future catalog refreshes.

@@ -252,7 +252,7 @@ Each task begins by re-validating its status and dependencies.
 
 > **Статус направления:** владелец реактивировал направление 2026-09-22.
 > Импорт не имеет CLI, cron, startup- или deploy-side пути: только явный,
-> защищённый запуск durable background job из `https://alex.vault57.ru/admin`
+> защищённый запуск durable background job из `https://rockplatform.win/admin`
 > с сохранённым прогрессом. Текущие client-side favicon fallback-механизмы
 > остаются переходным поведением до фактической реализации.
 

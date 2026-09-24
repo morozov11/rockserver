@@ -16,7 +16,7 @@ info:
     `GET /api/v1/device-control/catalog/search`) are implemented behind the RockserverBearer
     device session.
 servers:
-  - url: https://alex.vault57.ru
+  - url: https://rockplatform.win
   - url: http://localhost
 paths:
   /api/v1/admin/auth/login:

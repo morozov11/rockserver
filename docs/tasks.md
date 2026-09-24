@@ -1,5 +1,24 @@
 # Task log
 
+## 2026-09-23 — RS-DOMAIN-001: production move to rockplatform.win
+
+- Goal: relocate the public deployment to the new `rockplatform.win` domain
+  on a new host with fresh credentials and a fresh database; the old
+  `alex.vault57.ru` host and its data are left untouched.
+- Result: the WebAuthn relying-party id and origin
+  (`src/auth/webauthn.rs`), the canonical first-party browser origin for
+  state changes (`src/http/transport.rs`) and the OpenAPI server URL now use
+  `rockplatform.win`; origin-dependent tests reference the constants instead
+  of literals, and the ignored deploy inventory points at the new domain.
+  Passkeys registered for the old RP id cannot transfer and a fresh host is
+  seeded from the pinned catalog release; the administrator must be
+  re-bootstrapped and the station-icon import restarted explicitly.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features --
+  -D warnings`, and `cargo test` passed (225 tests; 15 PostgreSQL/live
+  tests ignored as designed).
+- Status: **domain change implemented locally; new-host bootstrap and deploy
+  pending new-host credentials.**
+
 ## 2026-09-22 — RS-ICON-011: homepage favicon discovery for the icon import
 
 - Goal: let the administrator-started import produce icons for the production

@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 /// Canonical first-party origin accepted for browser state changes.
-pub(super) const FIRST_PARTY_ORIGIN: &str = "https://alex.vault57.ru";
+pub(super) const FIRST_PARTY_ORIGIN: &str = "https://rockplatform.win";
 const MAX_PUBLIC_JSON_REQUEST_BODY_BYTES: usize = 16 * 1024;
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const TRUSTED_PROXY_HEADER: &str = "x-rockserver-proxy";

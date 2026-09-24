@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// The only relying-party identifier accepted by RockServer browser ceremonies.
-pub const RP_ID: &str = "alex.vault57.ru";
+pub const RP_ID: &str = "rockplatform.win";
 /// The only first-party origin accepted by RockServer browser ceremonies.
-pub const ORIGIN: &str = "https://alex.vault57.ru";
+pub const ORIGIN: &str = "https://rockplatform.win";
 
 /// Authentication state persisted with the account owner to prevent cross-account assertions.
 #[derive(Debug, Serialize, Deserialize)]

@@ -21,7 +21,7 @@ RockServer должен стать основной точкой выдачи и
 - `faviconUrl` равен `null`, пока готового файла нет; placeholder отображает клиент.
 - SQL migration только меняет схему: в ней запрещены сетевые скачивания.
 - HTTP endpoint только выдаёт готовый cache: никакой загрузки по запросу пользователя.
-- Импорт запускается только явной кнопкой авторизованного администратора в `https://alex.vault57.ru/admin`; CLI, startup- и deploy-side sync не используются.
+- Импорт запускается только явной кнопкой авторизованного администратора в `https://rockplatform.win/admin`; CLI, startup- и deploy-side sync не используются.
 - Кнопка создаёт отдельную durable background job; HTTP-запрос не ждёт скачивания, а админка показывает её сохранённый прогресс.
 - Админка показывает готовые иконки только через URL RockServer и локальный placeholder; она не запрашивает внешние favicon напрямую.
 
@@ -135,7 +135,7 @@ requirements for steps 3–5, not behavior of migrations or request handling.
 
 **Статус:** реализовано локально 2026-09-22; protected HTTP launch and UI are implemented locally in step 8.
 
-**Цель:** позволить оператору в `https://alex.vault57.ru/admin` начать bounded импорт недостающих и retryable иконок без CLI, миграционного, startup- или deploy-side запуска.
+**Цель:** позволить оператору в `https://rockplatform.win/admin` начать bounded импорт недостающих и retryable иконок без CLI, миграционного, startup- или deploy-side запуска.
 
 **Изменения:** добавить metadata для import job и её сохранённых счётчиков: `selected`, `processed`, `ready`, `missing`, `retryable_error`, `permanent_error`, `skipped`, `started_at`, `finished_at`, безопасный status и последний безопасный error code. `POST` администратора создаёт только одну активную job и сразу отвечает её идентификатором; background worker выполняет bounded concurrency и короткие DB transactions, никогда не держит DB lock во время сети. `GET` администратора читает status и прогресс для polling. После restart незавершённая job становится `interrupted`; оператор явно запускает новую/resume job кнопкой, а сервис не начинает сеть сам. Нет binary `sync_station_icons`, cron или скрытого deploy hook.
 
@@ -183,7 +183,7 @@ requirements for steps 3–5, not behavior of migrations or request handling.
 
 **Статус:** реализовано локально 2026-09-22 для automatic import: кнопка запуска, durable polling/progress и thumbnail/placeholder готовы. `favicon_url` в catalog DTO и ручной override остаются следующими отдельными этапами.
 
-**Цель:** администратор на `https://alex.vault57.ru/admin` видит покрытие, запускает импорт кнопкой и видит готовые иконки в списке станций.
+**Цель:** администратор на `https://rockplatform.win/admin` видит покрытие, запускает импорт кнопкой и видит готовые иконки в списке станций.
 
 **Изменения:** добавить в текущую вкладку «Станции» кнопку «Импортировать иконки», disabled при active job, и progress panel, который poll-ит только защищённый same-origin job read model. Панель показывает безопасный status, счётчики и время начала/окончания; она не показывает source URL или stream URL. Admin station DTO получает стабильный `station_id` только для защищённых действий и nullable `favicon_url` только для ready-файла. Рендерить thumbnail с `src=favicon_url`; при `null`, `404` или ошибке декодирования — локальный placeholder. CSP сохраняет `img-src 'self'`, поэтому админка никогда не обращается к origin станции. Операции должны быть описаны в OpenAPI, требовать текущий AdminBearer и, для POST, existing Origin/proxy protection.
 
@@ -234,7 +234,7 @@ requirements for steps 3–5, not behavior of migrations or request handling.
 3. Проверить существующие API: `faviconUrl` может быть `null`.
 4. Подключить persistent storage и проверить права/свободное место.
 5. Проверить admin login, Origin/proxy boundary, storage rights и свободное место.
-6. Оператор запускает import из вкладки «Станции» на `https://alex.vault57.ru/admin` и наблюдает прогресс; deploy не выполняет import.
+6. Оператор запускает import из вкладки «Станции» на `https://rockplatform.win/admin` и наблюдает прогресс; deploy не выполняет import.
 7. Проверить coverage, `200/304/404`, admin thumbnail/placeholder и отсутствие изменения station counts/IDs.
 8. Оставить retryable failures следующей явно запущенной job, не откатывая успешный deploy.
 9. После наблюдения включить отображение в клиентах с placeholder при `null`/`404`.

@@ -701,7 +701,7 @@ mod tests {
             .oneshot(
                 Request::put("/api/v1/admin/stations/station-rock-001/icon")
                     .header(header::AUTHORIZATION, format!("Bearer {token}"))
-                    .header("origin", "https://alex.vault57.ru")
+                    .header("origin", super::transport::FIRST_PARTY_ORIGIN)
                     .header("x-forwarded-proto", "https")
                     .body(Body::from("not an image"))
                     .unwrap(),
@@ -781,7 +781,7 @@ mod tests {
         });
         let refresh = Request::post("/api/v1/admin/auth/refresh")
             .header(header::AUTHORIZATION, format!("Bearer {token}"))
-            .header("origin", "https://alex.vault57.ru")
+            .header("origin", super::transport::FIRST_PARTY_ORIGIN)
             .header("x-forwarded-proto", "https")
             .body(Body::empty())
             .unwrap();
