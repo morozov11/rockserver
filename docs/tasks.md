@@ -5,8 +5,8 @@
 - Goal: prevent voice search requests from exceeding the 5.0s contract timeout (`search_timeout_ms: 5000`) in RockCast and RockMobile by reducing LLM parsing, embedding, and database query latencies.
 - Scope: update LLM defaults in `src/providers/yandex_llm.rs`, parallelize parser and embedding in `src/search/mod.rs`, optimize PostgreSQL CTE execution in `src/persistence/postgres.rs`, and update deployment environment allowlists in `deploy/compose.yaml`, `deploy/ops-001-d.psm1`, and `deploy/remote-ops-001-d.sh`.
 - Result: switched default LLM model to `yandexgpt-lite` with a 4.5s request timeout; overlapped query embedding with LLM parsing via `tokio::join!`; and added `MATERIALIZED` to `candidates` and `scored` CTEs in PostgreSQL station search, dropping DB execution from ~850-1060ms to ~147ms (~7x speedup).
-- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`; `cargo test` (172 tests passed); `deploy/tests/ops-001-d-tests.ps1`.
-- Status: **implemented locally.**
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`; `cargo test` (172 tests passed); `deploy/tests/ops-001-d-tests.ps1`; production deploy `db3066d` verified with readiness check and live search timing (~800–850ms).
+- Status: **deployed.**
 
 ## YANDEX-HOME-005 — 2026-09-24 — extract all sensor properties and render multi-metric device cards
 
