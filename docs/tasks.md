@@ -1,5 +1,23 @@
 # Task log
 
+## 2026-09-25 — OPS: deploy-time pg_dump disabled and deploy debris cleaned
+
+- Goal: stop paying the per-release database dump on the small VPS and
+  remove accumulated deployment debris at the operator's request.
+- Result: `remote-ops-001-d.sh` no longer runs `pg_dump`, copies dumps, or
+  prunes the backup directory; the release record keeps the `backup_sha256`
+  continuity field with `-`. The launcher regression suite now asserts the
+  dump path stays absent and the seed/readiness ordering is unchanged. On
+  the VPS this removed the retained dumps (34 MiB), stale deploy logs, a
+  dead seed container, and 17 superseded release images (~1 GiB; disk use
+  fell from 45% to 40%). Local diagnostic scratch files were deleted. A
+  deploy with the change (`454cae7`) created no dump and passed readiness;
+  the icon backlog was wiped and restarted (`2c3e367a`), reaching
+  ready=151/252 processed in the first minutes with the candidate-fallback
+  fetcher active.
+- Checks: `deploy/tests/ops-001-d-tests.ps1` passed; live readiness 200;
+  backup directory verified empty after the deploy.
+- Status: **deployed.**
 ## 2026-09-25 — RS-ICON-013: ordered favicon candidates with root fallback
 
 - Goal: stop losing stations whose first icon candidate is dead while a
