@@ -1,5 +1,23 @@
 # Task log
 
+## 2026-09-25 — RS-ICON-013: ordered favicon candidates with root fallback
+
+- Goal: stop losing stations whose first icon candidate is dead while a
+  usable one exists on the same site.
+- Result: homepage discovery now returns the ordered candidate list — every
+  declared HTTP(S) `icon`/`apple-touch-icon` link in document order
+  (deduplicated, at most four) followed by the homepage-root `/favicon.ico`
+  fallback — and the worker tries them in order until one normalizes. A
+  dead candidate (bad URL, 404, oversized) no longer dooms the station, and
+  any transport-level failure keeps the item retryable even when other
+  candidates are simply absent. Covers the two production cases found by
+  sampling: a deep-page relative `favicon.ico` that 404s while the root
+  icon lives, and a first declared candidate that cannot be decoded.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features --
+  -D warnings`, and `cargo test` passed (229 tests; 15 PostgreSQL/live
+  tests ignored as designed), including new candidate-order and
+  classification coverage.
+- Status: **implemented locally; production deploy pending.**
 ## 2026-09-25 — RS-ICON-012 deployed with prefix inspection, swap, and a from-scratch import
 
 - Goal: ship the homepage-prefix fix and restart the icon backlog cleanly on

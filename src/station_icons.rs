@@ -191,8 +191,12 @@ pub trait IconSourceFetcher: Send + Sync {
     /// Downloads and normalizes one validated external icon URL.
     async fn fetch_icon(&self, source: &str) -> Result<PreparedIcon, IconValidationError>;
 
-    /// Resolves one favicon candidate URL for a station homepage, or why none can be fetched.
-    async fn discover_homepage_icon(&self, homepage: &str) -> Result<String, IconValidationError>;
+    /// Resolves the ordered favicon candidate URLs for a station homepage, or why none
+    /// can be fetched.
+    async fn discover_homepage_icons(
+        &self,
+        homepage: &str,
+    ) -> Result<Vec<String>, IconValidationError>;
 }
 
 /// Fetches external icons only after validating the URL and every redirect destination.
@@ -296,11 +300,16 @@ impl IconSourceFetcher for SafeIconFetcher {
         prepare_icon(&self.fetch_bounded(source, MAX_SOURCE_BYTES).await?)
     }
 
-    /// Resolves one favicon candidate for a validated station homepage.
+    /// Resolves the ordered favicon candidates for a validated station homepage.
     ///
-    /// Returns the first HTTP(S) `<link rel="...icon...">` target, or the homepage-root
-    /// `/favicon.ico` fallback when the page declares no usable icon link.
-    async fn discover_homepage_icon(&self, homepage: &str) -> Result<String, IconValidationError> {
+    /// Returns every declared HTTP(S) `<link rel="...icon...">` target in document order
+    /// followed by the homepage-root `/favicon.ico` fallback, deduplicated: production
+    /// sampling showed both a deep-page relative link dying while the root icon lives and
+    /// a first declared candidate being unusable, so the worker tries them in order.
+    async fn discover_homepage_icons(
+        &self,
+        homepage: &str,
+    ) -> Result<Vec<String>, IconValidationError> {
         // Heavy pages are truncated to the inspected prefix instead of failing: the declared
         // icon links live in the document head, and production sampling showed ~17% of
         // remaining permanent errors were pages heavier than the whole-body bound.
@@ -308,30 +317,40 @@ impl IconSourceFetcher for SafeIconFetcher {
             .fetch_bounded_opt(homepage, MAX_HOMEPAGE_BYTES, true)
             .await?;
         let base = Url::parse(homepage).map_err(|_| IconValidationError::Format)?;
-        Ok(homepage_icon_candidate(
+        Ok(homepage_icon_candidates(
             &String::from_utf8_lossy(&body),
             &base,
         ))
     }
 }
 
-/// Chooses a homepage's favicon candidate: its declared icon link, else `/favicon.ico`.
-fn homepage_icon_candidate(html: &str, base: &Url) -> String {
-    if let Some(link) = first_icon_link(html, base) {
-        return link;
-    }
+/// Upper bound on the candidates inspected for one homepage.
+const MAX_ICON_CANDIDATES: usize = 4;
+
+/// Builds a homepage's ordered favicon candidates: declared icon links, then `/favicon.ico`.
+fn homepage_icon_candidates(html: &str, base: &Url) -> Vec<String> {
+    let mut candidates = icon_links(html, base, MAX_ICON_CANDIDATES);
     let mut fallback = base
         .join("/favicon.ico")
         .expect("an absolute HTTP(S) base always joins a root-relative path");
     fallback.set_fragment(None);
-    fallback.to_string()
+    let fallback = fallback.to_string();
+    if !candidates.contains(&fallback) {
+        candidates.push(fallback);
+    }
+    candidates
 }
 
-/// Extracts the first HTTP(S) icon link declared by bounded HTML, resolved against its base.
+/// Extracts up to `max` distinct HTTP(S) icon links declared by bounded HTML, in document
+/// order, resolved against the base.
 ///
 /// Accepts `rel` tokens `icon` and `apple-touch-icon` (this naturally excludes the SVG-only
 /// `mask-icon` token) and skips `data:` targets, which cannot be fetched like a URL.
-fn first_icon_link(html: &str, base: &Url) -> Option<String> {
+fn icon_links(html: &str, base: &Url, max: usize) -> Vec<String> {
+    let mut links: Vec<String> = Vec::new();
+    if max == 0 {
+        return links;
+    }
     let lowered = html.to_ascii_lowercase();
     let mut cursor = 0;
     while let Some(found) = lowered[cursor..].find("<link") {
@@ -361,12 +380,16 @@ fn first_icon_link(html: &str, base: &Url) -> Option<String> {
         if is_icon_rel
             && let Some((_, href)) = attributes.iter().find(|(name, _)| name == "href")
             && let Some(resolved) = resolve_icon_href(&unescape_href(href), base)
+            && !links.contains(&resolved)
         {
-            return Some(resolved);
+            links.push(resolved);
+            if links.len() == max {
+                return links;
+            }
         }
         cursor = tag_end + 1;
     }
-    None
+    links
 }
 
 /// Resolves one link target to an absolute fragment-free HTTP(S) URL.
@@ -793,18 +816,20 @@ enum ItemPlan {
 
 /// Resolves one item's outcome without touching persistence so the decision stays testable.
 ///
-/// Source priority follows the roadmap order: an explicit catalog icon URL wins (2), a favicon
-/// discovered on the station homepage is the fallback (1), and neither leaves the item missing.
-/// Only transport-level failures are retryable; unusable URLs (invalid, non-public,
-/// unsuccessfully answered) and sources exceeding a fixed byte limit are permanent so a dead
-/// address or oversized payload cannot loop forever.
+/// Source priority follows the roadmap order: an explicit catalog icon URL wins (2), favicon
+/// candidates discovered on the station homepage are the fallback (1), and neither leaves the
+/// item missing. Homepage candidates are tried in order, so a dead declared link cannot hide
+/// a living root icon. Only transport-level failures are retryable; unusable URLs (invalid,
+/// non-public, unsuccessfully answered) and sources exceeding a fixed byte limit are
+/// permanent so a dead address or oversized payload cannot loop forever.
 async fn resolve_item_plan(fetcher: &dyn IconSourceFetcher, item: &IconJobItem) -> ItemPlan {
-    let (source, source_priority) = match item.source_url.as_deref() {
-        Some(source) => (source.to_owned(), 2),
+    let (sources, source_priority) = match item.source_url.as_deref() {
+        Some(source) => (vec![source.to_owned()], 2),
         None => match item.homepage_url.as_deref() {
             None => return ItemPlan::Missing,
-            Some(homepage) => match fetcher.discover_homepage_icon(homepage).await {
-                Ok(discovered) => (discovered, 1),
+            Some(homepage) => match fetcher.discover_homepage_icons(homepage).await {
+                Ok(candidates) if candidates.is_empty() => return ItemPlan::Permanent,
+                Ok(candidates) => (candidates, 1),
                 Err(IconValidationError::Decode) => {
                     return ItemPlan::Retryable;
                 }
@@ -812,14 +837,27 @@ async fn resolve_item_plan(fetcher: &dyn IconSourceFetcher, item: &IconJobItem) 
             },
         },
     };
-    match fetcher.fetch_icon(&source).await {
-        Ok(icon) => ItemPlan::Ready {
-            icon,
-            source_url: source,
-            source_priority,
-        },
-        Err(IconValidationError::Decode) => ItemPlan::Retryable,
-        Err(_) => ItemPlan::Permanent,
+    let mut saw_retryable = false;
+    for source in sources {
+        match fetcher.fetch_icon(&source).await {
+            Ok(icon) => {
+                return ItemPlan::Ready {
+                    icon,
+                    source_url: source,
+                    source_priority,
+                };
+            }
+            // A candidate that merely timed out or overflowed does not poison the rest:
+            // the next declared link may still work, and any retryable result keeps the
+            // whole item eligible for a later job.
+            Err(IconValidationError::Decode) => saw_retryable = true,
+            Err(_) => {}
+        }
+    }
+    if saw_retryable {
+        ItemPlan::Retryable
+    } else {
+        ItemPlan::Permanent
     }
 }
 
@@ -923,28 +961,72 @@ mod tests {
     use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
     use url::Url;
 
+    use std::sync::Mutex;
+
     use super::{
         FilesystemIconStorage, IconJobItem, IconSourceFetcher, IconStorage, IconStorageKey,
-        IconValidationError, ItemPlan, PreparedIcon, first_icon_link, homepage_icon_candidate,
+        IconValidationError, ItemPlan, PreparedIcon, homepage_icon_candidates, icon_links,
         prepare_icon, resolve_item_plan,
     };
 
     /// Deterministic offline fetcher used to verify job outcome classification.
+    ///
+    /// `fetched` records the candidate URLs the plan actually tried, in order.
     struct FakeFetcher {
-        discovered: Result<String, IconValidationError>,
-        icon: Result<PreparedIcon, IconValidationError>,
+        discovered: Result<Vec<String>, IconValidationError>,
+        icon: Mutex<Vec<Result<PreparedIcon, IconValidationError>>>,
+        fetched: Mutex<Vec<String>>,
+    }
+
+    impl FakeFetcher {
+        /// Builds a fetcher that answers every candidate fetch with the same result.
+        fn uniform(
+            discovered: Result<Vec<String>, IconValidationError>,
+            icon: Result<PreparedIcon, IconValidationError>,
+        ) -> Self {
+            Self {
+                discovered,
+                icon: Mutex::new(Vec::new()),
+                fetched: Mutex::new(Vec::new()),
+            }
+            .with_icon_results(icon)
+        }
+
+        /// Queues per-candidate fetch results; the last one repeats.
+        fn with_icon_results(self, first: Result<PreparedIcon, IconValidationError>) -> Self {
+            *self.icon.lock().unwrap() = vec![first];
+            self
+        }
+
+        /// Queues per-candidate fetch results; the last one repeats.
+        fn with_results(self, results: Vec<Result<PreparedIcon, IconValidationError>>) -> Self {
+            assert!(!results.is_empty());
+            *self.icon.lock().unwrap() = results;
+            self
+        }
+
+        /// URLs this fetcher was asked to fetch, in order.
+        fn fetched(&self) -> Vec<String> {
+            self.fetched.lock().unwrap().clone()
+        }
     }
 
     #[async_trait]
     impl IconSourceFetcher for FakeFetcher {
-        async fn fetch_icon(&self, _source: &str) -> Result<PreparedIcon, IconValidationError> {
-            self.icon.clone()
+        async fn fetch_icon(&self, source: &str) -> Result<PreparedIcon, IconValidationError> {
+            self.fetched.lock().unwrap().push(source.to_owned());
+            let mut results = self.icon.lock().unwrap();
+            if results.len() > 1 {
+                results.remove(0)
+            } else {
+                results[0].clone()
+            }
         }
 
-        async fn discover_homepage_icon(
+        async fn discover_homepage_icons(
             &self,
             _homepage: &str,
-        ) -> Result<String, IconValidationError> {
+        ) -> Result<Vec<String>, IconValidationError> {
             self.discovered.clone()
         }
     }
@@ -1015,8 +1097,8 @@ mod tests {
         let base = Url::parse("https://radio.example/en/index.html").unwrap();
         let html = r#"<html><head><LINK REL="shortcut icon" HREF='/static/img/favicon.png'><link rel="stylesheet" href="styles.css"></head><body/></html>"#;
         assert_eq!(
-            first_icon_link(html, &base).as_deref(),
-            Some("https://radio.example/static/img/favicon.png")
+            icon_links(html, &base, 4),
+            vec!["https://radio.example/static/img/favicon.png"]
         );
     }
 
@@ -1026,8 +1108,8 @@ mod tests {
         let html =
             r#"<head><link rel="apple-touch-icon" href="https://cdn.example/touch.png"></head>"#;
         assert_eq!(
-            first_icon_link(html, &base).as_deref(),
-            Some("https://cdn.example/touch.png")
+            icon_links(html, &base, 4),
+            vec!["https://cdn.example/touch.png"]
         );
     }
 
@@ -1040,32 +1122,38 @@ mod tests {
             r#"<link rel="icon" type="image/png" href="favicon.png?v=2&amp;size=64"></head>"#,
         );
         assert_eq!(
-            first_icon_link(html, &base).as_deref(),
-            Some("https://radio.example/deep/favicon.png?v=2&size=64")
+            icon_links(html, &base, 4),
+            vec!["https://radio.example/deep/favicon.png?v=2&size=64"]
         );
     }
 
     #[test]
-    fn homepage_without_links_falls_back_to_root_favicon() {
+    fn homepage_candidates_end_with_the_root_favicon_and_dedupe() {
         let base = Url::parse("https://radio.example/deep/page?from=nav#top").unwrap();
         assert_eq!(
-            first_icon_link("<html><head><title>x</title></head></html>", &base),
-            None
+            icon_links("<html><head><title>x</title></head></html>", &base, 4),
+            Vec::<String>::new()
         );
         assert_eq!(
-            homepage_icon_candidate("<html><head><title>x</title></head></html>", &base),
-            "https://radio.example/favicon.ico"
+            homepage_icon_candidates("<html><head><title>x</title></head></html>", &base),
+            vec!["https://radio.example/favicon.ico"]
+        );
+        let declared = r#"<head><link rel="icon" href="/a.png"><link rel="apple-touch-icon" href="/b.png"><link rel="icon" href="/a.png"></head>"#;
+        assert_eq!(
+            homepage_icon_candidates(declared, &base),
+            vec![
+                "https://radio.example/a.png",
+                "https://radio.example/b.png",
+                "https://radio.example/favicon.ico",
+            ]
         );
     }
 
     #[tokio::test]
     async fn explicit_catalog_source_wins_with_top_priority() {
-        let fetcher = FakeFetcher {
-            // A wrongly consulted homepage discovery with this result would end the item
-            // as Permanent instead of Ready, so this assertion also proves it is skipped.
-            discovered: Err(IconValidationError::Format),
-            icon: Ok(sample_prepared()),
-        };
+        // A wrongly consulted homepage discovery with this result would end the item
+        // as Permanent instead of Ready, so this assertion also proves it is skipped.
+        let fetcher = FakeFetcher::uniform(Err(IconValidationError::Format), Ok(sample_prepared()));
         let plan = resolve_item_plan(
             &fetcher,
             &item(
@@ -1085,10 +1173,10 @@ mod tests {
 
     #[tokio::test]
     async fn homepage_discovery_is_the_fallback_source() {
-        let fetcher = FakeFetcher {
-            discovered: Ok("https://radio.example/favicon.ico".to_owned()),
-            icon: Ok(sample_prepared()),
-        };
+        let fetcher = FakeFetcher::uniform(
+            Ok(vec!["https://radio.example/favicon.ico".to_owned()]),
+            Ok(sample_prepared()),
+        );
         let plan = resolve_item_plan(&fetcher, &item(None, Some("https://radio.example"))).await;
         assert!(matches!(
             plan,
@@ -1101,11 +1189,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn candidates_are_tried_in_order_until_one_is_ready() {
+        // First declared link is unusable, second is transport-flaky, root fallback works:
+        // production showed both patterns, and the tried URLs must be recorded in order.
+        let fetcher = FakeFetcher::uniform(
+            Ok(vec![
+                "https://radio.example/broken.png".to_owned(),
+                "https://cdn.example/touch.png".to_owned(),
+                "https://radio.example/favicon.ico".to_owned(),
+            ]),
+            Ok(sample_prepared()),
+        )
+        .with_results(vec![
+            Err(IconValidationError::Format),
+            Err(IconValidationError::Decode),
+            Ok(sample_prepared()),
+        ]);
+        let plan = resolve_item_plan(&fetcher, &item(None, Some("https://radio.example"))).await;
+        assert!(matches!(
+            plan,
+            ItemPlan::Ready {
+                source_priority: 1,
+                ref source_url,
+                ..
+            } if source_url == "https://radio.example/favicon.ico"
+        ));
+        assert_eq!(
+            fetcher.fetched(),
+            vec![
+                "https://radio.example/broken.png".to_owned(),
+                "https://cdn.example/touch.png".to_owned(),
+                "https://radio.example/favicon.ico".to_owned(),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn all_dead_candidates_stay_permanent_but_flaky_ones_retry() {
+        let all_dead = FakeFetcher::uniform(
+            Ok(vec!["https://radio.example/a.png".to_owned()]),
+            Err(IconValidationError::Format),
+        );
+        assert_eq!(
+            resolve_item_plan(&all_dead, &item(None, Some("https://radio.example"))).await,
+            ItemPlan::Permanent
+        );
+        let flaky = FakeFetcher::uniform(
+            Ok(vec![
+                "https://radio.example/a.png".to_owned(),
+                "https://radio.example/favicon.ico".to_owned(),
+            ]),
+            Err(IconValidationError::Decode),
+        );
+        assert_eq!(
+            resolve_item_plan(&flaky, &item(None, Some("https://radio.example"))).await,
+            ItemPlan::Retryable
+        );
+    }
+
+    #[tokio::test]
     async fn station_without_any_source_is_missing() {
-        let fetcher = FakeFetcher {
-            discovered: Ok("https://radio.example/favicon.ico".to_owned()),
-            icon: Ok(sample_prepared()),
-        };
+        let fetcher = FakeFetcher::uniform(
+            Ok(vec!["https://radio.example/favicon.ico".to_owned()]),
+            Ok(sample_prepared()),
+        );
         assert_eq!(
             resolve_item_plan(&fetcher, &item(None, None)).await,
             ItemPlan::Missing
@@ -1114,26 +1261,18 @@ mod tests {
 
     #[tokio::test]
     async fn transient_homepage_failures_are_retryable_and_dead_ones_permanent() {
-        let transient = FakeFetcher {
-            discovered: Err(IconValidationError::Decode),
-            icon: Ok(sample_prepared()),
-        };
+        let transient =
+            FakeFetcher::uniform(Err(IconValidationError::Decode), Ok(sample_prepared()));
         assert_eq!(
             resolve_item_plan(&transient, &item(None, Some("https://radio.example"))).await,
             ItemPlan::Retryable
         );
-        let dead = FakeFetcher {
-            discovered: Err(IconValidationError::Format),
-            icon: Ok(sample_prepared()),
-        };
+        let dead = FakeFetcher::uniform(Err(IconValidationError::Format), Ok(sample_prepared()));
         assert_eq!(
             resolve_item_plan(&dead, &item(None, Some("https://radio.example"))).await,
             ItemPlan::Permanent
         );
-        let oversized = FakeFetcher {
-            discovered: Err(IconValidationError::Size),
-            icon: Ok(sample_prepared()),
-        };
+        let oversized = FakeFetcher::uniform(Err(IconValidationError::Size), Ok(sample_prepared()));
         assert_eq!(
             resolve_item_plan(&oversized, &item(None, Some("https://radio.example"))).await,
             ItemPlan::Permanent
@@ -1142,26 +1281,26 @@ mod tests {
 
     #[tokio::test]
     async fn icon_fetch_failures_keep_the_boundary_classification() {
-        let retryable = FakeFetcher {
-            discovered: Ok("https://radio.example/favicon.ico".to_owned()),
-            icon: Err(IconValidationError::Decode),
-        };
+        let retryable = FakeFetcher::uniform(
+            Ok(vec!["https://radio.example/favicon.ico".to_owned()]),
+            Err(IconValidationError::Decode),
+        );
         assert_eq!(
             resolve_item_plan(&retryable, &item(None, Some("https://radio.example"))).await,
             ItemPlan::Retryable
         );
-        let permanent = FakeFetcher {
-            discovered: Ok("https://radio.example/favicon.ico".to_owned()),
-            icon: Err(IconValidationError::Format),
-        };
+        let permanent = FakeFetcher::uniform(
+            Ok(vec!["https://radio.example/favicon.ico".to_owned()]),
+            Err(IconValidationError::Format),
+        );
         assert_eq!(
             resolve_item_plan(&permanent, &item(None, Some("https://radio.example"))).await,
             ItemPlan::Permanent
         );
-        let oversized = FakeFetcher {
-            discovered: Ok("https://radio.example/favicon.ico".to_owned()),
-            icon: Err(IconValidationError::Size),
-        };
+        let oversized = FakeFetcher::uniform(
+            Ok(vec!["https://radio.example/favicon.ico".to_owned()]),
+            Err(IconValidationError::Size),
+        );
         assert_eq!(
             resolve_item_plan(&oversized, &item(None, Some("https://radio.example"))).await,
             ItemPlan::Permanent
