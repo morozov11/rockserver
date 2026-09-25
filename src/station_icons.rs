@@ -227,6 +227,18 @@ impl SafeIconFetcher {
         source: &str,
         limit: usize,
     ) -> Result<Vec<u8>, IconValidationError> {
+        self.fetch_bounded_opt(source, limit, false).await
+    }
+
+    /// Downloads a bounded body; `truncate_oversize` stops reading at the limit instead of
+    /// failing, which suits HTML inspection where the declared icon links sit in the document
+    /// head and a heavy page must not hide them behind a size rejection.
+    async fn fetch_bounded_opt(
+        &self,
+        source: &str,
+        limit: usize,
+        truncate_oversize: bool,
+    ) -> Result<Vec<u8>, IconValidationError> {
         let mut url = Url::parse(source).map_err(|_| IconValidationError::Format)?;
         for _ in 0..=5 {
             validate_public_url(&url).await?;
@@ -250,9 +262,10 @@ impl SafeIconFetcher {
             if !response.status().is_success() {
                 return Err(IconValidationError::Format);
             }
-            if response
-                .content_length()
-                .is_some_and(|size| size as usize > limit)
+            if !truncate_oversize
+                && response
+                    .content_length()
+                    .is_some_and(|size| size as usize > limit)
             {
                 return Err(IconValidationError::Size);
             }
@@ -263,6 +276,9 @@ impl SafeIconFetcher {
                 .map_err(|_| IconValidationError::Decode)?
             {
                 if body.len() + chunk.len() > limit {
+                    if truncate_oversize {
+                        break;
+                    }
                     return Err(IconValidationError::Size);
                 }
                 body.extend_from_slice(&chunk);
@@ -285,7 +301,12 @@ impl IconSourceFetcher for SafeIconFetcher {
     /// Returns the first HTTP(S) `<link rel="...icon...">` target, or the homepage-root
     /// `/favicon.ico` fallback when the page declares no usable icon link.
     async fn discover_homepage_icon(&self, homepage: &str) -> Result<String, IconValidationError> {
-        let body = self.fetch_bounded(homepage, MAX_HOMEPAGE_BYTES).await?;
+        // Heavy pages are truncated to the inspected prefix instead of failing: the declared
+        // icon links live in the document head, and production sampling showed ~17% of
+        // remaining permanent errors were pages heavier than the whole-body bound.
+        let body = self
+            .fetch_bounded_opt(homepage, MAX_HOMEPAGE_BYTES, true)
+            .await?;
         let base = Url::parse(homepage).map_err(|_| IconValidationError::Format)?;
         Ok(homepage_icon_candidate(
             &String::from_utf8_lossy(&body),
