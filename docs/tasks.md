@@ -1,5 +1,33 @@
 # Task log
 
+## 2026-09-25 — RS-ICON-012 deployed: false icon-import failures reduced and import rerun
+
+- Goal: verify the fetcher fixes against production error rates and resume
+  the interrupted backlog.
+- Result: deploy `53e4968` (fetcher User-Agent, 1 MiB homepage bound, oversize
+  classification) passed readiness and the admin sidebar layout shipped with
+  it. The first rerun processed 2,423 items with retryable errors down from
+  ~23% to ~10% before a host restart interrupted the job by design (startup
+  marks unfinished jobs interrupted); a fresh rerun (`55c25b38`, 13,813
+  items) is continuing the backlog. Total ready icons reached 3,015 of 16,825
+  and grows during the run. Sampling of the remaining permanent errors shows
+  they are now mostly genuine: homepages that declare no icon link and a
+  404/redirecting `/favicon.ico`, plus dead domains — not fetcher defects.
+  Note: host memory is tight (~1.9 GiB total, ~110 MiB free); operators
+  should expect import jobs to interrupt on host restarts and rerun them.
+- Checks: live counters through the protected admin API; failed-station
+  sampling probed from the VPS; `cargo fmt --check`, strict Clippy, and
+  `cargo test` (225 passed) for the code change.
+- Status: **deployed; rerun job in progress.**
+
+## DOCS-002 — 2026-09-24 — refresh README and active backlog
+
+- Goal: bring the repository front page and near-term backlog in line with the implemented service and current cross-repository handoffs.
+- Scope: update README.md and TODO.md; record the documentation task in docs/status.md and this log.
+- Result: README now summarizes the current search, voice, account, administrator, Yandex Smart Home, and device-control capabilities, points to the canonical architecture/roadmap documents, and identifies known search-retrieval work. TODO.md now tracks remaining SRCH-002 through SRCH-004, the RC-4/RM-4 live-state handoff, voice reliability, and dependent ESP32/Home Assistant milestones. It distinguishes deployed or implemented behavior from work that remains open or hardware-blocked.
+- Checks: cargo fmt --check; cargo clippy --all-targets --all-features -- -D warnings; cargo test; git diff --check. All passed. PostgreSQL and live-provider integration tests were skipped by their explicit environment/credential guards.
+- Status: **complete.**
+
 ## SRCH-001 — 2026-09-24 — non-blocking ONNX inference and session pool
 
 - Goal: isolate CPU-intensive ONNX embedding inference from Tokio runtime worker threads and enable concurrent search inference without serializing on a single mutex.
