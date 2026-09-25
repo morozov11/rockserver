@@ -1,34 +1,49 @@
-# Near-term TODO
+# Active follow-up
 
-1. Repository hygiene and documentation — complete
-   - Acceptance: Rust edition remains 2024; local build, IDE, and environment artifacts are ignored; repository purpose and boundaries are documented; formatting, linting, and tests pass.
+The service foundation, production deployment path, search/voice APIs, account and administrator flows, Yandex Smart Home sensor cabinet, and core device-control server are implemented. Completed work is recorded in [docs/tasks.md](docs/tasks.md); this file tracks the next useful increments.
 
-2. HTTP service skeleton — complete
-   - Added Axum routing, health endpoints, structured tracing, graceful shutdown, and router-level tests.
-   - Acceptance met: readiness and liveness endpoints return documented responses; shutdown is graceful; router tests require no network service; all required checks pass.
+## P0 — search retrieval correctness
 
-3. Search API contract — complete
-   - Added `api/openapi.yaml` with `POST /api/v1/search`, request/response schemas, examples, and the standard error shape.
-   - Acceptance met: the contract defines validation and status codes, includes `code`, `message`, `request_id`, and `details` for errors, and is covered by a contract validation check.
+These server tasks are the highest-priority open items in the [voice-search roadmap](docs/roadmap/voice-search-improvements.md).
 
-4. Deterministic in-memory search — complete
-   - Implemented separate HTTP DTOs, domain models, a `StationRepository` trait, a small built-in in-memory catalog, explicit locale/country/exclusion constraints, and stable ranking.
-   - Acceptance met: identical inputs use score-descending then station-ID-ascending order; DTO mapping and validation are covered by HTTP tests; malformed JSON returns 400 and well-formed invalid requests return 422 in the standard error shape; tests use neither external network nor AI providers.
+1. **SRCH-002 — true semantic candidate retrieval.** Use the E5 HNSW index to retrieve semantic candidates independently of lexical/tag matches, and prove index use with PostgreSQL EXPLAIN. Current SQL only applies cosine scoring after tag, full-text, or trigram candidate selection.
+2. **SRCH-003 — prefilter ordering.** Remove degraded-stream stations before the bounded candidate limit, and include trigram relevance in prefilter ordering so strong name matches are not displaced.
+3. **SRCH-004 — safer language inference.** Run semantic language classification only when the request explicitly mentions a broadcast language; use a soft ranking signal where a hard filter was not requested.
 
-5. PostgreSQL persistence foundation — complete
-   - Added versioned station/stream migrations, an idempotent six-station development seed, PostgreSQL `StationRepository`, automatic startup migrations, `DATABASE_URL` backend selection, in-memory fallback, database-aware readiness, and a local Compose service.
-   - Acceptance met: SQL preserves language/country/exclusion filters, limit, score-descending order and station-ID tie-break; unit and real PostgreSQL integration tests cover conversions, migrations, seed, search, exclusions, limit, ranking, and readiness; no compile-time SQL query macros require a live database.
+**Recently completed:** SRCH-001 moved ONNX inference to spawn_blocking and added a bounded session pool. This is complete in the current repository; the project status does not record a production rollout yet.
 
-6. Controlled Radio Browser import — complete
-   - Added separate provider/import-store boundaries, a bounded Radio Browser client, deterministic validation and normalization, provider-owned idempotent PostgreSQL upserts, durable import-run accounting, and a manual one-shot CLI outside HTTP startup and search.
-   - Acceptance met: the importer requires `DATABASE_URL`, sends an explicit User-Agent, bounds timeout/page size/page count/response bytes, preserves the six built-in stations, never deletes missing upstream records, logs run/page/count progress without credentials or stream URLs, and is covered by deterministic unit, local mock HTTP, and opt-in real PostgreSQL tests.
-   - pgvector, embeddings, LLM parsing, authentication, rate limiting, stream probing, and RockCast changes remain excluded.
+## Current cross-repository handoff
 
-7. Semantic ranking — complete
-   - Added provider-neutral query-parser and embedding traits, deterministic fakes and an explicit development embedder, dimension-neutral pgvector persistence with provenance, controlled backfill/update, and deterministic exact hybrid ranking.
-   - Acceptance met: providers never receive the full catalog; failures and missing/incompatible embeddings preserve metadata fallback; hard filters/exclusions precede final limit; station ID is the last tie-break; in-memory mode and public HTTP schemas remain compatible; real pgvector integration is covered.
+- **RC-4 / RM-4 — authoritative live playback UI.** In the RockMobile and RockCast repositories, render selected station, playback state, and volume from revisioned device state. A command acknowledgement alone is not proof that playback changed. Preserve the server-resolved station playback path and do not expose stream URLs to the controller. See [the live-control handoff](docs/roadmap/rockmobile-rockcast-live-control.md).
 
-8. Windows RockCast production path — in progress
-   - RockCast text search uses `POST /api/v1/search` with the local catalog retained as fallback. Its Voice control captures bounded PCM16 mono from the default microphone and uses the protected canonical WebSocket endpoint.
-   - RockServer exposes both Yandex SpeechKit adapters when `YANDEX_AI_API_KEY` is configured: `buffered_v1` remains the default compatibility mode; `streaming_v3` sends bounded chunks upstream and returns partial transcripts. Input-device selection, deterministic end-to-end coverage, richer cancellation/error states, provider retries/circuit breaking, and production hardening remain.
-   - ESP32 is outside the current delivery plan and remains a future client of the stabilized RockServer API.
+## P1 — relevance and voice reliability
+
+- **SRCH-005 — RRF ranking fusion**, after SRCH-002 and SRCH-003, to combine lexical and semantic retrieval ranks.
+- **SRCH-006 — query and station-text normalization** for E5, including removal of conversational playback words from embeddings.
+- **SRCH-007 — dynamic genre taxonomy** so LLM schemas and prompts use the database taxonomy rather than only a compiled list.
+- **SRCH-008 — LLM resilience:** circuit breaker, bounded intent cache, explicit model configuration, and search rate limiting.
+- **RC-VOICE-001 — audio capture quality** in RockCast: anti-aliased 48-to-16 kHz resampling and voice activity detection. Keep this work in the RockCast repository.
+- Complete deterministic end-to-end voice checks and improve visible cancellation, recognition, and provider-error states in the clients.
+
+## Device-control expansion
+
+The server-side control plane and the RockMobile/RockCast player integration have a working foundation. Continue by dependency order in the [device-control roadmap](docs/roadmap/device-control-tasks.md).
+
+- **DC-018 / DC-019:** ESP32 display surface and sensor modules. These belong in rock-esp32.
+- **DC-020:** sensor-to-display end-to-end acceptance is paused until physical sensors are available.
+- **DC-021 / DC-022:** a separate Home Assistant connection adapter and read-only entity synchronization. The existing user-linked Yandex Smart Home sensor feature does not implement this adapter.
+- **DC-023 onward:** constrained actuator actions, multi-domain voice, durable operations, timers, weather, and speech delivery follow their prerequisite contracts. Complete DC-037 production hardening before broad actuator or automation rollout.
+
+## P2 — measurement and operations
+
+- **SRCH-009 / SRCH-010:** incremental embedding backfill and safe model-version migration.
+- **SRCH-011:** golden search set with Recall@K and MRR once RRF is in place.
+- **SRCH-012:** search telemetry and log-privacy audit.
+- Capture production PostgreSQL query plans and capacity measurements as the search candidate path changes.
+
+## Suggested order
+
+1. SRCH-002 through SRCH-004, with repeatable relevance fixtures for before/after comparison.
+2. RC-4 / RM-4 live playback state in the client repositories.
+3. Remaining search and voice reliability work.
+4. ESP32 and Home Assistant milestones when their hardware and product prerequisites are ready.

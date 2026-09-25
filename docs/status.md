@@ -2,6 +2,12 @@
 
 Last updated: 2026-09-24
 
+## DOCS-002: README and active backlog refresh (2026-09-24)
+
+Updated the repository front page to describe the implemented service, production deployment path, API areas, repository boundaries, and current search limitation. Replaced the original early-stage checklist in TODO.md with the open search P0s, the RockMobile/RockCast playback-state handoff, voice reliability work, and dependent device-control milestones. The backlog distinguishes the implemented Yandex Smart Home sensor cabinet from the planned Home Assistant adapter and records that ESP32 sensor-display acceptance is paused pending hardware.
+
+Verification: cargo fmt --check; cargo clippy --all-targets --all-features -- -D warnings; cargo test; git diff --check. All passed. PostgreSQL, Yandex LLM, SpeechKit, and local-asset/database-gated integration cases remained ignored by their explicit guards.
+
 ## SRCH-001: non-blocking ONNX inference and session pool (implemented locally, 2026-09-24)
 
 Made local ONNX Runtime inference non-blocking for the Tokio async runtime and added concurrent multi-session inference support:
