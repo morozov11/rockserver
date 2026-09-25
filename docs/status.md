@@ -2,6 +2,16 @@
 
 Last updated: 2026-09-24
 
+## RS-ICON-012 follow-up: homepage prefix inspection (deployed 2026-09-25)
+
+Production sampling of the remaining permanent errors showed ~17% were
+homepages heavier than the 1 MiB bound whose declared icon links sit in the
+document head; the bounded fetch discarded collected bytes on oversize. The
+homepage inspection now truncates to the prefix and parses it instead of
+failing. The operator also requested a from-scratch import on the new host,
+so the station_icons metadata and job items are cleared before the fresh
+run, and 3 GiB of swap was added to the memory-tight VPS. Verification:
+`cargo fmt --check`, strict Clippy, `cargo test` (227 passed).
 ## DOCS-002: README and active backlog refresh (2026-09-24)
 
 Updated the repository front page to describe the implemented service, production deployment path, API areas, repository boundaries, and current search limitation. Replaced the original early-stage checklist in TODO.md with the open search P0s, the RockMobile/RockCast playback-state handoff, voice reliability work, and dependent device-control milestones. The backlog distinguishes the implemented Yandex Smart Home sensor cabinet from the planned Home Assistant adapter and records that ESP32 sensor-display acceptance is paused pending hardware.
