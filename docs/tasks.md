@@ -1,5 +1,23 @@
 # Task log
 
+## 2026-09-25 — RS-ICON-012 deployed with prefix inspection, swap, and a from-scratch import
+
+- Goal: ship the homepage-prefix fix and restart the icon backlog cleanly on
+  the operator's request.
+- Result: commit `f4afd57` deployed (`readiness=passed`); the homepage
+  inspection now parses the collected prefix of oversized pages instead of
+  discarding it, so heavy pages (~17% of the remaining permanent errors)
+  can still declare their icon. The VPS gained a persistent 3 GiB swapfile
+  after the earlier memory-pressure concern. Station icon metadata and job
+  history were cleared on explicit operator instruction, and a fresh job
+  (`67bfc4a7`) restarted over all 16,825 stations: the first 502 processed
+  items showed ready=307 (61%), missing=49, retryable=28 (6%),
+  permanent=118 (23%) — materially better than the 44%/23%/27% profile of
+  the first run before the fetcher fixes.
+- Checks: live counters through the protected admin API; public readiness
+  200; swap verified active on the host.
+- Status: **deployed; from-scratch import running.**
+
 ## 2026-09-25 — RS-ICON-012 deployed: false icon-import failures reduced and import rerun
 
 - Goal: verify the fetcher fixes against production error rates and resume
