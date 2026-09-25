@@ -212,19 +212,18 @@ optional values are omitted. It writes one UTF-8 env entry per line; the remote 
 `/opt/rockserver/release.env` is mode `0600`. Repeated runs replace only owner-controlled settings
 and those six optional Yandex entries while preserving generated `POSTGRES_PASSWORD`,
 `ROCKSERVER_API_BEARER_TOKEN`, and database settings. No secret value appears in summaries or
-release metadata. The VPS creates a custom-format backup, runs embedded migrations and then imports
-the bundled checksum-pinned complete SQLite catalog after PostgreSQL is healthy, before the service
-starts. The current pinned release contains 16,825 active playable stations and deployment refuses
+release metadata. Deploy-time `pg_dump` is disabled by operator decision
+(2026-09-25): the small VPS does not dump the database on each release, and
+backups remain a separate owner-managed duty. The VPS runs embedded migrations
+and then imports the bundled checksum-pinned complete SQLite catalog after
+PostgreSQL is healthy, before the service starts. The current pinned release contains 16,825 active playable stations and deployment refuses
 a release below the 16,000-station gate. The same one-shot seed job then runs the checksum-pinned
 ONNX E5 backfill for every imported station; the service starts only after both catalog and vector
 steps succeed. Repeating the importer and backfill is idempotent by stable station and stream
 identities and cannot substitute the 41-station development fixture. The only release
-output/record fields are commit, image ID, artifact checksum, catalog version/count, backup checksum
-and readiness. After a new VPS `pg_dump` has been copied and its SHA-256 is verified, the deploy
-script deletes older `rockserver-*.dump` files from `/opt/rockserver/backups`; exactly one local
-deploy rollback dump remains. If backup creation, copying, or checksum validation fails, cleanup is
-not run and the prior dump is kept. This small on-VPS copy is not a substitute for the approved
-encrypted off-VPS backup policy.
+output/record fields are commit, image ID, artifact checksum, catalog version/count and readiness;
+the release record keeps a `backup_sha256` continuity field with the value `-` while deploy-time
+backups are disabled.
 
 ONNX semantic search is enabled automatically. The committed
 `deploy/onnx-assets.lock.json` pins the exact `intfloat/multilingual-e5-small` ONNX graph,

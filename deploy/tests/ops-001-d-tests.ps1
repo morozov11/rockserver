@@ -76,7 +76,7 @@ try {
     if ($launcher -notmatch 'docker image save' -or $remote -notmatch 'docker image load') { throw 'registry-free artifact transfer is missing' }
     if ($remote -notmatch 'transferred image artifact checksum mismatch' -or $remote -notmatch 'revision label binds that verified artifact to commit' -or $remote -match 'loaded image ID does not match') { throw 'cross-engine image artifact verification is not portable' }
     if ($remote -notmatch 'Accept the former five-argument form' -or $remote -notmatch 'deploy requires stage, image, commit, and artifact hash') { throw 'operator-script upgrade compatibility is missing' }
-    if ($remote -notmatch 'ROCKSERVER_IMAGE="\$image".*\$compose exec' -or $remote -notmatch 'ROCKSERVER_IMAGE="\$image".*\$compose ps') { throw 'Compose interpolation environment is not preserved for database commands' }
+    if ($remote -notmatch 'ROCKSERVER_IMAGE="\$image".*\$compose config' -or $remote -notmatch 'ROCKSERVER_IMAGE="\$image".*\$compose up') { throw 'Compose interpolation environment is not preserved for deployment commands' }
     if ($remote -notmatch 'os\.chmod\(path, 0o755 if name == .libonnxruntime\.so. else 0o644\)') { throw 'ONNX runtime executable permissions are not repaired after download' }
     if ($remote -notmatch 'os\.chmod\(root, 0o755\)') { throw 'ONNX asset directory is not traversable by the container user' }
     if (($remote -notmatch 'tarfile\.open') -or ($remote -notmatch 'for _ in range\(8\)') -or ($remote -notmatch 'member\.issym\(\)') -or ($remote -notmatch 'member\.islnk\(\)')) { throw 'ONNX runtime symlink archive extraction is not safe' }
@@ -85,11 +85,11 @@ try {
     if ($remote -notmatch 'Activate the validated operator script before starting the worker' -or $remote -notmatch 'install -m 0750.*remote-ops-001-d\.sh.*release_root/remote-ops-001-d\.sh') { throw 'normal deploy does not activate its operator script before starting the worker' }
     if ($remote -notmatch 'status \*' -or $launcher -notmatch 'statusCommand' -or $launcher -notmatch 'connection-retrying' -or $launcher -notmatch 'AddMinutes\(90\)') { throw 'launcher cannot reconnect to a detached remote deploy worker' }
     if ($remote -notmatch 'catalog_seed_is_current' -or $remote -notmatch 'catalog seed skipped' -or $remote -notmatch 'OPS001D_CATALOG_SHA256' -or $remote -notmatch 'station_embeddings') { throw 'unchanged full catalog cannot skip redundant ONNX backfill' }
-    if ($remote -notmatch 'prune_backups\(\)' -or $remote -notmatch 'find -P "\$release_root/backups" -mindepth 1 -maxdepth 1 -type f -name ''rockserver-\*\.dump''' -or $remote -notmatch 'new PostgreSQL backup checksum is invalid; previous backups were kept') { throw 'on-VPS backup retention is not safe and bounded to one verified dump' }
-    $backupAt = $remote.IndexOf('pg_dump --format=custom')
+    if ($remote -match 'pg_dump --format=custom' -or $remote -match 'prune_backups') { throw 'deploy-time pg_dump must stay disabled by operator decision' }
+    if ($remote -notmatch "backup_hash='-'") { throw 'deploy summary backup continuity marker is missing' }
     $seedAt = $remote.IndexOf('run --rm catalog_seed')
     $readyAt = $remote.IndexOf('/health/ready')
-    if ($backupAt -lt 0 -or $seedAt -le $backupAt -or $readyAt -le $seedAt -or $remote -match 'fixture') { throw 'backup/seed/readiness fail-closed ordering changed' }
+    if ($seedAt -lt 0 -or $readyAt -le $seedAt -or $remote -match 'fixture') { throw 'seed/readiness fail-closed ordering changed' }
     if ($remote -notmatch 'applies embedded migrations' -or $remote -notmatch 'exact HTTPS URLs and SHA-256' -or $launcher -notmatch 'onnx-assets.lock.json') { throw 'migration or automatic ONNX safeguards are missing' }
     if ($remote -notmatch '\[\^\[:cntrl:\]\]\*\$') { throw 'owner.env control-character validation is missing' }
     if ($compose -notmatch 'import_full_catalog.*backfill_embeddings' -or $compose -notmatch 'ROCKSERVER_LOG_DIR: /var/log/rockserver' -or $compose -notmatch 'ROCKSERVER_SEMANTIC_PROVIDER: onnx-e5-local' -or $compose -notmatch 'ORT_DYLIB_PATH') { throw 'first-deploy ONNX backfill or seed logging is not wired' }
