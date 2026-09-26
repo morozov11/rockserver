@@ -1957,6 +1957,7 @@ components:
       properties:
         status: { type: string, enum: [idle, playing, paused, stopped, buffering, error] }
         station_id: { type: [string, "null"], minLength: 1, maxLength: 128 }
+        track_title: { type: string, minLength: 1, maxLength: 256, description: Current stream metadata title when available; absent when unknown. }
     VolumeRuntimeState:
       type: object
       additionalProperties: false

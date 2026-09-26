@@ -20,6 +20,8 @@ pub struct DeviceRuntimeState {
 pub struct PlaybackState {
     pub status: String,
     pub station_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_title: Option<String>,
 }
 /// Volume's current observed state.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

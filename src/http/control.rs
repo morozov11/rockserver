@@ -1034,6 +1034,7 @@ mod tests {
                 playback: Some(crate::device_control::PlaybackState {
                     status: "idle".into(),
                     station_id: None,
+                    track_title: None,
                 }),
                 volume: None,
                 display: None,
@@ -1083,6 +1084,7 @@ mod tests {
                 playback: Some(crate::device_control::PlaybackState {
                     status: "playing".into(),
                     station_id: None,
+                    track_title: None,
                 }),
                 volume: None,
                 display: None,

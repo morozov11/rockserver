@@ -230,6 +230,7 @@ fn resolve_now_playing(
     let Some(PlaybackState {
         status,
         station_id: Some(station_id),
+        ..
     }) = device
         .runtime_state
         .as_ref()

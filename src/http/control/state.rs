@@ -16,6 +16,7 @@ pub(super) fn valid_snapshot(snapshot: &DeviceStateSnapshot) -> bool {
         && (snapshot.state.playback.is_some()
             || snapshot.state.volume.is_some()
             || snapshot.state.display.is_some())
+        && valid_track_title(&snapshot.state)
 }
 
 /// Rejects a delta that cannot represent the next monotonic device observation.
@@ -25,6 +26,19 @@ pub(super) fn valid_delta(delta: &DeviceStateDelta) -> bool {
         && (delta.changes.playback.is_some()
             || delta.changes.volume.is_some()
             || delta.changes.display.is_some())
+        && valid_track_title(&delta.changes)
+}
+
+/// Keeps optional metadata within the published protocol's text bound.
+fn valid_track_title(state: &DeviceRuntimeState) -> bool {
+    state
+        .playback
+        .as_ref()
+        .and_then(|playback| playback.track_title.as_deref())
+        .is_none_or(|title| {
+            let length = title.chars().count();
+            (1..=256).contains(&length) && !title.chars().any(char::is_control)
+        })
 }
 
 /// Applies only fields explicitly included by a typed state delta.
@@ -88,5 +102,28 @@ pub(super) fn entity_revision(
             None,
         ),
         None => RevisionOrder::Next,
+    }
+}
+
+#[cfg(test)]
+mod track_title_tests {
+    use super::valid_track_title;
+    use crate::device_control::{DeviceRuntimeState, PlaybackState};
+
+    #[test]
+    fn rejects_empty_and_overlong_track_metadata() {
+        let mut state = DeviceRuntimeState {
+            playback: Some(PlaybackState {
+                status: "playing".into(),
+                station_id: Some("id".into()),
+                track_title: Some("Artist - Track".into()),
+            }),
+            ..Default::default()
+        };
+        assert!(valid_track_title(&state));
+        state.playback.as_mut().unwrap().track_title = Some(String::new());
+        assert!(!valid_track_title(&state));
+        state.playback.as_mut().unwrap().track_title = Some("x".repeat(257));
+        assert!(!valid_track_title(&state));
     }
 }

@@ -525,6 +525,7 @@ mod tests {
                 playback: Some(PlaybackState {
                     status: "playing".to_owned(),
                     station_id: Some("station-rock-001".to_owned()),
+                    track_title: None,
                 }),
                 volume: Some(VolumeState {
                     level,
@@ -563,7 +564,8 @@ mod tests {
 
     #[test]
     fn runtime_state_round_trips_the_latest_snapshot_for_state_scoped_callers() {
-        let snapshot = playing_snapshot(9, 62);
+        let mut snapshot = playing_snapshot(9, 62);
+        snapshot.state.playback.as_mut().unwrap().track_title = Some("Artist - Track".into());
         let payload = serde_json::to_value(dto(
             Some(&snapshot),
             runtime_state_projection(Some(snapshot.clone()), true),
@@ -582,6 +584,10 @@ mod tests {
         assert_eq!(
             payload["runtime_state"]["state"]["playback"]["station_id"],
             "station-rock-001"
+        );
+        assert_eq!(
+            payload["runtime_state"]["state"]["playback"]["track_title"],
+            "Artist - Track"
         );
         assert_eq!(payload["runtime_state"]["state"]["volume"]["level"], 62);
         assert_eq!(payload["runtime_state"]["state"]["volume"]["muted"], false);

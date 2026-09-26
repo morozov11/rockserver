@@ -1,5 +1,12 @@
 # Task log
 
+## 2026-09-26 — DC playback track metadata
+
+- Goal: expose the current track observed by RockCast to the remote RockMobile player.
+- Scope: add optional `track_title` to the runtime playback contract and preserve it through the existing directory projection; no new endpoint or identity field.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed. External database and live service tests remain ignored.
+- Status: implemented locally; deployment pending.
+
 ## 2026-09-25 — OPS: deploy-time pg_dump disabled and deploy debris cleaned
 
 - Goal: stop paying the per-release database dump on the small VPS and

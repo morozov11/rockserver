@@ -210,6 +210,7 @@ mod tests {
                 playback: Some(crate::device_control::PlaybackState {
                     status: status.to_owned(),
                     station_id: Some("station-rock-001".to_owned()),
+                    track_title: None,
                 }),
                 volume: Some(crate::device_control::VolumeState {
                     level,

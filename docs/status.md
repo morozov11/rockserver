@@ -1,6 +1,16 @@
 # Project status
 
-Last updated: 2026-09-24
+Last updated: 2026-09-26
+
+## Device playback track metadata (2026-09-26)
+
+`PlaybackRuntimeState` accepts an optional bounded `track_title` from a player and
+preserves it in the owner-scoped directory `runtime_state` projection. The
+station ID remains the playback identity; the title is display metadata only.
+RockCast publishes its observed stream title when available, and RockMobile
+reads the field for its remote player. Verified with `cargo fmt --check`, strict
+Clippy and `cargo test` (database and live service integration tests remain
+ignored without their external prerequisites). Deployment is pending.
 
 ## RS-ICON-012 follow-up: homepage prefix inspection (deployed 2026-09-25)
 
