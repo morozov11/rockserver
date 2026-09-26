@@ -11,7 +11,7 @@ RockServer is licensed under the [GNU General Public License, version 3 or later
 - **Radio discovery:** POST /api/v1/search interprets a natural-language request, applies catalog filters, and returns ranked playable stations. The service imports the shared RockCatalog baseline and Radio Browser data; RockCast keeps its local catalog as an offline fallback.
 - **Voice:** POST /api/v1/voice/command searches from recognized text. GET /api/v1/voice/stream accepts bounded PCM16 mono chunks and supports the configured Yandex SpeechKit buffered and streaming modes.
 - **Accounts and administration:** browser passkeys, paired native devices, an administrator console, station catalog and icon operations, and a user cabinet are implemented.
-- **Device control:** native-session authentication, a bounded WebSocket transport, presence, manifests and current state, an owner-scoped directory, and typed command routing are implemented. RockMobile-to-RockCast playback control has passed staging end-to-end verification.
+- **Device control:** native-session authentication, a bounded WebSocket transport, presence, manifests and current state, an owner-scoped directory, and typed command routing are implemented. RockMobile-to-RockCast playback control is deployed. The owner-scoped directory projects confirmed station ID, playback status, volume, and optional current `track_title` published by RockCast; RockMobile resolves station names through the exact catalog lookup. Two station switches and changing track titles were verified on a connected phone and desktop.
 - **Yandex Smart Home:** signed-in users can link an account and view current sensor properties in the browser cabinet. This is separate from the planned Home Assistant device-control adapter.
 
 The project journal records the search-latency and multi-metric Yandex Home releases on 2026-09-24. The SRCH-001 ONNX runtime work is complete in the current repository; its production rollout is not recorded as a release. See [project status](docs/status.md) for the deployment and verification history.
@@ -32,7 +32,7 @@ See [architecture notes](docs/architecture.md), the [source map](src/ARCHITECTUR
 ## Current priorities
 
 1. Finish the P0 search retrieval fixes: true HNSW candidate retrieval, healthy-stream and trigram-aware prefilter ordering, and an explicit-language gate for semantic language filters.
-2. Continue the RockMobile/RockCast handoff for authoritative live playback state. The UI should reflect revisioned device state, not infer playback from command acceptance.
+2. Complete the remaining physical acceptance matrix for authoritative RockMobile/RockCast playback state, including volume, stale/offline recovery, and voice microphone input. The UI already reads revisioned device state rather than inferring playback from command acceptance.
 3. Improve voice-path cancellation and error states, then measure search quality before further ranking changes.
 4. Continue ESP32 display/sensor and Home Assistant work when their dependencies and hardware are ready. ESP32 sensor-display end-to-end acceptance is paused pending physical sensors.
 

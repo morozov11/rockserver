@@ -10,7 +10,7 @@ station ID remains the playback identity; the title is display metadata only.
 RockCast publishes its observed stream title when available, and RockMobile
 reads the field for its remote player. Verified with `cargo fmt --check`, strict
 Clippy and `cargo test` (database and live service integration tests remain
-ignored without their external prerequisites). Deployed as commit `a3f2a13` on 2026-09-26; readiness passed.
+ignored without their external prerequisites). Deployed as commit `a3f2a13` on 2026-09-26; readiness passed. A connected RockMobile switched the running RockCast between two stations and displayed their distinct titles. Spoken microphone input and the full physical control matrix remain unverified after this release.
 
 ## RS-ICON-012 follow-up: homepage prefix inspection (deployed 2026-09-25)
 

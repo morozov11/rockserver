@@ -5,7 +5,7 @@
 - Goal: expose the current track observed by RockCast to the remote RockMobile player.
 - Scope: add optional `track_title` to the runtime playback contract and preserve it through the existing directory projection; no new endpoint or identity field.
 - Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed. External database and live service tests remain ignored.
-- Status: deployed as commit `a3f2a13` on 2026-09-26; readiness passed.
+- Status: deployed as commit `a3f2a13` on 2026-09-26; readiness passed. Two live phone-to-desktop station switches showed distinct track titles; microphone input and the full physical matrix remain open.
 
 ## 2026-09-25 — OPS: deploy-time pg_dump disabled and deploy debris cleaned
 
