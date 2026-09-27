@@ -445,3 +445,217 @@ async fn confident_semantic_language_filter_is_applied_before_search() {
             .all(|station| station.station.language.as_deref() == Some("en"))
     );
 }
+
+struct FakeIntentParser {
+    intent: QueryIntent,
+}
+
+#[async_trait]
+impl QueryParser for FakeIntentParser {
+    async fn parse(&self, _input: &QueryParserInput) -> Result<QueryIntent, QueryParserError> {
+        Ok(self.intent.clone())
+    }
+}
+
+struct AlwaysFailingQueryParser;
+
+#[async_trait]
+impl QueryParser for AlwaysFailingQueryParser {
+    async fn parse(&self, _input: &QueryParserInput) -> Result<QueryIntent, QueryParserError> {
+        Err(QueryParserError::safe("upstream provider unreachable"))
+    }
+}
+
+#[tokio::test]
+async fn deterministic_and_fallback_paths_produce_identical_terms_and_counts() {
+    let service_det = SearchService::with_providers(
+        Arc::new(InMemoryStationRepository::with_legacy_fixture_catalog()),
+        Arc::new(DeterministicQueryParser),
+        None,
+    );
+    let constraints = SearchConstraints {
+        limit: 10,
+        excluded_station_ids: BTreeSet::new(),
+    };
+    let input = QueryParserInput {
+        query: "включи немецкий рок".to_owned(),
+        locale: "ru-RU".to_owned(),
+    };
+
+    let outcome_det = service_det
+        .interpret_and_search(input.clone(), &constraints)
+        .await
+        .unwrap();
+
+    assert_eq!(outcome_det.query.core_term_count, 2);
+    assert_eq!(outcome_det.query.raw_query, "немецкий рок");
+    assert!(outcome_det.query.terms.contains(&"рок".to_owned()));
+    assert!(outcome_det.query.terms.contains(&"rock".to_owned()));
+    assert!(!outcome_det.query.terms.contains(&"рокк".to_owned()));
+
+    let service_fail = SearchService::with_providers(
+        Arc::new(InMemoryStationRepository::with_legacy_fixture_catalog()),
+        Arc::new(AlwaysFailingQueryParser),
+        None,
+    );
+    let outcome_fail = service_fail
+        .interpret_and_search(input.clone(), &constraints)
+        .await
+        .unwrap();
+
+    // Verify complete terms vector equality between deterministic and emergency fallback
+    assert_eq!(outcome_fail.query.terms, outcome_det.query.terms);
+    assert_eq!(
+        outcome_fail.query.core_term_count,
+        outcome_det.query.core_term_count
+    );
+    assert_eq!(outcome_fail.query.raw_query, outcome_det.query.raw_query);
+
+    // Verify complete terms vector equality with normalize_query
+    let query_norm = normalize_query("включи немецкий рок".to_owned(), "ru-RU".to_owned());
+    assert_eq!(query_norm.terms, outcome_det.query.terms);
+    assert_eq!(
+        query_norm.core_term_count,
+        outcome_det.query.core_term_count
+    );
+    assert_eq!(query_norm.raw_query, outcome_det.query.raw_query);
+}
+
+#[tokio::test]
+async fn deterministic_query_parser_normalizes_single_term_jazz() {
+    let service = SearchService::with_providers(
+        Arc::new(InMemoryStationRepository::with_legacy_fixture_catalog()),
+        Arc::new(DeterministicQueryParser),
+        None,
+    );
+    let outcome = service
+        .interpret_and_search(
+            QueryParserInput {
+                query: "поставь джаз".to_owned(),
+                locale: "ru-RU".to_owned(),
+            },
+            &SearchConstraints {
+                limit: 10,
+                excluded_station_ids: BTreeSet::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.query.core_term_count, 1);
+    assert_eq!(outcome.query.raw_query, "джаз");
+    assert!(outcome.query.terms.contains(&"джаз".to_owned()));
+    assert!(outcome.query.terms.contains(&"jazz".to_owned()));
+}
+
+#[tokio::test]
+async fn partial_fallback_preserves_provider_tags_and_sets_correct_core_term_count() {
+    let service = SearchService::with_providers(
+        Arc::new(InMemoryStationRepository::with_legacy_fixture_catalog()),
+        Arc::new(FakeIntentParser {
+            intent: QueryIntent {
+                action: SearchAction::Play,
+                terms: Vec::new(),
+                // Provider returned a non-deterministic tag ("jazz") alongside "rock"
+                tags: vec!["jazz".to_owned(), "rock".to_owned()],
+                language: None,
+                country_code: None,
+                core_term_count: 0,
+                raw_query: String::new(),
+            },
+        }),
+        None,
+    );
+    let outcome = service
+        .interpret_and_search(
+            QueryParserInput {
+                query: "включи немецкий рок".to_owned(),
+                locale: "ru-RU".to_owned(),
+            },
+            &SearchConstraints {
+                limit: 10,
+                excluded_station_ids: BTreeSet::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.query.core_term_count, 2);
+    assert_eq!(outcome.query.raw_query, "немецкий рок");
+    // Verify provider's distinct tag ("jazz") is preserved alongside "rock"
+    assert_eq!(outcome.query.tags, ["jazz", "rock"]);
+    assert!(outcome.query.terms.contains(&"рок".to_owned()));
+    assert!(outcome.query.terms.contains(&"rock".to_owned()));
+    assert!(!outcome.query.terms.contains(&"рокк".to_owned()));
+}
+
+#[tokio::test]
+async fn llm_path_preserves_single_core_term_count() {
+    let service = SearchService::with_providers(
+        Arc::new(InMemoryStationRepository::with_legacy_fixture_catalog()),
+        Arc::new(FakeIntentParser {
+            intent: QueryIntent {
+                action: SearchAction::Play,
+                terms: vec!["rock".to_owned()],
+                tags: vec!["rock".to_owned()],
+                language: None,
+                country_code: None,
+                core_term_count: 1,
+                raw_query: "rock".to_owned(),
+            },
+        }),
+        None,
+    );
+    let outcome = service
+        .interpret_and_search(
+            QueryParserInput {
+                query: "rock".to_owned(),
+                locale: "en-US".to_owned(),
+            },
+            &SearchConstraints {
+                limit: 10,
+                excluded_station_ids: BTreeSet::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.query.core_term_count, 1);
+    assert_eq!(outcome.query.raw_query, "rock");
+}
+
+#[tokio::test]
+async fn llm_path_preserves_cased_compound_terms_without_splitting() {
+    let service = SearchService::with_providers(
+        Arc::new(InMemoryStationRepository::with_legacy_fixture_catalog()),
+        Arc::new(FakeIntentParser {
+            intent: QueryIntent {
+                action: SearchAction::Play,
+                terms: vec!["RockRadio".to_owned()],
+                tags: vec!["rock".to_owned()],
+                language: None,
+                country_code: None,
+                core_term_count: 1,
+                raw_query: "RockRadio".to_owned(),
+            },
+        }),
+        None,
+    );
+    let outcome = service
+        .interpret_and_search(
+            QueryParserInput {
+                query: "RockRadio".to_owned(),
+                locale: "en-US".to_owned(),
+            },
+            &SearchConstraints {
+                limit: 10,
+                excluded_station_ids: BTreeSet::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.query.core_term_count, 1);
+    assert_eq!(outcome.query.raw_query, "rockradio");
+    assert!(outcome.query.terms.contains(&"rockradio".to_owned()));
+}

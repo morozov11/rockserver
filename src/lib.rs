@@ -2,6 +2,9 @@
 //!
 //! See `src/ARCHITECTURE.md` for a compact source map, dependency rules, and test locations.
 
+// Axum 0.8 `Response` exceeds clippy's default size threshold on 64-bit targets.
+#![allow(clippy::result_large_err)]
+
 /// Preview-first cleanup boundary for one exact staging account, device, or passkey row.
 pub mod account_cleanup;
 /// Administrator identity and persistence contracts separate from Rock accounts.

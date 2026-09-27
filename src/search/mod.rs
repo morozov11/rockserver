@@ -695,10 +695,12 @@ impl SearchService {
             Ok(intent) => intent,
             Err(error) => {
                 tracing::warn!(%error, "query parser failed; using deterministic metadata fallback");
-                DeterministicQueryParser
+                let fallback = DeterministicQueryParser
                     .parse(&input)
                     .await
-                    .expect("deterministic query parser cannot fail")
+                    .expect("deterministic query parser cannot fail");
+                validate_intent(fallback)
+                    .expect("deterministic query parser always produces valid intent")
             }
         };
         // Providers (LLMs) may occasionally return:
@@ -712,7 +714,8 @@ impl SearchService {
                 .parse(&input)
                 .await
                 .expect("deterministic query parser cannot fail");
-            let deterministic = validate_intent(deterministic.clone()).unwrap_or(deterministic);
+            let deterministic = validate_intent(deterministic)
+                .expect("deterministic query parser always produces valid intent");
 
             if intent.tags.is_empty() {
                 // Full fallback: provider returned nothing actionable.

@@ -1,6 +1,22 @@
 # Project status
 
-Last updated: 2026-09-24
+Last updated: 2026-09-27
+
+## SRCH-004a: single query term normalization and accurate core_term_count (implemented locally, 2026-09-27)
+
+Consolidated query term normalization and transliteration expansion into a single validation pass:
+1. `src/search/query.rs`:
+   - `validate_intent` is now the single point where structured search intent terms are finalized: terms are trimmed and lowercased before tokenization (preserving compound tokens from structured providers like `"RockRadio"`), tokenized, cleaned of command stop-words, and deduplicated while strictly preserving original word order to compute `raw_query` and `core_term_count` before transliteration expansion. Transliterations are then expanded exactly once via `expand_transliterations`.
+   - `deterministic_intent` now yields unexpanded original query terms (tokenized from original text with CamelCase split), computing `raw_query` and `core_term_count` on unexpanded terms. An internal transliterated copy is used solely to infer catalog genre tags (e.g. mapping `"рок"` to `"rock"`).
+   - `normalize_query` routes deterministic intent through `validate_intent`, ensuring unified normalization behavior.
+   - Removed unused `remove_stop_words` helper.
+2. `src/search/mod.rs`:
+   - Emergency query parser error fallback in `interpret_and_search_with_input_logs` passes the deterministic fallback intent through `validate_intent`.
+   - Partial fallback (`terms.is_empty()`) validates deterministic intent via `expect(...)` and preserves provider tags while adopting validated unexpanded-count deterministic terms and `core_term_count`.
+3. Scoring effect: eliminated score denominator inflation in metadata ranking (e.g., "включи немецкий рок" yields `core_term_count == 2` instead of ~5); the specific effect on search result ranking was not measured. Eliminated double-transliteration artifacts (such as `"рокк"` from `"rock"`).
+4. Tests: updated unit tests in `src/search/query.rs` (`transliteration_expands_terms`, `transliteration_expands_common_station_tokens`) to check `normalize_query` rather than unexpanded `deterministic_intent`, added tests for unexpanded deterministic intent, word-order preservation in `raw_query`, and LLM compound terms (`"RockRadio"`). Expanded service-level acceptance coverage in `src/search/tests.rs` with exact terms-vector comparisons across deterministic path, emergency fallback, and `normalize_query`, distinct provider tag preservation in partial fallback, and compound LLM terms.
+5. Toolchain note: added `#![allow(clippy::result_large_err)]` in `src/lib.rs` as a temporary crate-wide toolchain accommodation for Axum 0.8 `Response` size on Rust 1.98.
+Verification: `cargo fmt --check` passed; `cargo clippy --all-targets --all-features -- -D warnings` passed; `cargo test` passed (181 passed in lib, all unit suites green); disposable PostgreSQL integration test on fresh DB (`TEST_DATABASE_URL` with `--test-threads=1`: 6 passed, 5 pre-existing unrelated failures (account_cleanup, account_session_rotation, admin_bootstrap, admin_identity_foundation, device_control_manifest), command exits non-zero).
 
 ## SRCH-001: non-blocking ONNX inference and session pool (implemented locally, 2026-09-24)
 

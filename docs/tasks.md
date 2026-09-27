@@ -1,5 +1,16 @@
 # Task log
 
+## SRCH-004a — 2026-09-27 — single query term normalization and accurate core_term_count
+
+- Goal: ensure query terms are normalized and transliterated exactly once across all parser and fallback paths, restoring accurate `core_term_count` (the metadata score denominator) and preventing duplicate transliteration artifacts.
+- Scope: update `validate_intent`, `deterministic_intent`, `normalize_query` in `src/search/query.rs`; update parser error and partial fallback in `src/search/mod.rs`; update affected tests in `src/search/query.rs` and add regression tests in `src/search/tests.rs`; record toolchain lint suppression for `clippy::result_large_err` in `src/lib.rs`.
+- Result: `validate_intent` is now the single normalization point where tokenization, stop-word removal, order-preserving deduplication, `raw_query`, and `core_term_count` are finalized before `expand_transliterations`. Provider terms are lowercased before tokenization so compound terms like `"RockRadio"` are not split. `deterministic_intent` yields unexpanded terms (transliterating only an internal copy for genre tag matching). Both emergency and partial fallbacks and `normalize_query` route through `validate_intent`. Scoring denominator inflation is fixed (e.g. `core_term_count == 2` for "включи немецкий рок" instead of ~5; effect on result ranking not measured) and double-transliterations like `"рокк"` are eliminated.
+- Tests with changed expectations:
+  - `transliteration_expands_terms` and `transliteration_expands_common_station_tokens` in `src/search/query.rs`: moved checks from `deterministic_intent` to `normalize_query`, as `deterministic_intent` now intentionally returns unexpanded terms.
+- Toolchain: suppressed `clippy::result_large_err` at crate level (`src/lib.rs`) due to Axum 0.8 `Response` size on Rust 1.98, unrelated to search domain logic.
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`; `cargo test` (181 lib tests passed, 0 failed); disposable PostgreSQL integration test on fresh DB (`--test-threads=1`: 6 passed, 5 pre-existing unrelated failures (account_cleanup, account_session_rotation, admin_bootstrap, admin_identity_foundation, device_control_manifest), command exits non-zero).
+- Status: **implemented locally.**
+
 ## SRCH-001 — 2026-09-24 — non-blocking ONNX inference and session pool
 
 - Goal: isolate CPU-intensive ONNX embedding inference from Tokio runtime worker threads and enable concurrent search inference without serializing on a single mutex.

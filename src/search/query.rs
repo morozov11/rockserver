@@ -87,8 +87,12 @@ impl QueryParser for DeterministicQueryParser {
 }
 
 /// Builds a normalized query using the deterministic metadata interpretation.
+///
+/// Runs deterministic intent parsing followed by [`validate_intent`] so terms are
+/// deduplicated, stop-words removed, and transliteration variants expanded exactly once.
 pub fn normalize_query(original: String, locale: String) -> SearchQuery {
-    let intent = deterministic_intent(&original, &locale);
+    let intent = validate_intent(deterministic_intent(&original, &locale))
+        .expect("deterministic intent is always valid");
     SearchQuery::from_intent(original, locale, intent)
 }
 
@@ -134,21 +138,37 @@ pub(super) fn station_name_hint_queries(original: &str) -> Vec<String> {
         .collect()
 }
 
+/// Validates and normalizes structured query intent before repository search.
+///
+/// This is the single location where query terms are finalized:
+/// 1. Values are trimmed and converted to lowercase before tokenization (preserving
+///    compound terms from structured providers like `"RockRadio"`), tokenized via [`tokenize`]
+///    (splitting on non-alphanumeric separators), and stripped of command stop-words.
+/// 2. Unique terms are preserved in their original encounter order to compute `raw_query`
+///    and `core_term_count` before transliteration expansion.
+/// 3. Transliteration variants are added to `terms` via [`expand_transliterations`].
+///
+/// Also validates optional ISO language and country filters.
 pub(super) fn validate_intent(intent: QueryIntent) -> Result<QueryIntent, QueryParserError> {
-    // LLM can return multi-word `terms` like "викер радио" or include symbols.
-    // We must normalize them into atomic matchable tokens using `tokenize()`.
-    let mut terms = normalize_values(intent.terms);
-    terms = terms
-        .into_iter()
-        .flat_map(|term| tokenize(&term))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    remove_stop_words(&mut terms);
+    let mut raw_terms = Vec::new();
+    let mut seen = BTreeSet::new();
 
-    let raw_query = terms.join(" ");
-    let core_term_count = terms.len();
+    for raw in intent.terms {
+        let normalized = raw.trim().to_lowercase();
+        if normalized.is_empty() {
+            continue;
+        }
+        for token in tokenize(&normalized) {
+            if !STOP_WORDS.contains(&token.as_str()) && seen.insert(token.clone()) {
+                raw_terms.push(token);
+            }
+        }
+    }
 
+    let raw_query = raw_terms.join(" ");
+    let core_term_count = raw_terms.len();
+
+    let mut terms = raw_terms;
     expand_transliterations(&mut terms);
 
     let tags = canonical_tags(intent.tags);
@@ -187,15 +207,33 @@ pub(super) fn validate_intent(intent: QueryIntent) -> Result<QueryIntent, QueryP
     })
 }
 
+/// Deterministic query interpretation yielding unexpanded query terms.
+///
+/// Query terms are tokenized, cleaned of stop-words, and deduplicated in original
+/// word order without transliteration expansion. A transliterated copy is used
+/// internally only to infer catalog genre tags (e.g., mapping `"рок"` to `"rock"`).
+///
+/// The resulting intent must pass through [`validate_intent`] before repository search
+/// to apply transliteration expansions and finalize `core_term_count` and `raw_query`.
 pub(super) fn deterministic_intent(original: &str, _locale: &str) -> QueryIntent {
-    let mut terms = tokenize(original);
-    let country_code = infer_country_code(&terms);
-    let language = infer_language(&terms);
-    remove_stop_words(&mut terms);
+    let raw_tokens = tokenize(original);
+    let country_code = infer_country_code(&raw_tokens);
+    let language = infer_language(&raw_tokens);
+
+    let mut terms = Vec::new();
+    let mut seen = BTreeSet::new();
+    for token in raw_tokens {
+        if !STOP_WORDS.contains(&token.as_str()) && seen.insert(token.clone()) {
+            terms.push(token);
+        }
+    }
+
     let raw_query = terms.join(" ");
     let core_term_count = terms.len();
-    expand_transliterations(&mut terms);
-    let tags = canonical_tags(terms.clone());
+
+    let mut expanded_for_tags = terms.clone();
+    expand_transliterations(&mut expanded_for_tags);
+    let tags = canonical_tags(expanded_for_tags);
 
     QueryIntent {
         action: SearchAction::Play,
@@ -206,16 +244,6 @@ pub(super) fn deterministic_intent(original: &str, _locale: &str) -> QueryIntent
         core_term_count,
         raw_query,
     }
-}
-
-fn normalize_values(values: Vec<String>) -> Vec<String> {
-    values
-        .into_iter()
-        .map(|value| value.trim().to_lowercase())
-        .filter(|value| !value.is_empty())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
 }
 
 pub fn tokenize(value: &str) -> Vec<String> {
@@ -294,11 +322,6 @@ const STOP_WORDS: &[&str] = &[
     "on",
     "put",
 ];
-
-/// Removes command verbs from query terms so they don't dilute match scores.
-pub(super) fn remove_stop_words(terms: &mut Vec<String>) {
-    terms.retain(|term| !STOP_WORDS.contains(&term.as_str()));
-}
 
 /// Well-known word-level transliterations between Russian and Latin radio terms.
 const WORD_TRANSLIT: &[(&str, &str)] = &[
@@ -662,7 +685,8 @@ const RUSSIAN_COUNTRY_INFLECTIONS: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::{
-        QueryIntent, SearchAction, deterministic_intent, station_name_hint_queries, validate_intent,
+        QueryIntent, SearchAction, deterministic_intent, normalize_query,
+        station_name_hint_queries, validate_intent,
     };
 
     #[test]
@@ -683,6 +707,8 @@ mod tests {
         assert_eq!(intent.tags, ["calm"]);
         assert_eq!(intent.language.as_deref(), Some("en"));
         assert_eq!(intent.country_code.as_deref(), Some("US"));
+        assert_eq!(intent.core_term_count, 1);
+        assert_eq!(intent.raw_query, "jazz");
     }
 
     #[test]
@@ -759,28 +785,88 @@ mod tests {
         assert!(!intent.terms.contains(&"включи".to_owned()));
         assert!(intent.terms.contains(&"радио".to_owned()));
         assert!(intent.terms.contains(&"диджей".to_owned()));
+        assert_eq!(intent.core_term_count, 2);
+        assert_eq!(intent.raw_query, "радио диджей");
+    }
+
+    #[test]
+    fn deterministic_intent_keeps_terms_unexpanded() {
+        let intent = deterministic_intent("включи радио диджей", "ru-RU");
+        assert_eq!(intent.terms, ["радио", "диджей"]);
+        assert!(!intent.terms.contains(&"radio".to_owned()));
+        assert!(!intent.terms.contains(&"dj".to_owned()));
+        assert_eq!(intent.core_term_count, 2);
+        assert_eq!(intent.raw_query, "радио диджей");
     }
 
     #[test]
     fn transliteration_expands_terms() {
-        let intent = deterministic_intent("включи радио диджей", "ru-RU");
-        assert!(intent.terms.contains(&"radio".to_owned()));
-        assert!(intent.terms.contains(&"dj".to_owned()));
+        let query = normalize_query("включи радио диджей".to_owned(), "ru-RU".to_owned());
+        assert!(query.terms.contains(&"radio".to_owned()));
+        assert!(query.terms.contains(&"dj".to_owned()));
+        assert_eq!(query.core_term_count, 2);
+        assert_eq!(query.raw_query, "радио диджей");
     }
 
     #[test]
     fn transliteration_expands_common_station_tokens() {
-        let intent = deterministic_intent("включи радио ультра рокс викер боб год", "ru-RU");
-        assert!(intent.terms.contains(&"ультра".to_owned()));
-        assert!(intent.terms.contains(&"ultra".to_owned()));
-        assert!(intent.terms.contains(&"рокс".to_owned()));
-        assert!(intent.terms.contains(&"roks".to_owned()));
-        assert!(intent.terms.contains(&"викер".to_owned()));
-        assert!(intent.terms.contains(&"viker".to_owned()));
-        assert!(intent.terms.contains(&"боб".to_owned()));
-        assert!(intent.terms.contains(&"bob".to_owned()));
-        assert!(intent.terms.contains(&"год".to_owned()));
-        assert!(intent.terms.contains(&"god".to_owned()));
+        let query = normalize_query(
+            "включи радио ультра рокс викер боб год".to_owned(),
+            "ru-RU".to_owned(),
+        );
+        assert!(query.terms.contains(&"ультра".to_owned()));
+        assert!(query.terms.contains(&"ultra".to_owned()));
+        assert!(query.terms.contains(&"рокс".to_owned()));
+        assert!(query.terms.contains(&"roks".to_owned()));
+        assert!(query.terms.contains(&"викер".to_owned()));
+        assert!(query.terms.contains(&"viker".to_owned()));
+        assert!(query.terms.contains(&"боб".to_owned()));
+        assert!(query.terms.contains(&"bob".to_owned()));
+        assert!(query.terms.contains(&"год".to_owned()));
+        assert!(query.terms.contains(&"god".to_owned()));
+    }
+
+    #[test]
+    fn raw_query_preserves_word_order_without_duplicates() {
+        let query_a = normalize_query("включи рок немецкий".to_owned(), "ru-RU".to_owned());
+        assert_eq!(query_a.raw_query, "рок немецкий");
+        assert_eq!(query_a.core_term_count, 2);
+
+        let query_b = normalize_query("включи немецкий рок".to_owned(), "ru-RU".to_owned());
+        assert_eq!(query_b.raw_query, "немецкий рок");
+        assert_eq!(query_b.core_term_count, 2);
+
+        let query_dup = normalize_query("рок рок немецкий рок".to_owned(), "ru-RU".to_owned());
+        assert_eq!(query_dup.raw_query, "рок немецкий");
+        assert_eq!(query_dup.core_term_count, 2);
+    }
+
+    #[test]
+    fn normalize_query_single_normalization_no_duplicate_transliteration_artifacts() {
+        let query = normalize_query("включи немецкий рок".to_owned(), "ru-RU".to_owned());
+        assert_eq!(query.core_term_count, 2);
+        assert_eq!(query.raw_query, "немецкий рок");
+        assert!(query.terms.contains(&"рок".to_owned()));
+        assert!(query.terms.contains(&"rock".to_owned()));
+        assert!(!query.terms.contains(&"рокк".to_owned()));
+    }
+
+    #[test]
+    fn validate_intent_preserves_cased_llm_compound_terms() {
+        let intent = validate_intent(QueryIntent {
+            action: SearchAction::Play,
+            terms: vec!["RockRadio".to_owned()],
+            tags: Vec::new(),
+            language: None,
+            country_code: None,
+            core_term_count: 0,
+            raw_query: String::new(),
+        })
+        .unwrap();
+
+        assert_eq!(intent.core_term_count, 1);
+        assert_eq!(intent.raw_query, "rockradio");
+        assert!(intent.terms.contains(&"rockradio".to_owned()));
     }
 
     #[test]
