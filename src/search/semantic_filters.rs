@@ -1,4 +1,7 @@
 //! Confidence-gated semantic language filters built on the query embedding provider.
+//!
+//! Note: Per SRCH-004, the semantic language classifier is not currently invoked in the live
+//! search query path. It is retained for configuration, offline evaluation, and calibration (SRCH-011).
 
 use std::{env, sync::Arc};
 

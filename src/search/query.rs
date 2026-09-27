@@ -296,6 +296,8 @@ fn split_camel_case(token: &str) -> Vec<String> {
 const STOP_WORDS: &[&str] = &[
     "включи",
     "включить",
+    "вруби",
+    "врубить",
     "поставь",
     "поставить",
     "найди",
@@ -615,21 +617,241 @@ pub(super) fn transliterate_lat_to_ru(term: &str) -> String {
     out
 }
 
-fn infer_language(terms: &[String]) -> Option<String> {
-    let term_set = terms.iter().map(String::as_str).collect::<BTreeSet<_>>();
-    if term_set.contains("русскоязычный") || term_set.contains("русскоязычная")
-    {
-        Some("ru".to_owned())
-    } else if term_set.contains("англоязычный") || term_set.contains("англоязычная")
-    {
-        Some("en".to_owned())
-    } else {
-        None
-    }
+/// Language specification for explicit broadcast language patterns.
+struct ExplicitLanguageSpec {
+    code: &'static str,
+    prepositional: &'static [&'static str],
+    adverbial: &'static [&'static str],
+    yazychn_prefixes: &'static [&'static str],
+    english_names: &'static [&'static str],
 }
 
+const EXPLICIT_LANGUAGES: &[ExplicitLanguageSpec] = &[
+    ExplicitLanguageSpec {
+        code: "de",
+        prepositional: &["немецком"],
+        adverbial: &["немецки"],
+        yazychn_prefixes: &["немецкоязычн"],
+        english_names: &["german"],
+    },
+    ExplicitLanguageSpec {
+        code: "en",
+        prepositional: &["английском"],
+        adverbial: &["английски"],
+        yazychn_prefixes: &["англоязычн", "английскоязычн"],
+        english_names: &["english"],
+    },
+    ExplicitLanguageSpec {
+        code: "fr",
+        prepositional: &["французском"],
+        adverbial: &["французски"],
+        yazychn_prefixes: &["франкоязычн", "французскоязычн"],
+        english_names: &["french"],
+    },
+    ExplicitLanguageSpec {
+        code: "es",
+        prepositional: &["испанском"],
+        adverbial: &["испански"],
+        yazychn_prefixes: &["испаноязычн", "испанскоязычн"],
+        english_names: &["spanish"],
+    },
+    ExplicitLanguageSpec {
+        code: "it",
+        prepositional: &["итальянском"],
+        adverbial: &["итальянски"],
+        yazychn_prefixes: &["итальяноязычн", "итальянскоязычн"],
+        english_names: &["italian"],
+    },
+    ExplicitLanguageSpec {
+        code: "ru",
+        prepositional: &["русском"],
+        adverbial: &["русски"],
+        yazychn_prefixes: &["русскоязычн"],
+        english_names: &["russian"],
+    },
+    ExplicitLanguageSpec {
+        code: "uk",
+        prepositional: &["украинском"],
+        adverbial: &["украински"],
+        yazychn_prefixes: &["украиноязычн", "украинскоязычн"],
+        english_names: &["ukrainian"],
+    },
+    ExplicitLanguageSpec {
+        code: "pl",
+        prepositional: &["польском"],
+        adverbial: &["польски"],
+        yazychn_prefixes: &["польскоязычн"],
+        english_names: &["polish"],
+    },
+    ExplicitLanguageSpec {
+        code: "ja",
+        prepositional: &["японском"],
+        adverbial: &["японски"],
+        yazychn_prefixes: &["японоязычн", "японскоязычн"],
+        english_names: &["japanese"],
+    },
+    ExplicitLanguageSpec {
+        code: "zh",
+        prepositional: &["китайском"],
+        adverbial: &["китайски"],
+        yazychn_prefixes: &["китаеязычн", "китайскоязычн"],
+        english_names: &["chinese"],
+    },
+    ExplicitLanguageSpec {
+        code: "ko",
+        prepositional: &["корейском"],
+        adverbial: &["корейски"],
+        yazychn_prefixes: &["корееязычн", "корейскоязычн"],
+        english_names: &["korean"],
+    },
+    ExplicitLanguageSpec {
+        code: "tr",
+        prepositional: &["турецком"],
+        adverbial: &["турецки"],
+        yazychn_prefixes: &["турецкоязычн", "тюркоязычн"],
+        english_names: &["turkish"],
+    },
+    ExplicitLanguageSpec {
+        code: "pt",
+        prepositional: &["португальском"],
+        adverbial: &["португальски"],
+        yazychn_prefixes: &["португалоязычн", "португальскоязычн"],
+        english_names: &["portuguese"],
+    },
+    ExplicitLanguageSpec {
+        code: "sv",
+        prepositional: &["шведском"],
+        adverbial: &["шведски"],
+        yazychn_prefixes: &["шведоязычн", "шведскоязычн"],
+        english_names: &["swedish"],
+    },
+    ExplicitLanguageSpec {
+        code: "fi",
+        prepositional: &["финском"],
+        adverbial: &["фински"],
+        yazychn_prefixes: &["финноязычн", "финскоязычн"],
+        english_names: &["finnish"],
+    },
+    ExplicitLanguageSpec {
+        code: "no",
+        prepositional: &["норвежском"],
+        adverbial: &["норвежски"],
+        yazychn_prefixes: &["норвежскоязычн"],
+        english_names: &["norwegian"],
+    },
+    ExplicitLanguageSpec {
+        code: "da",
+        prepositional: &["датском"],
+        adverbial: &["датски"],
+        yazychn_prefixes: &["датскоязычн"],
+        english_names: &["danish"],
+    },
+    ExplicitLanguageSpec {
+        code: "nl",
+        prepositional: &["голландском", "нидерландском"],
+        adverbial: &["голландски", "нидерландски"],
+        yazychn_prefixes: &["голландскоязычн", "нидерландскоязычн"],
+        english_names: &["dutch"],
+    },
+    ExplicitLanguageSpec {
+        code: "cs",
+        prepositional: &["чешском"],
+        adverbial: &["чешски"],
+        yazychn_prefixes: &["чешскоязычн"],
+        english_names: &["czech"],
+    },
+    ExplicitLanguageSpec {
+        code: "el",
+        prepositional: &["греческом"],
+        adverbial: &["гречески"],
+        yazychn_prefixes: &["грекоязычн", "греческоязычн"],
+        english_names: &["greek"],
+    },
+    ExplicitLanguageSpec {
+        code: "hu",
+        prepositional: &["венгерском"],
+        adverbial: &["венгерски"],
+        yazychn_prefixes: &["венгроязычн", "венгерскоязычн"],
+        english_names: &["hungarian"],
+    },
+    ExplicitLanguageSpec {
+        code: "ro",
+        prepositional: &["румынском"],
+        adverbial: &["румынски"],
+        yazychn_prefixes: &["румыноязычн", "румынскоязычн"],
+        english_names: &["romanian"],
+    },
+];
+
+/// Infers an ISO 639 broadcast language hard filter only when explicitly requested.
+///
+/// Bare nationality adjectives (such as "немецкий" or "german") do not infer a language.
+/// If more than one language is matched, returns `None`.
+fn infer_language(terms: &[String]) -> Option<String> {
+    let mut matched = BTreeSet::new();
+
+    // Check two-token windows:
+    // - "на <prepositional>" (e.g. "на немецком")
+    // - "in <english_name>" (e.g. "in German")
+    //   NOTE (SRCH-004 fix): "на <prepositional>" and "in <Language>" are considered
+    //   explicit language requests ONLY when positioned at the end of the query OR
+    //   immediately followed by "языке" / "языка" / "language".
+    // - "по <adverbial>" (e.g. "по немецки", from "по-немецки")
+    // - "<english_name> language" (e.g. "German language", "German-language")
+    for (i, window) in terms.windows(2).enumerate() {
+        let first = window[0].as_str();
+        let second = window[1].as_str();
+
+        let is_valid_prep_context = (i + 1 == terms.len() - 1)
+            || (i + 2 < terms.len()
+                && matches!(terms[i + 2].as_str(), "языке" | "языка" | "language"));
+
+        for spec in EXPLICIT_LANGUAGES {
+            let is_prep_match = ((first == "на" && spec.prepositional.contains(&second))
+                || (first == "in" && spec.english_names.contains(&second)))
+                && is_valid_prep_context;
+
+            let is_other_two_token_match = (first == "по" && spec.adverbial.contains(&second))
+                || (second == "language" && spec.english_names.contains(&first));
+
+            if is_prep_match || is_other_two_token_match {
+                matched.insert(spec.code);
+            }
+        }
+    }
+
+    // Check single tokens:
+    // - "<stem>язычн..." in all inflected forms
+    // - "по<adverbial>" (e.g. "понемецки")
+    // - "<english_name>language"
+    for term in terms {
+        for spec in EXPLICIT_LANGUAGES {
+            if spec
+                .yazychn_prefixes
+                .iter()
+                .any(|prefix| term.starts_with(prefix))
+                || spec
+                    .adverbial
+                    .iter()
+                    .any(|adv| term.strip_prefix("по") == Some(adv))
+                || spec
+                    .english_names
+                    .iter()
+                    .any(|eng| term.strip_suffix("language") == Some(eng))
+            {
+                matched.insert(spec.code);
+            }
+        }
+    }
+
+    (matched.len() == 1).then(|| matched.into_iter().next().unwrap().to_owned())
+}
+
+/// Infers an ISO 3166-1 alpha-2 country hard filter only when a country name is explicitly recognized.
+///
+/// Demonyms and cultural adjectives (such as "немецкий" or "german") do not create country filters.
+/// Exactly one recognized country yields a filter; ambiguous or multiple countries return `None`.
 pub(super) fn infer_country_code(terms: &[String]) -> Option<String> {
-    // Country is a hard filter only when a name or demonym occurs in the command.
     let matched_codes = COUNTRY_ALIASES
         .split('|')
         .filter_map(|entry| {
@@ -649,16 +871,6 @@ pub(super) fn infer_country_code(terms: &[String]) -> Option<String> {
     (matched_codes.len() == 1).then(|| matched_codes.into_iter().next().unwrap().to_owned())
 }
 
-/// Returns whether a request explicitly asks for stations from a country.
-///
-/// Only unambiguous source-country prepositions are recognized. This prevents
-/// cultural adjectives such as "английский рок" from becoming country filters.
-pub(super) fn has_explicit_country_request(terms: &[String]) -> bool {
-    terms
-        .windows(2)
-        .any(|window| matches!(window[0].as_str(), "из" | "from") && !window[1].is_empty())
-}
-
 /// Returns whether a normalized country alias occurs as a complete token sequence.
 fn contains_country_alias(terms: &[String], alias: &str) -> bool {
     let alias_terms = alias.split_whitespace().collect::<Vec<_>>();
@@ -670,16 +882,82 @@ fn contains_country_alias(terms: &[String], alias: &str) -> bool {
     })
 }
 
-// ISO 3166-1 alpha-2 countries with English/Russian names and common demonyms.
+// ISO 3166-1 alpha-2 countries with English/Russian country names only (demonyms removed per SRCH-004).
 // Ambiguous forms such as "конго" are intentionally omitted.
-const COUNTRY_ALIASES: &str = "AF=afghanistan;афганистан;афганский;afghan|AL=albania;албания;албанский;albanian|DZ=algeria;алжир;алжирский;algerian|AD=andorra;андорра;andorran|AO=angola;ангола;angolan|AG=antigua and barbuda;антигуа и барбуда|AR=argentina;аргентина;аргентинский;argentinian|AM=armenia;армения;армянский;armenian|AU=australia;австралия;австралийский;australian|AT=austria;австрия;австрийский;austrian|AZ=azerbaijan;азербайджан;азербайджанский|BS=bahamas;багамы;bahamian|BH=bahrain;бахрейн;bahraini|BD=bangladesh;бангладеш;bangladeshi|BB=barbados;барбадос;barbadian|BY=belarus;беларусь;белоруссия;белорусский;belarusian|BE=belgium;бельгия;бельгийский;belgian|BZ=belize;белиз;belizean|BJ=benin;бенин;beninese|BT=bhutan;бутан;bhutanese|BO=bolivia;боливия;bolivian|BA=bosnia and herzegovina;босния и герцеговина;bosnian|BW=botswana;ботсвана;botswanan|BR=brazil;бразилия;бразильский;brazilian|BN=brunei;бруней;bruneian|BG=bulgaria;болгария;болгарский;bulgarian|BF=burkina faso;буркина фасо|BI=burundi;бурунди;burundian|CV=cabo verde;cape verde;кабо верде|KH=cambodia;камбоджа;cambodian|CM=cameroon;камерун;cameroonian|CA=canada;канада;канадский;canadian|CF=central african republic;центральноафриканская республика|TD=chad;чад;chadian|CL=chile;чили;chilean|CN=china;китай;китайский;chinese|CO=colombia;колумбия;colombian|KM=comoros;коморы;comorian|CG=republic of congo;республика конго|CD=democratic republic of congo;демократическая республика конго|CR=costa rica;коста рика;costa rican|CI=cote d ivoire;ivory coast;кот д ивуар;ivorian|HR=croatia;хорватия;croatian|CU=cuba;куба;cuban|CY=cyprus;кипр;cypriot|CZ=czechia;czech republic;чехия;czech|DK=denmark;дания;данский;danish|DJ=djibouti;джибути|DM=dominica;доминика|DO=dominican republic;доминиканская республика|EC=ecuador;эквадор;ecuadorian|EG=egypt;египет;египетский;egyptian|SV=el salvador;сальвадор;salvadoran|GQ=equatorial guinea;экваториальная гвинея|ER=eritrea;эритрея;eritrean|EE=estonia;эстония;эстонский;estonian|SZ=eswatini;свазиленд;эсватини|ET=ethiopia;эфиопия;ethiopian|FJ=fiji;фиджи;fijian|FI=finland;финляндия;финский;finnish|FR=france;франция;французский;french|GA=gabon;габон;gabonese|GM=gambia;гамбия;gambian|GE=georgia;грузия;грузинский;georgian|DE=germany;германия;немецкий;немецкая;немецкое;немецкие;german|GH=ghana;гана;ghanaian|GR=greece;греция;греческий;greek|GD=grenada;гренада|GT=guatemala;гватемала|GN=guinea;гвинея|GW=guinea bissau;гвинея бисау|GY=guyana;гайана|HT=haiti;гаити;haitian|VA=holy see;vatican;ватикан|HN=honduras;гондурас;honduran|HU=hungary;венгрия;венгерский;hungarian|IS=iceland;исландия;icelandic|IN=india;индия;индийский;indian|ID=indonesia;индонезия;indonesian|IR=iran;иран;iranian|IQ=iraq;ирак;iraqi|IE=ireland;ирландия;irish|IL=israel;израиль;israeli|IT=italy;италия;итальянский;italian|JM=jamaica;ямайка;jamaican|JP=japan;япония;японский;japanese|JO=jordan;иордания;jordanian|KZ=kazakhstan;казахстан;казахский;kazakh|KE=kenya;кения;kenyan|KI=kiribati;кирибати|KP=north korea;северная корея;северокорейский|KR=south korea;южная корея;южнокорейский|KW=kuwait;кувейт;kuwaiti|KG=kyrgyzstan;киргизия;кыргызстан;kyrgyz|LA=laos;лаос|LV=latvia;латвия;latvian|LB=lebanon;ливан;lebanese|LS=lesotho;лесото|LR=liberia;либерия;liberian|LY=libya;ливия;libyan|LI=liechtenstein;лихтенштейн|LT=lithuania;литва;lithuanian|LU=luxembourg;люксембург|MG=madagascar;мадагаскар;malagasy|MW=malawi;малави|MY=malaysia;малайзия;malaysian|MV=maldives;мальдивы|ML=mali;мали|MT=malta;мальта;maltese|MH=marshall islands;маршалловы острова|MR=mauritania;мавритания|MU=mauritius;маврикий|MX=mexico;мексика;мексиканский;mexican|FM=micronesia;микронезия|MD=moldova;молдова;moldovan|MC=monaco;монако|MN=mongolia;монголия;mongolian|ME=montenegro;черногория|MA=morocco;марокко;moroccan|MZ=mozambique;мозамбик|MM=myanmar;мьянма;бирма;burmese|NA=namibia;намибия|NR=nauru;науру|NP=nepal;непал;nepali|NL=netherlands;holland;нидерланды;голландия;dutch|NZ=new zealand;новая зеландия|NI=nicaragua;никарагуа;nicaraguan|NE=niger;нигер;nigerien|NG=nigeria;нигерия;nigerian|MK=north macedonia;северная македония;macedonian|NO=norway;норвегия;норвежский;norwegian|OM=oman;оман;omani|PK=pakistan;пакистан;pakistani|PW=palau;палау|PS=palestine;палестина;palestinian|PA=panama;панама;panamanian|PG=papua new guinea;папуа новая гвинея|PY=paraguay;парагвай;paraguayan|PE=peru;перу;peruvian|PH=philippines;филиппины;filipino|PL=poland;польша;польский;polish|PT=portugal;португалия;португальский;portuguese|QA=qatar;катар;qatari|RO=romania;румыния;румынский;romanian|RU=russia;россия;россии;российский;российская;русский;russian|RW=rwanda;руанда;rwandan|KN=saint kitts and nevis;сент китс и невис|LC=saint lucia;сент люсия|VC=saint vincent and the grenadines;сент винсент и гренадины|WS=samoa;самоа;samoan|SM=san marino;сан марино|ST=sao tome and principe;сан томе и принсипи|SA=saudi arabia;саудовская аравия;saudi|SN=senegal;сенегал;senegalese|RS=serbia;сербия;сербский;serbian|SC=seychelles;сейшелы|SL=sierra leone;сьерра леоне|SG=singapore;сингапур;singaporean|SK=slovakia;словакия;slovak|SI=slovenia;словения;slovenian|SB=solomon islands;соломоновы острова|SO=somalia;сомали;somali|ZA=south africa;южная африка;южноафриканский;south african|SS=south sudan;южный судан|ES=spain;испания;испанский;spanish|LK=sri lanka;шри ланка|SD=sudan;судан;sudanese|SR=suriname;суринам|SE=sweden;швеция;шведский;swedish|CH=switzerland;швейцария;швейцарский;swiss|SY=syria;сирия;syrian|TJ=tajikistan;таджикистан;tajik|TZ=tanzania;танзания;tanzanian|TH=thailand;таиланд;тайланд;тайский;thai|TL=timor leste;east timor;восточный тимор|TG=togo;того|TO=tonga;тонга|TT=trinidad and tobago;тринидад и тобаго|TN=tunisia;тунис;tunisian|TR=turkey;türkiye;турция;турецкий;turkish|TM=turkmenistan;туркменистан;turkmen|TV=tuvalu;тувалу|UG=uganda;уганда;ugandan|UA=ukraine;украина;украинский;ukrainian|AE=united arab emirates;объединенные арабские эмираты;эмираты;emirati|GB=united kingdom;great britain;britain;великобритания;британия;соединенное королевство;англия;британский;british;uk|US=united states;united states of america;сша;соединенные штаты;америка;американский;american;usa|UY=uruguay;уругвай;uruguayan|UZ=uzbekistan;узбекистан;узбекский;uzbek|VU=vanuatu;вануату|VE=venezuela;венесуэла;venezuelan|VN=vietnam;вьетнам;вьетнамский;vietnamese|YE=yemen;йемен;yemeni|ZM=zambia;замбия;zambian|ZW=zimbabwe;зимбабве;zimbabwean";
+const COUNTRY_ALIASES: &str = "AF=afghanistan;афганистан|AL=albania;албания|DZ=algeria;алжир|AD=andorra;андорра|AO=angola;ангола|AG=antigua and barbuda;антигуа и барбуда|AR=argentina;аргентина|AM=armenia;армения|AU=australia;австралия|AT=austria;австрия|AZ=azerbaijan;азербайджан|BS=bahamas;багамы|BH=bahrain;бахрейн|BD=bangladesh;бангладеш|BB=barbados;барбадос|BY=belarus;беларусь;белоруссия|BE=belgium;бельгия|BZ=belize;белиз|BJ=benin;бенин|BT=bhutan;бутан|BO=bolivia;боливия|BA=bosnia and herzegovina;босния и герцеговина|BW=botswana;ботсвана|BR=brazil;бразилия|BN=brunei;бруней|BG=bulgaria;болгария|BF=burkina faso;буркина фасо|BI=burundi;бурунди|CV=cabo verde;cape verde;кабо верде|KH=cambodia;камбоджа|CM=cameroon;камерун|CA=canada;канада|CF=central african republic;центральноафриканская республика|TD=chad;чад|CL=chile;чили|CN=china;китай|CO=colombia;колумбия|KM=comoros;коморы|CG=republic of congo;республика конго|CD=democratic republic of congo;демократическая республика конго|CR=costa rica;коста рика|CI=cote d ivoire;ivory coast;кот д ивуар|HR=croatia;хорватия|CU=cuba;куба|CY=cyprus;кипр|CZ=czechia;czech republic;чехия|DK=denmark;дания|DJ=djibouti;джибути|DM=dominica;доминика|DO=dominican republic;доминиканская республика|EC=ecuador;эквадор|EG=egypt;египет|SV=el salvador;сальвадор|GQ=equatorial guinea;экваториальная гвинея|ER=eritrea;эритрея|EE=estonia;эстония|SZ=eswatini;свазиленд;эсватини|ET=ethiopia;эфиопия|FJ=fiji;фиджи|FI=finland;финляндия|FR=france;франция|GA=gabon;габон|GM=gambia;гамбия|GE=georgia;грузия|DE=germany;германия|GH=ghana;гана|GR=greece;греция|GD=grenada;гренада|GT=guatemala;гватемала|GN=guinea;гвинея|GW=guinea bissau;гвинея бисау|GY=guyana;гайана|HT=haiti;гаити|VA=holy see;vatican;ватикан|HN=honduras;гондурас|HU=hungary;венгрия|IS=iceland;исландия|IN=india;индия|ID=indonesia;индонезия|IR=iran;иран|IQ=iraq;ирак|IE=ireland;ирландия|IL=israel;израиль|IT=italy;италия|JM=jamaica;ямайка|JP=japan;япония|JO=jordan;иордания|KZ=kazakhstan;казахстан|KE=kenya;кения|KI=kiribati;кирибати|KP=north korea;северная корея|KR=south korea;южная корея|KW=kuwait;кувейт|KG=kyrgyzstan;киргизия;кыргызстан|LA=laos;лаос|LV=latvia;латвия|LB=lebanon;ливан|LS=lesotho;лесото|LR=liberia;либерия|LY=libya;ливия|LI=liechtenstein;лихтенштейн|LT=lithuania;литва|LU=luxembourg;люксембург|MG=madagascar;мадагаскар|MW=malawi;малави|MY=malaysia;малайзия|MV=maldives;мальдивы|ML=mali;мали|MT=malta;мальта|MH=marshall islands;маршалловы острова|MR=mauritania;мавритания|MU=mauritius;маврикий|MX=mexico;мексика|FM=micronesia;микронезия|MD=moldova;молдова|MC=monaco;монако|MN=mongolia;монголия|ME=montenegro;черногория|MA=morocco;марокко|MZ=mozambique;мозамбик|MM=myanmar;мьянма;бирма|NA=namibia;намибия|NR=nauru;науру|NP=nepal;непал|NL=netherlands;holland;нидерланды;голландия|NZ=new zealand;новая зеландия|NI=nicaragua;никарагуа|NE=niger;нигер|NG=nigeria;нигерия|MK=north macedonia;северная македония|NO=norway;норвегия|OM=oman;оман|PK=pakistan;пакистан|PW=palau;палау|PS=palestine;палестина|PA=panama;панама|PG=papua new guinea;папуа новая гвинея|PY=paraguay;парагвай|PE=peru;перу|PH=philippines;филиппины|PL=poland;польша|PT=portugal;португалия|QA=qatar;катар|RO=romania;румыния|RU=russia;россия|RW=rwanda;руанда|KN=saint kitts and nevis;сент китс и невис|LC=saint lucia;сент люсия|VC=saint vincent and the grenadines;сент винсент и гренадины|WS=samoa;самоа|SM=san marino;сан марино|ST=sao tome and principe;сан томе и принсипи|SA=saudi arabia;саудовская аравия|SN=senegal;сенегал|RS=serbia;сербия|SC=seychelles;сейшелы|SL=sierra leone;сьерра леоне|SG=singapore;сингапур|SK=slovakia;словакия|SI=slovenia;словения|SB=solomon islands;соломоновы острова|SO=somalia;сомали|ZA=south africa;южная африка|SS=south sudan;южный судан|ES=spain;испания|LK=sri lanka;шри ланка|SD=sudan;судан|SR=suriname;суринам|SE=sweden;швеция|CH=switzerland;швейцария|SY=syria;сирия|TJ=tajikistan;таджикистан|TZ=tanzania;танзания|TH=thailand;таиланд;тайланд|TL=timor leste;east timor;восточный тимор|TG=togo;того|TO=tonga;тонга|TT=trinidad and tobago;тринидад и тобаго|TN=tunisia;тунис|TR=turkey;türkiye;турция|TM=turkmenistan;туркменистан|TV=tuvalu;тувалу|UG=uganda;уганда|UA=ukraine;украина|AE=united arab emirates;объединенные арабские эмираты;эмираты|GB=united kingdom;great britain;britain;великобритания;британия;соединенное королевство;англия;uk|US=united states;united states of america;сша;соединенные штаты;америка;usa|UY=uruguay;уругвай|UZ=uzbekistan;узбекистан|VU=vanuatu;вануату|VE=venezuela;венесуэла|VN=vietnam;вьетнам|YE=yemen;йемен|ZM=zambia;замбия|ZW=zimbabwe;зимбабве";
 
-/// Russian forms that cannot be safely derived by suffix stripping.
+/// Russian inflected case forms for world countries.
 const RUSSIAN_COUNTRY_INFLECTIONS: &[(&str, &str)] = &[
+    // Австрия (AT)
+    ("австрии", "AT"),
+    ("австрию", "AT"),
+    ("австрией", "AT"),
+    // Англия / Великобритания / Британия (GB)
     ("англии", "GB"),
+    ("англию", "GB"),
+    ("англией", "GB"),
+    ("великобритании", "GB"),
+    ("великобританию", "GB"),
+    ("великобританией", "GB"),
+    ("британии", "GB"),
+    ("британию", "GB"),
+    ("британией", "GB"),
+    // Бразилия (BR)
+    ("бразилии", "BR"),
+    ("бразилию", "BR"),
+    ("бразилией", "BR"),
+    // Германия (DE)
     ("германии", "DE"),
     ("германию", "DE"),
     ("германией", "DE"),
+    // Испания (ES)
+    ("испании", "ES"),
+    ("испанию", "ES"),
+    ("испанией", "ES"),
+    // Италия (IT)
+    ("италии", "IT"),
+    ("италию", "IT"),
+    ("италией", "IT"),
+    // Китай (CN)
+    ("китая", "CN"),
+    ("китаю", "CN"),
+    ("китаем", "CN"),
+    ("китае", "CN"),
+    // Польша (PL)
+    ("польши", "PL"),
+    ("польше", "PL"),
+    ("польшу", "PL"),
+    ("польшей", "PL"),
+    // Россия (RU)
+    ("россии", "RU"),
+    ("россию", "RU"),
+    ("россией", "RU"),
+    // США / Америка (US)
+    ("америки", "US"),
+    ("америке", "US"),
+    ("америку", "US"),
+    ("америкой", "US"),
+    // Турция (TR)
+    ("турции", "TR"),
+    ("турцию", "TR"),
+    ("турцией", "TR"),
+    // Украина (UA)
+    ("украины", "UA"),
+    ("украине", "UA"),
+    ("украину", "UA"),
+    ("украиной", "UA"),
+    // Франция (FR)
+    ("франции", "FR"),
+    ("францию", "FR"),
+    ("францией", "FR"),
+    // Швейцария (CH)
+    ("швейцарии", "CH"),
+    ("швейцарию", "CH"),
+    ("швейцарией", "CH"),
+    // Япония (JP)
+    ("японии", "JP"),
+    ("японию", "JP"),
+    ("японией", "JP"),
 ];
 
 #[cfg(test)]
@@ -745,23 +1023,116 @@ mod tests {
     }
 
     #[test]
-    fn country_filter_recognizes_world_country_names_and_demonyms() {
+    fn country_filter_recognizes_country_names_and_rejects_demonyms() {
         for (request, expected_country_code) in [
-            ("Включи немецкий рок", "DE"),
-            ("включи рок из Германии", "DE"),
-            ("Japanese jazz", "JP"),
-            ("Бразилия радио", "BR"),
-            ("south african metal", "ZA"),
-            ("Эмираты поп", "AE"),
+            ("включи рок из Германии", Some("DE")),
+            ("Бразилия радио", Some("BR")),
+            ("Эмираты поп", Some("AE")),
+            ("Включи немецкий рок", None),
+            ("Japanese jazz", None),
+            ("south african metal", None),
         ] {
             assert_eq!(
                 deterministic_intent(request, "ru-RU")
                     .country_code
                     .as_deref(),
-                Some(expected_country_code),
+                expected_country_code,
                 "{request}"
             );
         }
+    }
+
+    #[test]
+    fn table_a_deterministic_acceptance_queries() {
+        let cases: &[(&str, Option<&str>, Option<&str>, usize)] = &[
+            ("вруби станцию из германии", None, Some("DE"), 3),
+            ("станции германии", None, Some("DE"), 2),
+            ("рок из австрии", None, Some("AT"), 3),
+            ("вруби немецкий рок", None, None, 2),
+            ("рок на немецком", Some("de"), None, 3),
+            ("рок по-немецки", Some("de"), None, 3),
+            ("немецкоязычное радио", Some("de"), None, 2),
+            ("рок in German", Some("de"), None, 3),
+            ("включи джаз", None, None, 1),
+            ("американский рок", None, None, 2),
+            ("Включи английский рок", None, None, 2),
+            ("русскоязычный рок", Some("ru"), None, 2),
+            ("рок из прошлого", None, None, 3),
+            ("немецкий рок из австрии", None, Some("AT"), 4),
+        ];
+
+        for &(query_str, expected_lang, expected_country, expected_core_terms) in cases {
+            let intent = deterministic_intent(query_str, "ru-RU");
+            assert_eq!(
+                intent.language.as_deref(),
+                expected_lang,
+                "deterministic_intent language mismatch for: {query_str}"
+            );
+            assert_eq!(
+                intent.country_code.as_deref(),
+                expected_country,
+                "deterministic_intent country mismatch for: {query_str}"
+            );
+            assert_eq!(
+                intent.core_term_count, expected_core_terms,
+                "deterministic_intent core_term_count mismatch for: {query_str}"
+            );
+
+            let normalized = normalize_query(query_str.to_owned(), "ru-RU".to_owned());
+            assert_eq!(
+                normalized.language.as_deref(),
+                expected_lang,
+                "normalize_query language mismatch for: {query_str}"
+            );
+            assert_eq!(
+                normalized.country_code.as_deref(),
+                expected_country,
+                "normalize_query country mismatch for: {query_str}"
+            );
+            assert_eq!(
+                normalized.core_term_count, expected_core_terms,
+                "normalize_query core_term_count mismatch for: {query_str}"
+            );
+        }
+    }
+
+    #[test]
+    fn prepositional_language_requires_end_of_query_or_language_word() {
+        // Negative tests: prepositional language form not at end and not followed by language/языке/языка
+        assert_eq!(
+            deterministic_intent("рок на немецком фестивале", "ru-RU").language,
+            None
+        );
+        assert_eq!(
+            deterministic_intent("включи радио Tune In German Rock", "ru-RU").language,
+            None
+        );
+
+        // Positive tests: at end of query or followed by language word
+        assert_eq!(
+            deterministic_intent("рок на немецком", "ru-RU")
+                .language
+                .as_deref(),
+            Some("de")
+        );
+        assert_eq!(
+            deterministic_intent("песни на немецком языке", "ru-RU")
+                .language
+                .as_deref(),
+            Some("de")
+        );
+        assert_eq!(
+            deterministic_intent("рок in German", "ru-RU")
+                .language
+                .as_deref(),
+            Some("de")
+        );
+        assert_eq!(
+            deterministic_intent("rock in german language", "ru-RU")
+                .language
+                .as_deref(),
+            Some("de")
+        );
     }
 
     #[test]

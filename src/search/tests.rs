@@ -12,7 +12,8 @@ use super::{
     DeterministicQueryParser, Embedding, EmbeddingProvider, EmbeddingProviderError,
     InMemoryStationRepository, QueryIntent, QueryParser, QueryParserError, QueryParserInput,
     RankedStation, RepositoryError, SearchAction, SearchConstraints, SearchQuery, SearchService,
-    SemanticLanguageClassifier, StationRepository, UnavailableStationRepository, normalize_query,
+    SemanticLanguageClassifier, Station, StationHealth, StationRepository,
+    UnavailableStationRepository, normalize_query,
 };
 
 #[tokio::test]
@@ -405,7 +406,7 @@ async fn deterministic_fake_embedding_crosses_only_the_repository_boundary() {
 }
 
 #[tokio::test]
-async fn confident_semantic_language_filter_is_applied_before_search() {
+async fn semantic_language_classifier_is_not_invoked_in_search_path() {
     let classifier = SemanticLanguageClassifier::from_embeddings(vec![
         (
             "en",
@@ -437,13 +438,315 @@ async fn confident_semantic_language_filter_is_applied_before_search() {
         .await
         .unwrap();
 
-    assert_eq!(outcome.query.language.as_deref(), Some("en"));
+    // Per SRCH-004, the semantic language classifier is bypassed in the search request path.
+    assert_eq!(outcome.query.language, None);
+    assert_eq!(outcome.query.country_code, None);
+}
+
+fn acceptance_c_fixture() -> Vec<Station> {
+    vec![
+        Station {
+            id: "s-generic-de".to_owned(),
+            name: "Rock Antenne Test".to_owned(),
+            stream_url: "https://streams.example.com/de.mp3".to_owned(),
+            homepage_url: None,
+            favicon_url: None,
+            tags: vec!["rock".to_owned()],
+            language: Some("de".to_owned()),
+            country_code: Some("DE".to_owned()),
+            codec: Some("MP3".to_owned()),
+            bitrate_kbps: Some(192),
+            health: StationHealth::Healthy,
+        },
+        Station {
+            id: "s-at-rock".to_owned(),
+            name: "Radio Wien Rock Test".to_owned(),
+            stream_url: "https://streams.example.com/at.mp3".to_owned(),
+            homepage_url: None,
+            favicon_url: None,
+            tags: vec!["rock".to_owned()],
+            language: Some("de".to_owned()),
+            country_code: Some("AT".to_owned()),
+            codec: Some("MP3".to_owned()),
+            bitrate_kbps: Some(192),
+            health: StationHealth::Healthy,
+        },
+        Station {
+            id: "s-gb-rock".to_owned(),
+            name: "Planet Rock Test".to_owned(),
+            stream_url: "https://streams.example.com/gb.mp3".to_owned(),
+            homepage_url: None,
+            favicon_url: None,
+            tags: vec!["rock".to_owned()],
+            language: Some("en".to_owned()),
+            country_code: Some("GB".to_owned()),
+            codec: Some("MP3".to_owned()),
+            bitrate_kbps: Some(192),
+            health: StationHealth::Healthy,
+        },
+        Station {
+            id: "s-jazz".to_owned(),
+            name: "Jazz FM Test".to_owned(),
+            stream_url: "https://streams.example.com/jazz.mp3".to_owned(),
+            homepage_url: None,
+            favicon_url: None,
+            tags: vec!["jazz".to_owned()],
+            language: Some("en".to_owned()),
+            country_code: Some("GB".to_owned()),
+            codec: Some("MP3".to_owned()),
+            bitrate_kbps: Some(192),
+            health: StationHealth::Healthy,
+        },
+    ]
+}
+
+#[tokio::test]
+async fn table_a_search_service_deterministic_query_parser_acceptance() {
+    let repo = Arc::new(InMemoryStationRepository::from_stations(
+        acceptance_c_fixture(),
+    ));
+    let service = SearchService::new(repo);
+    let constraints = SearchConstraints {
+        limit: 10,
+        excluded_station_ids: BTreeSet::new(),
+    };
+
+    let cases: &[(&str, Option<&str>, Option<&str>, usize)] = &[
+        ("вруби станцию из германии", None, Some("DE"), 3),
+        ("станции германии", None, Some("DE"), 2),
+        ("рок из австрии", None, Some("AT"), 3),
+        ("вруби немецкий рок", None, None, 2),
+        ("рок на немецком", Some("de"), None, 3),
+        ("рок по-немецки", Some("de"), None, 3),
+        ("немецкоязычное радио", Some("de"), None, 2),
+        ("рок in German", Some("de"), None, 3),
+        ("включи джаз", None, None, 1),
+        ("американский рок", None, None, 2),
+        ("Включи английский рок", None, None, 2),
+        ("русскоязычный рок", Some("ru"), None, 2),
+        ("рок из прошлого", None, None, 3),
+        ("немецкий рок из австрии", None, Some("AT"), 4),
+    ];
+
+    for &(query_str, expected_lang, expected_country, expected_core_terms) in cases {
+        let outcome = service
+            .interpret_and_search(
+                QueryParserInput {
+                    query: query_str.to_owned(),
+                    locale: "ru-RU".to_owned(),
+                },
+                &constraints,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            outcome.query.language.as_deref(),
+            expected_lang,
+            "SearchService language mismatch for: {query_str}"
+        );
+        assert_eq!(
+            outcome.query.country_code.as_deref(),
+            expected_country,
+            "SearchService country mismatch for: {query_str}"
+        );
+        assert_eq!(
+            outcome.query.core_term_count, expected_core_terms,
+            "SearchService core_term_count mismatch for: {query_str}"
+        );
+    }
+
+    // Also verify the negative prepositional context queries through SearchService
+    let outcome_neg1 = service
+        .interpret_and_search(
+            QueryParserInput {
+                query: "рок на немецком фестивале".to_owned(),
+                locale: "ru-RU".to_owned(),
+            },
+            &constraints,
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome_neg1.query.language, None);
+
+    let outcome_neg2 = service
+        .interpret_and_search(
+            QueryParserInput {
+                query: "включи радио Tune In German Rock".to_owned(),
+                locale: "ru-RU".to_owned(),
+            },
+            &constraints,
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome_neg2.query.language, None);
+}
+
+#[tokio::test]
+async fn acceptance_c_search_service_in_memory_suite() {
+    let repo = Arc::new(InMemoryStationRepository::from_stations(
+        acceptance_c_fixture(),
+    ));
+    let service = SearchService::new(repo.clone());
+    let constraints = SearchConstraints {
+        limit: 10,
+        excluded_station_ids: BTreeSet::new(),
+    };
+
+    // 1. «вруби немецкий рок»: в выдаче все три рок-станции (включая s-gb-rock — доказательство отсутствия фильтра), нет s-jazz.
+    let outcome1 = service
+        .interpret_and_search(
+            QueryParserInput {
+                query: "вруби немецкий рок".to_owned(),
+                locale: "ru-RU".to_owned(),
+            },
+            &constraints,
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome1.query.language, None);
+    assert_eq!(outcome1.query.country_code, None);
+    let ids1 = outcome1
+        .stations
+        .iter()
+        .map(|s| s.station.id.as_str())
+        .collect::<Vec<_>>();
+    assert!(ids1.contains(&"s-generic-de"));
+    assert!(ids1.contains(&"s-at-rock"));
+    assert!(ids1.contains(&"s-gb-rock"));
+    assert!(!ids1.contains(&"s-jazz"));
+    assert_eq!(ids1.len(), 3);
+
+    // 2. «рок из германии»: только s-generic-de.
+    let outcome2 = service
+        .interpret_and_search(
+            QueryParserInput {
+                query: "рок из германии".to_owned(),
+                locale: "ru-RU".to_owned(),
+            },
+            &constraints,
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome2.query.country_code.as_deref(), Some("DE"));
+    let ids2 = outcome2
+        .stations
+        .iter()
+        .map(|s| s.station.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids2, ["s-generic-de"]);
+
+    // 3. «вруби станцию из германии»: разбор даёт country_code = DE; выдача на этой фикстуре пустая.
+    let outcome3 = service
+        .interpret_and_search(
+            QueryParserInput {
+                query: "вруби станцию из германии".to_owned(),
+                locale: "ru-RU".to_owned(),
+            },
+            &constraints,
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome3.query.country_code.as_deref(), Some("DE"));
     assert!(
-        outcome
-            .stations
-            .iter()
-            .all(|station| station.station.language.as_deref() == Some("en"))
+        outcome3.stations.is_empty(),
+        "expected empty result for 'вруби станцию из германии' on this fixture"
     );
+
+    // 4. «рок на немецком»: s-generic-de и s-at-rock, без s-gb-rock.
+    let outcome4 = service
+        .interpret_and_search(
+            QueryParserInput {
+                query: "рок на немецком".to_owned(),
+                locale: "ru-RU".to_owned(),
+            },
+            &constraints,
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome4.query.language.as_deref(), Some("de"));
+    assert_eq!(outcome4.query.country_code, None);
+    let ids4 = outcome4
+        .stations
+        .iter()
+        .map(|s| s.station.id.as_str())
+        .collect::<Vec<_>>();
+    assert!(ids4.contains(&"s-generic-de"));
+    assert!(ids4.contains(&"s-at-rock"));
+    assert!(!ids4.contains(&"s-gb-rock"));
+    assert_eq!(ids4.len(), 2);
+
+    // 5. Тот же результат через normalize_query + SearchService::search (голосовой путь).
+    let q1 = normalize_query("вруби немецкий рок".to_owned(), "ru-RU".to_owned());
+    let v_ids1 = service
+        .search(&q1, &constraints)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|s| s.station.id)
+        .collect::<Vec<_>>();
+    assert!(v_ids1.contains(&"s-generic-de".to_owned()));
+    assert!(v_ids1.contains(&"s-at-rock".to_owned()));
+    assert!(v_ids1.contains(&"s-gb-rock".to_owned()));
+    assert!(!v_ids1.contains(&"s-jazz".to_owned()));
+    assert_eq!(v_ids1.len(), 3);
+
+    let q2 = normalize_query("рок из германии".to_owned(), "ru-RU".to_owned());
+    let v_ids2 = service
+        .search(&q2, &constraints)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|s| s.station.id)
+        .collect::<Vec<_>>();
+    assert_eq!(v_ids2, ["s-generic-de"]);
+
+    let q3 = normalize_query("вруби станцию из германии".to_owned(), "ru-RU".to_owned());
+    let v_ids3 = service.search(&q3, &constraints).await.unwrap();
+    assert!(v_ids3.is_empty());
+
+    let q4 = normalize_query("рок на немецком".to_owned(), "ru-RU".to_owned());
+    let v_ids4 = service
+        .search(&q4, &constraints)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|s| s.station.id)
+        .collect::<Vec<_>>();
+    assert!(v_ids4.contains(&"s-generic-de".to_owned()));
+    assert!(v_ids4.contains(&"s-at-rock".to_owned()));
+    assert!(!v_ids4.contains(&"s-gb-rock".to_owned()));
+    assert_eq!(v_ids4.len(), 2);
+
+    // 6. Классификатор не влияет на результат: настоящий SemanticLanguageClassifier::from_embeddings
+    // с контролируемыми эмбеддингами, который дал бы уверенный en для запроса, передан в SearchService — language остаётся None.
+    let classifier = SemanticLanguageClassifier::from_embeddings(vec![
+        (
+            "en",
+            Embedding::new("fake", "1", 2, vec![1.0, 0.0]).unwrap(),
+        ),
+        (
+            "es",
+            Embedding::new("fake", "1", 2, vec![0.0, 1.0]).unwrap(),
+        ),
+    ]);
+    let service_with_classifier = SearchService::with_providers_and_language_classifier(
+        repo.clone(),
+        Arc::new(DeterministicQueryParser),
+        Some(Arc::new(FixedEmbeddingProvider)),
+        Some(Arc::new(classifier)),
+    );
+    let outcome_classifier = service_with_classifier
+        .interpret_and_search(
+            QueryParserInput {
+                query: "Включи английский рок".to_owned(),
+                locale: "ru-RU".to_owned(),
+            },
+            &constraints,
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome_classifier.query.language, None);
 }
 
 struct FakeIntentParser {

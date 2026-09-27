@@ -623,7 +623,9 @@ mod tests {
 
     #[test]
     fn domain_search_values_convert_to_stable_sql_parameters() {
-        let query = normalize_query("british classic rock".to_owned(), "en-GB".to_owned());
+        // "uk" is an explicit country name for GB, whereas "british" is a demonym
+        // which no longer sets country_code under SRCH-004.
+        let query = normalize_query("uk classic rock".to_owned(), "en-GB".to_owned());
         let constraints = SearchConstraints {
             limit: 7,
             excluded_station_ids: BTreeSet::from([

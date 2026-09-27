@@ -1,5 +1,18 @@
 # Task log
 
+## SRCH-004 — 2026-09-27 — explicit lexical gating for country and language filters
+
+- Goal: prevent nationality adjectives and uncalibrated classifiers from triggering destructive hard country and language SQL filters that wipe out catalog search results.
+- Scope: update `COUNTRY_ALIASES`, `RUSSIAN_COUNTRY_INFLECTIONS` (15 countries), `infer_language`, and `STOP_WORDS` in `src/search/query.rs`; ignore LLM language and country outputs in `src/search/llm.rs`; bypass `SemanticLanguageClassifier` in `src/search/mod.rs` and update notes in `src/search/semantic_filters.rs` and `.env.example`; update schema docs in `api/openapi.yaml`; adjust tests in `src/search/query.rs`, `src/persistence/postgres.rs`, `src/search/llm.rs`, and `src/search/tests.rs`.
+- Result: nationality adjectives ("немецкий рок", "german rock", "американский") never produce hard filters. Country filters are only applied when explicit country names are present ("из германии", "станции германии", "Germany"). Language filters are only applied when explicit phrasing is present ("на <prep>", "по-<adv>", "<stem>язычн...", "in <Lang>", "<Lang>-language"), with prepositional forms ("на <prep>", "in <Lang>") gated to end-of-query position or explicit language indicators ("языке", "языка", "language") to prevent false triggers (e.g. "рок на немецком фестивале", "Tune In German Rock"). LLM parser outputs for language and country are ignored in favor of deterministic lexical extraction. `SemanticLanguageClassifier` is bypassed in the live search path.
+- Tests with changed expectations:
+  - `country_filter_recognizes_country_names_and_rejects_demonyms` in `src/search/query.rs`: cultural/nationality adjectives ("Включи немецкий рок", "Japanese jazz", "south african metal") previously expected `Some(...)`, now assert `None`.
+  - `domain_search_values_convert_to_stable_sql_parameters` in `src/persistence/postgres.rs`: query changed from `"british classic rock"` to `"uk classic rock"` since "british" is a demonym and no longer sets `country_code: GB`.
+  - `valid_json_becomes_existing_query_intent` in `src/search/llm.rs`: LLM output `language: "en"` for query `"calm jazz"` is now ignored (`intent.language` is `None`).
+  - `semantic_language_classifier_is_not_invoked_in_search_path` in `src/search/tests.rs`: previously asserted classifier inferred `language: "en"`; now asserts `language: None`.
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`; `cargo test` (186 lib tests passed, all unit and acceptance suites green); disposable PostgreSQL integration test on fresh DB (`TEST_DATABASE_URL` with `--test-threads=1`: 6 passed, 5 pre-existing unrelated failures (`account_cleanup`, `account_session_rotation`, `admin_bootstrap`, `admin_identity_foundation`, `device_control_manifest`), command exits non-zero).
+- Status: **implemented locally.**
+
 ## SRCH-004a — 2026-09-27 — single query term normalization and accurate core_term_count
 
 - Goal: ensure query terms are normalized and transliterated exactly once across all parser and fallback paths, restoring accurate `core_term_count` (the metadata score denominator) and preventing duplicate transliteration artifacts.

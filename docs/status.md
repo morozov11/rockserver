@@ -2,6 +2,31 @@
 
 Last updated: 2026-09-27
 
+## SRCH-004: explicit lexical gating for country and language filters (implemented locally, 2026-09-27)
+
+Implemented strict lexical gating for broadcast language and country hard filters:
+1. `src/search/query.rs`:
+   - Cleaned `COUNTRY_ALIASES` by removing 190 adjectives and demonyms (e.g. "немецкий", "german", "американский", "american"). Adjectives of nationality never set `country_code` or `language`.
+   - Expanded Russian country inflections (`RUSSIAN_COUNTRY_INFLECTIONS`) across all grammatical cases for 15 key countries (DE, AT, CH, FR, ES, IT, RU, UA, PL, GB, US, JP, CN, TR, BR). Country filters require explicit country naming (e.g. "из германии", "станции германии", "Germany").
+   - Implemented `infer_language` supporting 22 languages (de, en, fr, es, it, ru, uk, pl, ja, zh, ko, tr, pt, sv, fi, no, da, nl, cs, el, hu, ro) strictly through explicit grammatical phrases: 2-token windows ("на <prep>", "по-<adv>", "in <Lang>", "<Lang>-language") and single-token rules ("<stem>язычн..."). Prepositional forms ("на <prep>", "in <Lang>") require end-of-query position or an immediate following language indicator ("языке", "языка", "language") to prevent false triggers (e.g. "рок на немецком фестивале", "Tune In German Rock").
+   - Added colloquial Russian command imperatives "вруби" and "врубить" to `STOP_WORDS`.
+2. `src/search/llm.rs`:
+   - In `LlmQueryParser::parse`, ignored LLM output `language` and `country_code`, overwriting them with deterministic lexical extraction from the raw query.
+3. `src/search/mod.rs` & `src/search/semantic_filters.rs`:
+   - Bypassed `SemanticLanguageClassifier` invocation in `SearchService::interpret_and_search_with_input_logs` request path. The classifier remains available for offline evaluation and calibration (SRCH-011).
+4. `api/openapi.yaml`:
+   - Updated descriptions for `NormalizedQuery.language` and `NormalizedQuery.country_code` reflecting that hard filters require explicit wording.
+5. Verification:
+   - `cargo fmt --check` passed.
+   - `cargo clippy --all-targets --all-features -- -D warnings` passed.
+   - `cargo test` passed (186 tests in lib, all unit and acceptance suites green).
+   - Disposable PostgreSQL integration test on fresh DB (`TEST_DATABASE_URL` with `--test-threads=1`): 6 passed, 5 pre-existing unrelated failures (`account_cleanup`, `account_session_rotation`, `admin_bootstrap`, `admin_identity_foundation`, `device_control_manifest`), command exits non-zero.
+6. Known limitations:
+   - `SemanticLanguageClassifier` is bypassed in the live request path;
+   - LLM language and country outputs are ignored;
+   - Requests with nationality adjectives (e.g. "немецкий рок") temporarily run without a hard country filter until ranking soft-boost / centroid calibration is introduced in SRCH-011/SRCH-005/SRCH-007.
+   - **International regression — do not deploy without SRCH-004b.** Explicit-language and country-name rules cover only Russian and a few English forms ("in German", "German-language"). Because LLM and semantic-classifier language/country outputs are now ignored, requests in other languages (e.g. "rock en allemand", "Rock auf Deutsch", "música en español", "Radio aus Deutschland") no longer get a hard language/country filter at all. Planned SRCH-004b: LLM returns language/country with a type (`explicit_language` / `country_name` / `nationality_adjective`) and a verbatim evidence span; the server applies a hard filter only for explicit types whose evidence occurs in the query, keeping these lexical rules as the fallback.
+
 ## SRCH-004a: single query term normalization and accurate core_term_count (implemented locally, 2026-09-27)
 
 Consolidated query term normalization and transliteration expansion into a single validation pass:

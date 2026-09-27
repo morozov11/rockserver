@@ -3164,11 +3164,15 @@ components:
             type: string
         language:
           type: [string, "null"]
-          description: ISO 639 language code when inferred.
+          description: >-
+            Hard ISO 639 language filter, inferred only when explicitly requested in an explicit form at the end of the query or accompanied by a language indicator
+            (e.g. "на немецком", "песни на немецком языке", "in German", "in german language", "по-немецки", "немецкоязычный"). Cultural or nationality adjectives (e.g. "немецкий рок") do not set this filter.
         country_code:
           type: [string, "null"]
           pattern: "^[A-Z]{2}$"
-          description: ISO 3166-1 alpha-2 country code when inferred.
+          description: >-
+            Hard ISO 3166-1 alpha-2 country filter, inferred only when an explicit country name is recognized
+            (e.g. "из Германии", "Germany"). Cultural or nationality adjectives (e.g. "немецкий рок") do not set this filter.
     StationResult:
       type: object
       additionalProperties: false

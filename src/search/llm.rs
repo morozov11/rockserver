@@ -6,9 +6,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::query::{
-    deterministic_intent, has_explicit_country_request, infer_country_code, tokenize,
-};
+use super::query::deterministic_intent;
 use super::taxonomy::CANONICAL_TAGS;
 use super::{QueryIntent, QueryParser, QueryParserError, QueryParserInput, SearchAction};
 
@@ -43,6 +41,10 @@ impl LlmRequest {
     }
 
     /// Creates the fixed structured-output request used for one validated radio command.
+    ///
+    /// Note: While the prompt and schema request `language` and `country_code`, these values
+    /// returned by the model are intentionally ignored per SRCH-004. Hard language and country
+    /// filters are strictly determined by deterministic lexical analysis of the user command.
     pub fn radio_intent(input: &QueryParserInput) -> Self {
         Self::new(
             format!(
@@ -150,17 +152,11 @@ impl QueryParser for LlmQueryParser {
         intent.tags.extend(deterministic.tags);
         intent.tags.sort();
         intent.tags.dedup();
-        // Locale describes recognition/UI, not a requested station-language filter. Preserve a
-        // validated provider language when deterministic wording has no unambiguous result.
-        intent.language = deterministic.language.or(intent.language);
-        // Provider output is not allowed to turn UI/STT locale into a country hard filter. A
-        // country constraint exists only when the original command names one explicitly.
-        let command_terms = tokenize(&input.query);
-        intent.country_code = infer_country_code(&command_terms).or_else(|| {
-            has_explicit_country_request(&command_terms)
-                .then_some(intent.country_code)
-                .flatten()
-        });
+        // Hard language and country filters are gated solely by deterministic lexical analysis
+        // of explicit user command phrasing (SRCH-004). Model-supplied language and country_code
+        // are intentionally ignored to prevent cultural/nationality adjectives from becoming filters.
+        intent.language = deterministic.language;
+        intent.country_code = deterministic.country_code;
         Ok(intent)
     }
 }
@@ -254,8 +250,73 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(intent.terms, ["Jazz"]);
-        assert_eq!(intent.language.as_deref(), Some("en"));
+        assert_eq!(intent.language.as_deref(), None);
         assert_eq!(intent.country_code, None);
+    }
+
+    #[tokio::test]
+    async fn acceptance_b_llm_path_ignores_model_language_and_country() {
+        // - «вруби немецкий рок», LLM: language:"de", country_code:"DE" -> language/country_code = None.
+        let intent1 = parser(
+            r#"{"action":"play","terms":["рок"],"tags":["rock"],"language":"de","country_code":"DE"}"#,
+        )
+        .parse(&QueryParserInput {
+            query: "вруби немецкий рок".to_owned(),
+            locale: "ru-RU".to_owned(),
+        })
+        .await
+        .unwrap();
+        assert_eq!(intent1.language, None);
+        assert_eq!(intent1.country_code, None);
+
+        // - «включи джаз», LLM: language:"en", country_code:"US" -> None/None.
+        let intent2 = parser(
+            r#"{"action":"play","terms":["джаз"],"tags":["jazz"],"language":"en","country_code":"US"}"#,
+        )
+        .parse(&QueryParserInput {
+            query: "включи джаз".to_owned(),
+            locale: "ru-RU".to_owned(),
+        })
+        .await
+        .unwrap();
+        assert_eq!(intent2.language, None);
+        assert_eq!(intent2.country_code, None);
+
+        // - «рок из прошлого», LLM: country_code:"GB" -> None.
+        let intent3 = parser(
+            r#"{"action":"play","terms":["рок","прошлого"],"tags":["rock"],"language":null,"country_code":"GB"}"#,
+        )
+        .parse(&QueryParserInput {
+            query: "рок из прошлого".to_owned(),
+            locale: "ru-RU".to_owned(),
+        })
+        .await
+        .unwrap();
+        assert_eq!(intent3.country_code, None);
+
+        // - «рок на немецком», LLM: language:null -> de.
+        let intent4 = parser(
+            r#"{"action":"play","terms":["рок"],"tags":["rock"],"language":null,"country_code":null}"#,
+        )
+        .parse(&QueryParserInput {
+            query: "рок на немецком".to_owned(),
+            locale: "ru-RU".to_owned(),
+        })
+        .await
+        .unwrap();
+        assert_eq!(intent4.language.as_deref(), Some("de"));
+
+        // - «вруби станцию из германии», LLM: country_code:null -> DE.
+        let intent5 = parser(
+            r#"{"action":"play","terms":["станцию"],"tags":[],"language":null,"country_code":null}"#,
+        )
+        .parse(&QueryParserInput {
+            query: "вруби станцию из германии".to_owned(),
+            locale: "ru-RU".to_owned(),
+        })
+        .await
+        .unwrap();
+        assert_eq!(intent5.country_code.as_deref(), Some("DE"));
     }
 
     #[tokio::test]

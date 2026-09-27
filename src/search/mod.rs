@@ -32,7 +32,7 @@ pub use semantic_filters::{
 /// are not reliable enough to claim that a station matches the requested genre.
 pub const MIN_RELEVANCE_SCORE: f64 = 0.35;
 
-use query::{has_explicit_country_request, station_name_hint_queries, validate_intent};
+use query::{station_name_hint_queries, validate_intent};
 use ranking::rank_stations;
 use taxonomy::{genre_ancestors, station_matches_requested_genre};
 
@@ -270,6 +270,12 @@ impl InMemoryStationRepository {
         }
     }
 
+    /// Builds an in-memory repository from an explicit list of stations for testing.
+    #[cfg(test)]
+    pub(crate) fn from_stations(stations: Vec<Station>) -> Self {
+        Self { stations }
+    }
+
     /// Provides a compact deterministic fixture for isolated unit tests.
     #[cfg(test)]
     fn legacy_fixture_catalog() -> Self {
@@ -496,6 +502,7 @@ pub struct SearchService {
     repository: Arc<dyn StationRepository + Send + Sync>,
     query_parser: Arc<dyn QueryParser>,
     embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
+    #[allow(dead_code)]
     language_classifier: Option<Arc<SemanticLanguageClassifier>>,
 }
 
@@ -528,8 +535,8 @@ impl SearchService {
 
     /// Creates search with an optional confidence-gated semantic language classifier.
     ///
-    /// The classifier is deliberately separate from the station ranking embedding so a
-    /// deployment can disable hard language filters without disabling semantic ranking.
+    /// The classifier structure is preserved for offline calibration and testing (SRCH-011),
+    /// but is intentionally not invoked in the live query path per SRCH-004.
     pub fn with_providers_and_language_classifier(
         repository: Arc<dyn StationRepository + Send + Sync>,
         query_parser: Arc<dyn QueryParser>,
@@ -729,23 +736,8 @@ impl SearchService {
             }
         }
 
-        let request_terms = tokenize(&input.query);
-        if intent.language.is_none()
-            && !has_explicit_country_request(&request_terms)
-            && let (Some(classifier), Some(embedding)) = (&self.language_classifier, &embedding)
-        {
-            if let Some(language) = classifier.classify(embedding) {
-                tracing::debug!(
-                    language = %language.code,
-                    score = language.score,
-                    margin = language.margin,
-                    "semantic language filter accepted"
-                );
-                intent.language = Some(language.code);
-            } else {
-                tracing::debug!("semantic language filter rejected as low confidence");
-            }
-        }
+        // Semantic language classification is deliberately not invoked in the search request path
+        // (narrow lexical gate per SRCH-004; offline evaluation and calibration tracked in SRCH-011).
 
         let query = SearchQuery::from_intent(input.query, input.locale, intent);
         if log_input {
