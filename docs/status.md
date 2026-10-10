@@ -1,6 +1,14 @@
 # Project status
 
-Last updated: 2026-10-02
+Last updated: 2026-10-10
+
+## Apache-2.0 adoption, contributors recognition, and ecosystem cross-linking — 2026-10-10
+
+- Adopted Apache License 2.0 (`LICENSE` file with `Copyright 2026 Aleksandr Morozov and contributors`) and added `CONTRIBUTORS.md` acknowledging Aleksandr Morozov and ArtVal across repositories (`rockserver`, `rockcast`, `rockmobile`, `rockcast-station-catalog`).
+- Added `license = "Apache-2.0"` in `Cargo.toml` (`rockserver`, `rockcast`) and updated `README.md` License sections.
+- Updated GitHub metadata (About description, topics, homepage URL) for `rockserver`, `rockcast`, `rockmobile`, `rockcast-station-catalog`, and `rocklight` to improve Googlebot crawling and GitHub topics discoverability.
+- Updated `README.md` across `rockserver`, `rockcast`, `rockmobile`, `rockcast-station-catalog`, and `rock-esp32` with an interlinked `## Ecosystem` section linking all components to each other and to `https://rockplatform.win`.
+- Verification: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` in `rockserver`.
 
 ## Voice search paging follows RockCast — 2026-10-02
 

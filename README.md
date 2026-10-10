@@ -1,10 +1,20 @@
 # RockServer
 
-RockServer is the Rust 2024 backend for RockCast radio discovery, voice search, accounts, and account-owned device control. It runs as a deployed service and exposes a versioned HTTP/WebSocket API. The implementation lives here; playback UI and firmware live in their own repositories.
+RockServer is the Rust 2024 backend for [RockCast](https://github.com/morozov11/rockcast) radio discovery, voice search, accounts, and account-owned device control. It runs as a deployed service at [rockplatform.win](https://rockplatform.win) and exposes a versioned HTTP/WebSocket API. The implementation lives here; playback UI and firmware live in their own repositories.
+
+## Ecosystem
+
+RockServer is part of the RockCast internet radio suite:
+
+- **[RockCast](https://github.com/morozov11/rockcast)** — Desktop internet radio player for Windows and Linux with Google Cast (CASTV2), local playback, and spectrum visualizer.
+- **[RockMobile](https://github.com/morozov11/rockmobile)** — Android companion app and radio player with background Media3 playback, offline catalog, and remote playback control.
+- **[RockServer](https://github.com/morozov11/rockserver)** *(this repository)* — Rust 2024 backend for semantic search (E5 ONNX), streaming voice recognition (SpeechKit), and WebSocket device control ([rockplatform.win](https://rockplatform.win)).
+- **[rock-esp32](https://github.com/morozov11/rock-esp32)** — Standalone hardware radio player and display firmware based on ESP32-P4.
+- **[RockCast Station Catalog](https://github.com/morozov11/rockcast-station-catalog)** — Curated baseline station catalog, JSON schema, and offline validation tools.
 
 ## License
 
-RockServer is licensed under the [GNU General Public License, version 3 or later (GPL-3.0-or-later)](https://www.gnu.org/licenses/gpl-3.0.html).
+RockServer is licensed under the [Apache License, Version 2.0](LICENSE).
 
 ## Current product
 
@@ -23,7 +33,7 @@ The project journal records the search-latency and multi-metric Yandex Home rele
 - PostgreSQL is the production backend. Migrations cover station catalog/search, accounts, administration, Yandex Home connections, and device-control state.
 - Radio Browser imports, stream probes, catalog imports, and embedding backfills run as explicit maintenance commands, outside HTTP startup and request handling.
 - LLM providers translate a request into bounded structured intent; they do not scan the station catalog.
-- RockCast retains its local station catalog for offline search fallback. Client and firmware changes belong in the RockCast, RockMobile, and rock-esp32 repositories.
+- RockCast retains its local station catalog for offline search fallback. Client and firmware changes belong in the [RockCast](https://github.com/morozov11/rockcast), [RockMobile](https://github.com/morozov11/rockmobile), and [rock-esp32](https://github.com/morozov11/rock-esp32) repositories.
 
 A cosine HNSW index exists for the E5 embedding provenance, but current SQL still builds candidates from tags, full-text search, and station-name similarity before applying vector scores. Semantic-only candidate retrieval and related search-prefilter fixes are open work in the [voice-search roadmap](docs/roadmap/voice-search-improvements.md).
 

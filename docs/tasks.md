@@ -1,5 +1,19 @@
 # Task log
 
+## 2026-10-10 — Apache-2.0 adoption, contributors recognition, and ecosystem cross-linking
+
+- Goal: enhance GitHub repository discoverability, establish permissive Apache-2.0 licensing, formally recognize contributors, and provide interlinked ecosystem documentation across the RockCast suite.
+- Scope:
+  - Adopted Apache License 2.0 (`LICENSE` file with `Copyright 2026 Aleksandr Morozov and contributors`) and added `CONTRIBUTORS.md` acknowledging Aleksandr Morozov and ArtVal across repositories (`rockserver`, `rockcast`, `rockmobile`, `rockcast-station-catalog`).
+  - Added package metadata `license = "Apache-2.0"` to `rockserver/Cargo.toml` and `rockcast/Cargo.toml`.
+  - Updated `README.md` License sections to point to the local Apache-2.0 `LICENSE` file.
+  - Updated GitHub repository descriptions, homepage URLs (`https://rockplatform.win`), and 10–20 keyword topics across `rockcast`, `rockserver`, `rockmobile`, `rockcast-station-catalog`, and `rocklight` via GitHub CLI (`rock-esp32` topics preserved per instruction).
+  - Added structured `## Ecosystem` cross-linking sections with direct repository links and `https://rockplatform.win` references to `rockserver/README.md`, `rockcast/README.md`, `rockmobile/README.md`, `rockcast-station-catalog/README.md`, and `rock-esp32/README.md`.
+  - Replaced unlinked text mentions with markdown links in documentation across all repositories.
+- Result: all repositories have Apache-2.0 licensing, contributors files, interlinked README headers, and keyword-optimized GitHub About sections.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`.
+- Status: **completed**.
+
 ## 2026-10-02 — FRONTEND-REDESIGN-008: table default and infinite scroll for station lists
 
 - Goal: implement stage 8 of `docs/frontend-redesign-plan.md` — make the table the default catalog view and page both views infinitely via `api.searchStations(query, limit, offset)` with `has_more`/`total`, plus progressive local reveal for favourites/history.
