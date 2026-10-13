@@ -49,6 +49,29 @@ async fn limit_is_applied_after_ranking() {
 }
 
 #[tokio::test]
+async fn pagination_offset_and_total_matches() {
+    let (status, first_page) = search(json!({"query": "rock", "limit": 1, "offset": 0})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(first_page["stations"].as_array().unwrap().len(), 1);
+    let total = first_page["total"].as_u64().unwrap();
+    assert!(total > 1);
+    assert_eq!(first_page["has_more"], true);
+
+    let (status, second_page) = search(json!({"query": "rock", "limit": 1, "offset": 1})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(second_page["stations"].as_array().unwrap().len(), 1);
+    assert_eq!(second_page["total"], total);
+    assert_ne!(
+        first_page["stations"][0]["id"],
+        second_page["stations"][0]["id"]
+    );
+
+    let (_, end_page) = search(json!({"query": "rock", "limit": 10, "offset": total})).await;
+    assert_eq!(end_page["stations"].as_array().unwrap().len(), 0);
+    assert_eq!(end_page["has_more"], false);
+}
+
+#[tokio::test]
 async fn equal_score_results_use_station_id_as_a_stable_tie_break() {
     let (_, first) = search(json!({"query": "rock"})).await;
     let (_, second) = search(json!({"query": "rock"})).await;
@@ -145,7 +168,7 @@ async fn api_v1_search_is_anonymous() {
 #[tokio::test]
 async fn anonymous_search_rejects_the_burst_before_work_is_started() {
     let app = rockserver::http::router();
-    for _ in 0..10 {
+    for _ in 0..60 {
         let response = app
             .clone()
             .oneshot(

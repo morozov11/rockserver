@@ -254,15 +254,9 @@ write_catalog_marker() {
   printf 'catalog_version=%s\ncatalog_count=%s\ncatalog_sha256=%s\n' "$version" "$count" "$checksum" > "$marker"
   chmod 0600 "$marker"
 }
-prune_backups() {
-  local retained_backup
-  retained_backup="${1:?retained backup required}"
-  [ -f "$retained_backup" ] || fail 'refusing to prune backups before the new backup is available'
-  find -P "$release_root/backups" -mindepth 1 -maxdepth 1 -type f -name 'rockserver-*.dump' ! -path "$retained_backup" -delete
-}
 deploy_internal() {
   local stage="${1:?stage required}" image="${2:?image required}" caddy_image="${3:?Caddy image required}" commit="${4:?commit required}" archive_hash="${5:?artifact hash required}" caddy_archive_hash="${6:?Caddy artifact hash required}" portable_image_id="${7:-}" legacy_caddy="${8:-0}"
-  local backup container backup_hash domain catalog_version catalog_count compose loaded_id
+  local backup_hash domain catalog_version catalog_count compose loaded_id
   require_root; validate_stage "$stage"
   [ -f "$env_file" ] || fail 'bootstrap has not provisioned the protected runtime env-file'
   ensure_host_log_dir
@@ -277,17 +271,10 @@ deploy_internal() {
   compose="docker compose --project-name rockserver --env-file $env_file --file $release_root/compose.yaml --file $release_root/compose.production.yaml"
   ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose config >/dev/null
   ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose up --detach --wait postgres
-  backup="$release_root/backups/rockserver-$(date -u +%Y%m%d-%H%M%SZ).dump"
-  ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --format=custom --file=/tmp/ops001d.dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"'
-  container="$(ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose ps -q postgres)"
-  docker cp "${container}:/tmp/ops001d.dump" "$backup"
-  ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose exec -T postgres rm -f /tmp/ops001d.dump
-  backup_hash="$(sha256sum "$backup" | awk '{print $1}')"
-  [ "${#backup_hash}" -eq 64 ] || fail 'new PostgreSQL backup checksum is invalid; previous backups were kept'
-  # Keep exactly one on-VPS deploy rollback point.  This happens only after a
-  # complete new dump was copied and checksummed, so a failed backup never
-  # erases the last recoverable dump.
-  prune_backups "$backup"
+  # Deploy-time pg_dump is disabled by operator decision: the small VPS cannot
+  # afford a full dump on every release, and backups are a separate owner-
+  # managed duty. The summary keeps the field only for format continuity.
+  backup_hash='-'
   # A full release replacement deletes/rebuilds derived vectors.  Skip that
   # costly operation only when the exact pinned release was already completed
   # and PostgreSQL still contains every station and every embedding.

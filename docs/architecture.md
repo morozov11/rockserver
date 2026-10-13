@@ -56,6 +56,10 @@ After STT yields final text, `CommandInterpreter` is the provider-neutral bounda
 
 The HTTP layer owns DTO deserialization, defaults, validation, request IDs, and `ErrorResponse` mapping. Query interpretation, embedding generation, ranking semantics, and persistence use separate boundaries. `LlmQueryParser` sends a fixed instruction and JSON-encoded command/locale to `LlmProvider`, requires an intent JSON Schema, and locally validates the bounded response; the Yandex implementation applies `Api-Key` authentication, status checks, response-size and timeout limits without logging its secret or raw upstream payload. The search domain owns the repository-neutral meaning of hard filtering, exclusions, deterministic scoring, score-descending/station-ID-ascending ordering, and final limit. `StationRepository` returns ranked domain models and exposes the readiness check. PostgreSQL executes those rules in SQL so it can filter, order, and limit before transferring rows; the in-memory fallback applies metadata rules in Rust. This avoids leaking SQL/vector types into the domain while keeping large-catalog work out of the HTTP and provider layers.
 
+## Device-control playback projection
+
+A paired RockCast publishes revisioned runtime playback state through the authenticated device WebSocket. RockServer validates an optional bounded `track_title`, stores the player state, and includes it in the owner-scoped REST/WebSocket directory projection. The title is display metadata only; `station_id` remains identity and command routing is unchanged. RockMobile resolves that ID through the exact station catalog endpoint, with its verified offline catalog as fallback, and renders the title only when present.
+
 ## Persistence
 
 At startup, `DATABASE_URL` is required; the service connects through SQLx, applies embedded versioned migrations from `migrations/`, and selects `PostgresStationRepository`. The schema separates station metadata from playable stream URLs, enforces stable IDs, positive bitrates, valid health states, at most one primary stream per station, timestamps, and useful metadata/relationship indexes. A second idempotent migration seeds PostgreSQL with the same six development stations used by isolated tests. The RS-006 migration adds provider ownership to stations and streams, unique source identities for idempotent upsert, and `import_runs` with status, counts, timestamps, and safe error summaries. Existing seed rows are backfilled as `builtin`; Radio Browser rows use `radio_browser`.
@@ -73,6 +77,16 @@ for recovery review. It never merges accounts, infers test ownership from names/
 browser/Google Password Manager entries. It requires the non-secret
 `ROCKSERVER_CLEANUP_ENV=staging` guard, and the deployment wrapper exposes it only through the
 existing root-scoped operator command path.
+
+The RM-012-A migration adds account-owned personal data: `favourite_records` and
+`history_records` keyed by `(user_id, record_id)` with nullable station and deletion markers,
+plus one shared monotonic revision sequence used as the per-account sync cursor. Pushes apply
+last-writer-wins on `updated_at` inside the synchronize transaction; live collections stay
+bounded at 500 rows each, history past 90 days expires at push time, tombstones are
+garbage-collected after 90 days, and rows of accounts deleted more than 30 days ago are purged
+by the retention sweep. `POST /api/v1/sync` authenticates with the native device-session Bearer
+and returns the account delta plus echoes of pushed records, so a rejected stale push never
+loops.
 
 When `DATABASE_URL` is absent, startup selects `InMemoryStationRepository`; both choices are logged by backend name without logging a DSN or password. SQL uses runtime-checked queries rather than compile-time query macros, so normal builds do not require a live database. `compose.yaml` uses a pgvector-capable PostgreSQL 17 image with development-only defaults and a healthcheck. Import and embedding backfill always require `DATABASE_URL` and never fall back to memory.
 

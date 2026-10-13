@@ -1,5 +1,568 @@
 # Task log
 
+## 2026-10-10 — Apache-2.0 adoption, contributors recognition, and ecosystem cross-linking
+
+- Goal: enhance GitHub repository discoverability, establish permissive Apache-2.0 licensing, formally recognize contributors, and provide interlinked ecosystem documentation across the RockCast suite.
+- Scope:
+  - Adopted Apache License 2.0 (`LICENSE` file with `Copyright 2026 Aleksandr Morozov and contributors`) and added `CONTRIBUTORS.md` acknowledging Aleksandr Morozov and ArtVal across repositories (`rockserver`, `rockcast`, `rockmobile`, `rockcast-station-catalog`).
+  - Added package metadata `license = "Apache-2.0"` to `rockserver/Cargo.toml` and `rockcast/Cargo.toml`.
+  - Updated `README.md` License sections to point to the local Apache-2.0 `LICENSE` file.
+  - Updated GitHub repository descriptions, homepage URLs (`https://rockplatform.win`), and 10–20 keyword topics across `rockcast`, `rockserver`, `rockmobile`, `rockcast-station-catalog`, and `rocklight` via GitHub CLI (`rock-esp32` topics preserved per instruction).
+  - Added structured `## Ecosystem` cross-linking sections with direct repository links and `https://rockplatform.win` references to `rockserver/README.md`, `rockcast/README.md`, `rockmobile/README.md`, `rockcast-station-catalog/README.md`, and `rock-esp32/README.md`.
+  - Replaced unlinked text mentions with markdown links in documentation across all repositories.
+- Result: all repositories have Apache-2.0 licensing, contributors files, interlinked README headers, and keyword-optimized GitHub About sections.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`.
+- Status: **completed**.
+
+## 2026-10-02 — FRONTEND-REDESIGN-008: table default and infinite scroll for station lists
+
+- Goal: implement stage 8 of `docs/frontend-redesign-plan.md` — make the table the default catalog view and page both views infinitely via `api.searchStations(query, limit, offset)` with `has_more`/`total`, plus progressive local reveal for favourites/history.
+- Scope:
+  - `web/src/paging.ts` (new): `mergeServerPage` — ID dedup, server-page-size offset accounting, empty-page stop, explicit `MAX_SEARCH_OFFSET` (10 000) boundary.
+  - `web/src/useStationPages.ts` (new): issuance hook with a single in-flight guard (ref), generation counter dropping late responses of superseded queries, next-page error keeping the list, retry support, and a per-query cache of completed issuances.
+  - `web/src/components/ListFooter.tsx` (new): sentinel (`IntersectionObserver`, 600 px root margin) + footer states — loading, error with «Повторить», counter «Показано N из M», manual «Загрузить ещё», end line, offset-boundary notice.
+  - `web/src/components/StationsView.tsx`: `viewMode` lifted to the cabinet (table default), footer under both views, history subtitle counts the full list via `paging.total`.
+  - `web/src/components/AccountCentre.tsx`: search effect replaced by `useStationPages`; favourites/history revealed in 24-record steps from synced data (no catalog requests); full totals kept in counters; retry via `searchAttempt` reuse.
+  - `web/src/style.css`: footer, spinner (reuses `pairingSpin`), counter, retry/load buttons with 44 px touch targets, boundary notice.
+  - Tests: `web/tests/paging.mjs` (executes the transpiled `mergeServerPage` — offset by server page length, dedup, empty page, boundary); stage-8 suite in `web/tests/ux-regression.mjs`; `--stage8`/`--stage8-page-fail`/`--stage8-slow` fixtures in `web/tests/browser-harness.mjs` (per-query 64-station pool with drift duplicates, counted first next-page failure, 1.2 s pages, synced 26 favourites + 30 history records, request logging); `package.json` test script runs both suites.
+- Result: verified in the local harness browser at 390/800/1440 px — table default; auto-load walked offsets 0/20/40/60 with one request per page and 58 unique rows (fixture repeats deduped); view switch and section round trip kept the loaded data; next-page error shown with the list intact and one retry reload; mid-flight query change kept only the new issuance; scroll position preserved across appends; favourites/history revealed locally with zero extra search requests and full counters; single audio element survived every check; no horizontal scroll.
+- Checks (sequential): `pnpm typecheck`; `pnpm test` 26/26; `pnpm build`; `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`; `cargo test` (0 failures; PostgreSQL/external-provider suites stay ignored by environment gates).
+- Status: **implemented locally, verified**; not committed/pushed/deployed (stage 8 hand-off). Known limits: boundary text covered by unit/static tests only (reaching offset 10 000 needs ~500 requests); harness has no audio streams; server sync caps unchanged (500 records/collection server-side, 50 local history entries) — progressive reveal does not hide record loss.
+
+## 2026-10-02 — DEPLOY: Redesigned user cabinet (stages 2–7) with pairing session reuse deployed to staging
+
+- Goal: build, deploy, and verify release commit `2368c66` on the staging VPS via `deploy/ops-001-d.ps1`.
+- Scope:
+  - Built immutable container images `rockserver:sha-2368c66a99a0e3fa28eead76d5d4b30ee4dff310` (`sha256:a10601982e4d48051884ae220b32857cd037dde9a6613e0a76f7b6cde47f7720`) and `rockserver-caddy:sha-2368c66a99a0e3fa28eead76d5d4b30ee4dff310`; the web bundle built inside the image matches the locally verified one.
+  - Executed automated staging deployment via `deploy/ops-001-d.ps1 -Action deploy`.
+  - Verified remote execution: worker PID 1516644 completed with `status=succeeded`, remote readiness probe passed (`readiness=passed`).
+  - Verified live deployment: `https://rockplatform.win/` loads bundle `index-Dr613h5P.js` / `index-C_w9otA0.css`; `/health/ready` returns 200; the redesigned anonymous gate renders at 1440 and 390 px without horizontal overflow; a real lookup of a non-existent pairing link shows the terminal card and strips the secret from the URL; public search returns real stations (first post-deploy call timed out cold, retry succeeded).
+- Checks: `deploy/ops-001-d.ps1 -Action deploy` returned exit code 0, `status=succeeded`, `readiness=passed`.
+- Status: **deployed** as commit `2368c66`.
+
+## 2026-10-02 — FRONTEND-REDESIGN-007: stage 7 pre-release pass, defect fixes, and release
+
+- Goal: run the full stage-7 verification of the redesigned cabinet, fix found defects, and release stages 2–7 plus the pairing-session change per `docs/frontend-redesign-plan.md`.
+- Scope:
+  - Full local harness browser pass at 390/800/1440 px across catalog/search/filters/grid+table, favorites, history, persistent player, devices, Yandex Home, and every QR pairing state (both session modes, expired, server-down, cancel, success→devices handoff).
+  - Fix 1: `web/src/components/StationsView.tsx` — the visible internal eyebrow «TUNER SELECTOR» replaced with the mockup's Russian «Прямой эфир».
+  - Fix 2: `web/src/style.css` — `--text-dim` `#546676` → `#7a92a5`, restoring ≥4.5:1 contrast for dim text (footer, «нет данных», sensor times, table headers, paused badge, offline badge) on all backgrounds it renders over.
+  - `web/tests/ux-regression.mjs`: the tuner-selector assertion now requires the Russian eyebrow and forbids the English label; added a dim-contrast assertion (20/20 tests).
+  - Documentation: stage-7 status in the plan, this entry, and `docs/status.md`.
+- Result: no overlaps or horizontal scroll at any tested width; long names wrap/ellipsize correctly; all reachable actions verified with honest states; playback continuous across sections on a single audio element. Native `window.prompt`/`window.confirm` flows (rename/revoke) verified via stubs because the embedded browser suppresses native dialogs; Tab-focus routing is not supported by the embedded browser, so keyboard focus was verified via CSS/static assertions.
+- Checks: `pnpm typecheck`, `pnpm test` (20/20), `pnpm build`, then `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` (263 tests passed, 0 failed) run sequentially; 12 PostgreSQL and 5 external-provider tests remain ignored by their environment gates.
+- Status: pre-release verification complete; release (commit, push, staging deploy, post-deploy pass) recorded below and in `docs/status.md`. Manual scenarios pending user verification: real external radio playback, real passkey sign-in/registration, QR scanning with a physical phone, and live Yandex Home OAuth/sensors.
+
+## 2026-10-02 — DEPLOY: Live track metadata synchronization in active station card deployed to staging
+
+- Goal: build, deploy, and verify release commit `84a4854` on the staging VPS via `deploy/ops-001-d.ps1`.
+- Scope:
+  - Built immutable container images `rockserver:sha-84a485455cdaed14fcb47f273c29df63ff3897dd` (`sha256:412106ec45fa8d3befa150e40eb08f0d86f9a4acea7ce00fbfec082f62fc9adf`) and `rockserver-caddy:sha-84a485455cdaed14fcb47f273c29df63ff3897dd`.
+  - Executed automated staging deployment via `deploy/ops-001-d.ps1 -Action deploy`.
+  - Verified remote execution: worker PID 1426573 completed with `status=succeeded`, remote readiness probe passed (`readiness=passed`).
+  - Verified live deployment: `https://rockplatform.win/` loaded new assets bundle (`index-DDUlj5LE.js` and `index-CZPFtbEa.css`).
+- Checks: `deploy/ops-001-d.ps1 -Action deploy` returned exit code 0, `status=succeeded`, `readiness=passed`.
+- Status: **deployed** as commit `84a4854`.
+
+## 2026-10-02 — WEB-UI-008: live track metadata synchronization in active station card
+
+- Goal: synchronize live track metadata between the bottom player deck and the active station card, replacing genre tags with real song metadata and preventing the track metadata block from disappearing when paused.
+- Scope:
+  - `web/src/components/AccountCentre.tsx`: updated `handlePlayStation` to initialize `trackTitle` with `"Подключение к эфиру…"` instead of genre tags fallback (`station.tags.slice(0, 2).join(" · ")`).
+  - `web/src/components/StationsView.tsx`: updated `.live-track-preview` in grid view and table view to render whenever `isCurrent` is true. When playing, renders animated VU equalizer; when paused, renders `⏸` paused indicator and preserves the track title.
+  - `web/src/style.css`: added styles for `.live-track-preview.paused`, `.track-paused-icon`, and enforced text overflow ellipsis with tooltip `title`.
+- Checks:
+  - `pnpm test`: passed all 15/15 tests.
+  - `pnpm run build`: passed clean.
+  - `cargo fmt --check`: passed.
+  - `cargo clippy --all-targets --all-features -- -D warnings`: passed with 0 warnings.
+  - `cargo test --lib`: passed all 195 tests.
+- Status: **completed**.
+
+## 2026-10-02 — DEPLOY: Server-side account sync for favorites and playback history deployed to staging
+
+- Goal: build, deploy, and verify release commit `b3c0d1b` on the staging VPS via `deploy/ops-001-d.ps1`.
+- Scope:
+  - Built immutable container images `rockserver:sha-b3c0d1be3ab48c27f09356a797b7c261e28c2781` (`sha256:357c45467d371a85cd1c90873bf80e3e854a1e1ec72b3f662f4d49524369f735`) and `rockserver-caddy:sha-b3c0d1be3ab48c27f09356a797b7c261e28c2781`.
+  - Executed automated staging deployment via `deploy/ops-001-d.ps1 -Action deploy`.
+  - Verified remote execution: worker PID 1415707 completed with `status=succeeded`, remote readiness probe passed (`readiness=passed`).
+  - Verified live deployment: `https://rockplatform.win/` loaded new assets bundle (`index-B6iHmCX6.js` and `index-wqU82xOn.css`) with active `/api/v1/browser/sync` endpoint.
+- Checks: `deploy/ops-001-d.ps1 -Action deploy` returned exit code 0, `status=succeeded`, `readiness=passed`.
+- Status: **deployed** as commit `b3c0d1b`.
+
+## 2026-10-02 — PERSONAL-SYNC-WEB-001: server-side account sync for favorites and playback history across devices
+
+- Goal: implement server-side synchronization of favorites and playback history for the web cabinet, syncing data across all paired devices (Windows RockCast, web browser) via PostgreSQL personal data storage, and fix favorites display bug.
+- Scope:
+  - Backend (`src/http/browser_sync.rs`): introduced authenticated `POST /api/v1/browser/sync` endpoint matching `PersonalDataStore.synchronize` semantics behind browser cookie + CSRF token + trusted proxy verification. Active favorites are enriched in the response with `PublicStationDto` representations.
+  - Contract (`api/openapi.yaml`): declared `/api/v1/browser/sync` path and `BrowserPersonalSyncResponse` schemas with full parameter bounds and descriptions.
+  - Frontend (`web/src/api.ts`): defined TypeScript types and client method `api.browserSync`.
+  - Hook (`web/src/usePersonalSync.ts`): created modular hook managing LWW conflict resolution, initial migration of legacy localStorage favorites, optimistic UI updates, and fire-and-forget server sync.
+  - UI (`web/src/components/AccountCentre.tsx`): integrated `usePersonalSync`; decoupled favorites and history tabs from the 20-station query catalog window so favorited stations always remain visible; added query filtering for favorites/history views.
+- Checks:
+  - `cargo fmt --check`: passed.
+  - `cargo clippy --all-targets --all-features -- -D warnings`: passed with 0 warnings.
+  - `cargo test`: passed all unit, integration, and contract test suites.
+  - `pnpm test`: passed all 15/15 UX tests.
+  - `pnpm run build`: passed clean (`tsc` and Vite build).
+- Status: **completed**.
+
+
+## 2026-10-01 — DEPLOY: Search and device catalog rate limits increased to production parameters deployed to staging
+
+- Goal: build, deploy, and verify release commit `9ec1413` on the staging VPS via `deploy/ops-001-d.ps1`.
+- Scope:
+  - Built immutable container images `rockserver:sha-9ec1413be1f159de2274002968e7ef71b4a53f3d` (`sha256:a0ae67a8fcd2dae0a48dae160536294e6f29ffd3d397d03293d25f3fb446e571`) and `rockserver-caddy:sha-9ec1413be1f159de2274002968e7ef71b4a53f3d`.
+  - Executed automated staging deployment via `deploy/ops-001-d.ps1 -Action deploy`.
+  - Verified remote execution: worker PID 1087495 completed with `status=succeeded`, remote readiness probe passed (`readiness=passed`).
+  - Verified live deployment: `https://rockplatform.win/api/v1/search` returned results with high throughput and no 429 rate limit errors.
+- Checks: `deploy/ops-001-d.ps1 -Action deploy` returned exit code 0, `status=succeeded`, `readiness=passed`.
+- Status: **deployed** as commit `9ec1413`.
+
+## 2026-10-01 — SEARCH-RATE-LIMIT-001: increase search and device catalog rate limits to production parameters
+
+- Goal: increase search rate limits from restrictive 10 burst / 30 rpm to production-friendly 60 burst / 120 rpm across public search (`POST /api/v1/search`) and device catalog search (`GET /api/v1/device-catalog/search`), eliminating spurious HTTP 429 errors during interactive station discovery.
+- Scope:
+  - `src/http/search.rs`: increased `SEARCH_LIMIT` from `burst: 10, requests: 30` to `burst: 60, requests: 120`.
+  - `src/http/device_catalog.rs`: increased `DEVICE_CATALOG_SEARCH_LIMIT` from `burst: 10, requests: 30` to `burst: 60, requests: 120`.
+  - `tests/search_api.rs`: updated `anonymous_search_rejects_the_burst_before_work_is_started` burst rejection test loop from `0..10` to `0..60`.
+  - `tests/device_catalog_api.rs`: updated `search_rate_limit_matches_the_public_search_quota` burst rejection test loop from `0..10` to `0..60`.
+  - `web/src/components/AccountCentre.tsx`: removed hardcoded `(лимит 10 в минуту)` from rate limit error notice.
+- Checks:
+  - `cargo fmt --check`: passed.
+  - `cargo clippy --all-targets --all-features -- -D warnings`: passed with 0 warnings.
+  - `cargo test`: passed all unit, integration, and contract tests.
+  - `pnpm test`: passed all 15/15 UX/security tests.
+  - `pnpm run build`: TypeScript typecheck and Vite production build clean.
+- Status: **completed**.
+
+
+## 2026-10-01 — DEPLOY: Station preset cache, error preservation, and right column overflow fix deployed to staging
+
+- Goal: build, deploy, and verify release commit `cc011cb` on the staging VPS via `deploy/ops-001-d.ps1`.
+- Scope:
+  - Built immutable container images `rockserver:sha-cc011cb8e13a6c4c36f2e211ab9ac722d1b5e2cb` (`sha256:4d8341743623308d9d20788722f79c310052a53eb466b30d4eccac19cd865730`) and `rockserver-caddy:sha-cc011cb8e13a6c4c36f2e211ab9ac722d1b5e2cb`.
+  - Executed automated staging deployment via `deploy/ops-001-d.ps1 -Action deploy`.
+  - Verified remote execution: worker PID 969361 completed with `status=succeeded`, remote readiness probe passed (`readiness=passed`).
+  - Verified live deployment: `https://rockplatform.win/` loaded new assets bundle (`index-BcFvSP3r.js` and `index-wqU82xOn.css`).
+- Checks: `deploy/ops-001-d.ps1 -Action deploy` returned exit code 0, `status=succeeded`, `readiness=passed`.
+- Status: **deployed** as commit `cc011cb`.
+
+## 2026-10-01 — WEB-UI-007: station search in-memory cache, preserve stations on error, and right column horizontal overflow fix
+
+- Goal: fix station tiles disappearing on filter preset switching, eliminate 429 rate limit errors when browsing presets via in-memory caching, and resolve right column clipping/overflow at viewport edges.
+- Scope:
+  - `web/src/components/AccountCentre.tsx`:
+    - Introduced session in-memory cache (`stationCache = useRef<Map<string, StationItem[]>>(new Map())`) for search queries and preset tag filters (`#all`, `#rock`, `#classical`, `#jazz`, etc.). Switching back and forth between presets now loads instantly from memory with zero network latency and zero risk of rate limit exhaustion.
+    - Preserved existing stations when a search error or rate limit occurs (removed destructive `setStations([])` call), preventing tiles from vanishing.
+    - Improved rate limit detection (checking `code === "rate_limited"`, `status === 429`, or error message) with a polite Russian notification banner.
+    - Resetting/deleting cache entry upon explicit search submit or tag retry to guarantee fresh results when requested.
+  - `web/src/components/HardwareHud.tsx`:
+    - Compacted `formatDate` to `day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"` (e.g., "24 сент., 15:20"), eliminating ~60px of redundant monospace text width in the metadata row.
+  - `web/src/style.css`:
+    - Added global `*, *::before, *::after { box-sizing: border-box; }` and `html, body { overflow-x: hidden; }` to eliminate content-box overflow and unwanted horizontal scrolling.
+    - Refined `.cabinet-main-grid` columns to `220px minmax(0, 1fr) 310px` with `gap: 1.25rem; padding: 1.25rem;` and added `min-width: 0;` on `.cabinet-right-col`.
+    - Compacted `.hardware-deck` padding to `1rem`, added `min-width: 0; flex: 1;` with ellipsis on the title, and constrained `.device-card-item` / `.device-meta-entry` so the right column never clips against the browser edge.
+  - Verification:
+    - `pnpm test`: all 15/15 UX and security regression tests passed.
+    - `pnpm build`: TypeScript typecheck (`tsc --noEmit`), lint, and Vite production bundle clean.
+    - `cargo fmt --check`, strict Clippy, and `cargo test`: all green.
+- Status: **deployed** as commit `cc011cb`.
+
+## 2026-10-01 — DEPLOY: Device card formatting, official logo, search debounce/rate-limit fix, and station icons deployed to staging
+
+- Goal: build, deploy, and verify release commit `ce32f9d` on the staging VPS via `deploy/ops-001-d.ps1`.
+- Scope:
+  - Built immutable container images `rockserver:sha-ce32f9df6b8d43a4e2192a878e8965b68e6add66` (`sha256:c853c0a1b98019530c7270a8a2950debd2fb8a6206b219707ccf3fa0da4a4207`) and `rockserver-caddy:sha-ce32f9df6b8d43a4e2192a878e8965b68e6add66`.
+  - Executed automated staging deployment via `deploy/ops-001-d.ps1 -Action deploy`.
+  - Verified remote execution: worker PID 963630 completed with `status=succeeded`, remote readiness probe passed (`readiness=passed`).
+  - Verified live deployment: `https://rockplatform.win/icon_logo.png` returned HTTP 200 OK image/png, and index.html loads with new assets.
+- Checks: `deploy/ops-001-d.ps1 -Action deploy` returned exit code 0, `status=succeeded`, `readiness=passed`.
+- Status: **deployed** as commit `ce32f9d`.
+
+## 2026-10-01 — WEB-UI-006: connected device cards formatting, official logo, search debounce/rate-limit fix, and station icons styling
+
+- Goal: fix connected device cards text wrapping, replace placeholder badge with official RockCast logo, prevent search rate limiting (HTTP 429) via debounce and explicit submit button, and fix station icons styling on grid cards and table rows.
+- Scope:
+  - `web/src/components/HardwareHud.tsx`:
+    - Redesigned device card layout into structured vertical blocks:
+      - Header row: device type icon (`📱` / `💻`), full product-prefixed title (`deviceName(device)`), and compact online/offline status badge (`● В сети` / `○ Офлайн`).
+      - Metadata plate: recessed key-value data list with neat left/right alignment for "Подключено" and "Активность" timestamps.
+      - Action controls: balanced 2-column grid for "Переименовать" and "Отключить" buttons.
+    - Simplified header limit pill to `{count} / {limit}` with full descriptive title tooltip to prevent header text wrapping.
+  - Official Logo:
+    - Added `web/public/icon_logo.png` and `web/public/favicon.ico` sourced from official RockCast client assets (`C:\repos\rockcast\assets\icon_logo.png`).
+    - Updated `web/index.html` to reference `/icon_logo.png`.
+    - Updated `web/src/components/Header.tsx` to render `<img src="/icon_logo.png" ... class="brand-logo" />`.
+  - Search Debounce & Rate Limit Fix:
+    - In `web/src/components/AccountCentre.tsx`: decoupled local input state (`searchQuery`) from executed search (`activeSearch`); added 700ms debounce when typing; added `handleSearchSubmit` on Enter and button click; added `searchError` state specifically catching HTTP 429 `rate_limited` with friendly Russian explanation and retry button.
+    - In `web/src/components/Header.tsx`: wrapped search input in form with explicit `<button type="submit" class="header-search-btn">Найти</button>`.
+    - In `web/src/components/StationsView.tsx`: wrapped search deck in form with prominent amber `<button type="submit" class="search-submit-btn">Найти</button>`; added alert banner with retry button for rate limit or search errors.
+  - Station Icons & Card Styling:
+    - In `web/src/components/StationsView.tsx`: used `station.favicon_url || /api/v1/stations/{id}/icon` with lazy loading and letter fallback.
+    - In `web/src/components/PlayerDeck.tsx`: added fallback to `/api/v1/stations/{id}/icon` for player cover art.
+    - In `web/src/style.css`: added styles for `.brand-logo-wrap`, `.brand-logo`, `.header-search-btn`, `.search-submit-btn`, `.search-error-banner`, `.search-retry-btn`, `.station-card`, `.station-card-top`, `.station-icon-wrap` (48x48 rounded container), `.station-card .station-icon` (object-fit cover), `.station-icon-fallback`, `.station-card-body`, `.station-card-footer`, `.card-play-btn`, and table view thumb icons.
+  - Verification:
+    - Visually verified connected device cards layout and responsiveness.
+    - `pnpm test`: all 15/15 UX and security regression tests passed.
+    - `pnpm build`: TypeScript typecheck (`tsc --noEmit`), lint, and Vite production bundle clean.
+    - `cargo fmt --check`, strict Clippy, and `cargo test`: all green.
+- Status: **deployed** as commit `ce32f9d`.
+
+## 2026-10-01 — DEPLOY: Cyber-Tuner navigation, search deck, and limit 422 fix deployed to staging
+
+- Goal: build, deploy, and verify release commit `bf11261` on the staging VPS via `deploy/ops-001-d.ps1`.
+- Scope:
+  - Built immutable container images `rockserver:sha-bf112619acdefa3049f51b789b84ed50e743b3bd` (`sha256:97713455517882ea308d0635493125b7dc7b57719f3121fbac1dbffd5b9b001c`) and `rockserver-caddy:sha-bf112619acdefa3049f51b789b84ed50e743b3bd`.
+  - Executed automated staging deployment via `deploy/ops-001-d.ps1 -Action deploy`.
+  - Verified remote execution: worker PID 951939 completed with `status=succeeded`, remote readiness probe passed (`readiness=passed`).
+- Checks: `deploy/ops-001-d.ps1 -Action deploy` returned exit code 0, `status=succeeded`, `readiness=passed`.
+- Status: **deployed** as commit `bf11261`.
+
+## 2026-10-01 — WEB-UI-005: search limit 422 fix, tuner search deck, and cabinet navigation wiring
+
+- Goal: fix empty station catalog on initial load and preset tag clicks, provide a dedicated tuner search input, and wire left console navigation tabs.
+- Scope:
+  - `web/src/components/AccountCentre.tsx`:
+    - Fixed station search query parameter: reduced `limit` from 24 to 20 to conform to backend validation bounds (`limit <= 20` enforced in `src/http/search.rs`); previously caused silent 422 Unprocessable Entity and empty lists.
+    - Wired `activeTab` in center column: renders `HardwareHud` and `YandexHomeCard` when `activeTab === "devices"`, and filters to local history when `activeTab === "history"`.
+    - Implemented playback history tracking persisted in `localStorage` (`rockserver_player_history`, up to 30 items).
+    - Added `handleTagSelect` and `handleSearchChange` to keep search state consistent and switch view to `stations` automatically.
+  - `web/src/components/StationsView.tsx`:
+    - Added dedicated tuner search deck (`tuner-search-deck`) with search icon, clear button (✕), and search event bindings.
+    - Added context-aware empty state messages for "favorites" and "history" tabs.
+  - `web/src/style.css`:
+    - Added styling for `.tuner-search-deck`, `.tuner-search-wrap`, `.tuner-search-input`, `.search-clear-btn`, and `.cabinet-center-devices`.
+  - Verification:
+    - End-to-end verification via Playwright: initial catalog render (20 stations), `#jazz` frequency preset click (20 stations), text search for "Rock FM" (20 stations), and "Оборудование" sidebar navigation switch.
+    - `pnpm test`: all 15/15 UX regression tests passed.
+    - `pnpm build`: TypeScript typecheck and Vite production build clean.
+    - `cargo fmt --check`, strict Clippy, and `cargo test`: all green.
+- Status: **complete locally; ready for commit and staging deployment.**
+
+## 2026-10-01 — DEPLOY: Cyber-Tuner web cabinet and radio player deployed to staging
+
+- Goal: build, deploy, and verify release commit `2624b6b` on the staging VPS via `deploy/ops-001-d.ps1`.
+- Scope:
+  - Built immutable container images `rockserver:sha-2624b6b963e81a9e80d5097f0adef0ce288f3bc8` (`sha256:685c0d6d5e49780be4eb881802d287fa92d9847cf7cd5fd6a0f429f7a8bad5fc`) and `rockserver-caddy:sha-2624b6b963e81a9e80d5097f0adef0ce288f3bc8`.
+  - Executed automated staging deployment via `deploy/ops-001-d.ps1 -Action deploy`.
+  - Verified remote execution: worker PID 922409 completed with `status=succeeded`, remote readiness probe passed (`readiness=passed`).
+- Checks: `deploy/ops-001-d.ps1 -Action deploy` returned exit code 0, `status=succeeded`, `readiness=passed`.
+- Status: **deployed** as commit `2624b6b`.
+
+## 2026-10-01 — WEB-UI-004: frontend test expansion and full-stack verification (Stage 4)
+
+- Goal: expand the frontend UX and security regression test suite to cover HTML5 audio streaming, real-time SSE ICY metadata synchronization, Cyber-Tuner controls, animated VU-meter keyframes, and responsive CSS rules.
+- Scope:
+  - `web/tests/ux-regression.mjs`: expanded test suite from 11 to 15 tests, adding assertions for:
+    - Audio stream player embedding (`<audio ref={audioRef}>`), stream URL `/api/v1/stations/{id}/stream`, SSE URL `/api/v1/stations/{id}/events`, initial `api.stationNowPlaying`, `EventSource` subscription, master transport controls, volume slider, and local storage volume persistence.
+    - Tuner station selector, WebP favicon icons, bitrate/codec badges, and animated VU-meter equalizers (`vu-equalizer`, `vu-bar`).
+    - Sidebar navigation dock, live tuner search, frequency presets (`#synthwave`, `#rock`, etc.), and Cloud Sync LWW indicator.
+    - Cyber-Tuner CSS system: `@keyframes vuBounce`, fixed `.player-deck-bar`, glassmorphic `backdrop-filter: blur(16px)`, tablet `@media (max-width: 1200px)` and mobile `@media (max-width: 768px)` breakpoints.
+  - Component modularization: extracted `AccountCentre.tsx` (315 lines) and `PairingView.tsx` (223 lines) from `app.tsx` (reduced to 419 lines), ensuring every single frontend source file remains strictly bounded under the 400-500 line budget.
+  - Verified zero DOM leakage of authentication tokens or secret credentials.
+- Checks: `pnpm test` (all 15/15 UX regression tests passed), `pnpm build` (`tsc --noEmit` and Vite bundling passed), `cargo fmt --check`, strict all-targets/all-features Clippy, and `cargo test` all green.
+- Status: Stage 4 complete; all 4 stages of the user cabinet and web player redesign are complete and verified.
+
+## 2026-10-01 — WEB-UI-003: Cyber-Tuner / Studio Deck responsive CSS design system (Stage 3)
+
+- Goal: implement high-end studio audio deck aesthetics, responsive 3-column desktop grid, tablet and mobile ergonomics, and animated VU-meter equalizers in `web/src/style.css`.
+- Scope:
+  - `web/src/style.css`: designed and implemented the Cyber-Tuner CSS system: deep space graphite surfaces (`#080b0f`), hairline tactile borders, glowing amber accents (`#f59e0b`), cyber-cyan and emerald telemetry indicators, animated 4-bar VU-equalizers (`vu-bar`), and pulsing live dots.
+  - Multi-tier responsive grid: wide desktop 3-column layout (240px navigation dock, central tuner station cards, 330px hardware/Yandex telemetry HUD), 2-column tablet layout, and mobile-friendly vertical stack.
+  - Persistent bottom audio player deck: backdrop-blur glass styling (`backdrop-filter: blur(16px)`), master transport controls, volume attenuation slider, and station artwork preview with fallback markers.
+  - Preserved 100% of existing pairing/registration forms, access controls, accessible status landmarks, mobile button sizing, and scoped desktop-first administrator console (`.admin-app`).
+- Checks: `pnpm test` (all 11/11 UX regression tests passed), `pnpm build` (`tsc --noEmit` and Vite bundling passed), `cargo fmt --check`, strict all-targets/all-features Clippy, and `cargo test` all green.
+- Status: Stage 3 complete; new UI, web player, and studio deck styling are fully implemented and verified.
+
+## 2026-10-01 — WEB-UI-002: online radio stream player and real-time SSE title synchronization (Stage 2)
+
+- Goal: implement in-browser audio streaming from `/api/v1/stations/{id}/stream` and real-time live ICY track metadata synchronization via SSE `/api/v1/stations/{id}/events`.
+- Scope:
+  - `web/src/components/PlayerDeck.tsx`: added HTML5 `<audio>` streaming controller with transport state handling (buffering, error, playing, paused), volume attenuation, master transport controls, initial metadata fetch via `api.stationNowPlaying`, and real-time SSE `EventSource` subscription to `/api/v1/stations/{id}/events` updating observed ICY track title dynamically.
+  - `web/src/api.ts`: extended `StationNowPlaying` type to support both camelCase and snake_case properties (`stationId`/`station_id`, `rawTitle`/`raw_title`, `updatedAt`/`updated_at`).
+  - `web/src/app.tsx`: added next/previous station navigation cycling, volume and favorite persistence in `localStorage`, and real-time title and playback state synchronization across catalog views.
+- Checks: `pnpm test` (all 11/11 UX regression tests passed), `pnpm build` (`tsc --noEmit` and Vite bundling passed), `cargo fmt --check`, strict all-targets/all-features Clippy, and `cargo test` all green.
+- Status: Stage 2 complete; Stage 3 (studio deck / cyber-tuner responsive CSS styling) is next.
+
+## 2026-10-01 — WEB-UI-001: modular frontend component decomposition for user cabinet and web player (Stage 1)
+
+- Goal: decompose the monolithic browser cabinet (`web/src/app.tsx`) into modular components preparing for cyber-tuner / studio deck responsive UI and integrated web radio player.
+- Scope: extracted `Header.tsx`, `SidebarNav.tsx`, `StationsView.tsx`, `HardwareHud.tsx`, `YandexHomeCard.tsx`, and `PlayerDeck.tsx` under `web/src/components/`. Extended `web/src/api.ts` with station and search typing/methods (`searchStations`, `stationNowPlaying`). Updated `web/src/app.tsx` and `web/tests/ux-regression.mjs` to maintain all 11 security/UX regression assertions.
+- Checks: `pnpm test` (11/11 UX regression tests passed), `pnpm build` (`tsc --noEmit` and `vite build` cleanly bundled), `cargo fmt --check`, strict all-targets/all-features Clippy, and `cargo test` passed.
+- Status: Stage 1 complete; Stage 2 (live audio playback and SSE stream integration) and Stage 3 (studio deck styling) are next.
+
+## 2026-10-01 — RR-002: station now-playing API and SSE
+
+- Goal: expose RR-001 ICY title snapshots to Web UI through authorized reads and events.
+- Scope: added `/now-playing` and `/events` with shared session/catalog access, explicit missing/fresh/stale snapshots, initial and update SSE events, bounded subscribers and queues, disconnect/lifetime handling, OpenAPI contract, local fake-upstream and subscription checks. Audio and native in-stream ICY remain unchanged.
+- Checks: local targeted metadata tests, `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test` passed. Disposable-PostgreSQL and live-provider tests remain ignored without configured environments.
+- Status: implementation complete locally; RR-003 clients and RR-006 shared upstream remain separate stages.
+
+## 2026-10-01 — RR-001: authenticated radio stream relay
+
+- Goal: serve catalog audio and ICY metadata only to current browser or native-device sessions.
+- Scope: station-ID relay route, active primary lookup, pinned DNS/IP and redirect validation, bounded streaming and title snapshot, OpenAPI contract and local fake-upstream checks. Client apps, metadata API/SSE, and shared upstream remain later stages.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed. Local fake-upstream checks cover auth/query rejection, fragmented ICY, audio-only delivery, malformed/missing metadata, blocked destinations/redirects, and disconnect cleanup. PostgreSQL and live-provider tests remain ignored without configured environments.
+- Status: RR-001 complete locally; RR-002 metadata API/events is next.
+
+## 2026-10-01 — DOCS: authenticated radio stream relay plan
+
+- Goal: record an actionable roadmap for authenticated radio relay and first-wave now-playing metadata.
+- Scope: added `docs/authenticated-radio-stream-relay-plan.md` with architecture, endpoint/auth/security/reconnect contracts, in-stream ICY for native clients, Web snapshot/SSE, and RR-001—RR-006 acceptance criteria; updated status and task log.
+- Checks: Markdown content, `git diff --check`, `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test` passed; no runtime behavior changed.
+- Status: plan documented; RR-001 is next.
+
+## 2026-09-29 — DEPLOY: modular refactoring and agent guidelines deployed to staging
+
+- Goal: build, deploy, and verify release commit `137475f` on the staging VPS via `deploy/ops-001-d.ps1`.
+- Scope:
+  - Built immutable container images `rockserver:sha-137475fb4fd8dfefcd59165614639d2e7145c351` and `rockserver-caddy:sha-137475fb4fd8dfefcd59165614639d2e7145c351`.
+  - Executed automated staging deployment via `deploy/ops-001-d.ps1 -Action deploy`.
+  - Verified container start and remote readiness probe (`GET /health/ready`).
+- Checks: `deploy/ops-001-d.ps1 -Action deploy` returned exit code 0, `status=succeeded`, `readiness=passed`.
+- Status: **deployed** as commit `137475f`.
+
+## 2026-09-29 — DOCS: agent instruction guidelines for modularity, file size limits, and test decomposition
+
+- Goal: update contributor and agent instructions to enforce early decomposition of modules and integration test suites, preventing large monolithic files and mixed responsibilities.
+- Scope:
+  - `AGENTS.md`: added `## Modularity and code organization` section defining file size ceilings (~400-500 lines), architectural layer separation (domain, traits, orchestration, wire protocol/DTO, persistence/fakes, thin facades), unit test isolation (`tests.rs`), and thematic integration test decomposition with shared `common.rs`.
+  - `docs/codex-project-context.md`: added rule 7 detailing modularity requirements and thematic integration test decomposition for Codex and other AI agents.
+  - `src/ARCHITECTURE.md`: added integration test submodules to submodule maps and updated reading order instructions to mandate modular test suites.
+  - Updated `docs/status.md` and `docs/tasks.md`.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` all green.
+- Status: complete; agent instruction files explicitly mandate layered decomposition upfront.
+
+## 2026-09-29 — ARCH: thematic modular decomposition of integration test suites (tests/openapi_contract and tests/postgres_integration)
+
+- Goal: decompose the massive integration test files `tests/openapi_contract.rs` (1783 lines) and `tests/postgres_integration.rs` (2412 lines) into focused thematic submodule files to improve navigation, maintainability, and compilation speed, while preserving single integration test targets.
+- Scope:
+  - `tests/openapi_contract/`:
+    - `common.rs` (325 lines): fixture specifications, schema validation helpers, golden JSON loaders, and OpenAPI document constants.
+    - `surface.rs` (302 lines): public surface validation and search endpoint registration tests.
+    - `device_control.rs` (466 lines): device control v1 specification bounds, schema linking, and golden fixture validation.
+    - `device_catalog.rs` (425 lines): stream-free catalog bounds, play stream constraints, and native session gating.
+    - `voice_stream.rs` (143 lines): voice stream specification alignment with runtime and device flows.
+    - `personal_sync.rs` (158 lines): personal data sync specification constraints and session checks.
+    - `tests/openapi_contract.rs` (14 lines): minimal facade declaring thematic submodules via `#[path = ...]`.
+  - `tests/postgres_integration/`:
+    - `common.rs` (98 lines): shared test database inspection pools (`repository_pool`), import mock providers (`OnePageProvider`, `imported_station`), run assertions (`assert_run`), and result helpers (`station_ids`).
+    - `device_control.rs` (310 lines): device control state persistence and ownership isolation.
+    - `admin.rs` (323 lines): administrator identity, Argon2id credentials, atomic bootstrap, and durable session revocation.
+    - `account.rs` (477 lines): passkey registration, WebAuthn challenge handling, desktop pairing, and session rotation.
+    - `account_cleanup.rs` (210 lines): preview inspection, operator cascade deletion, and audit logging.
+    - `yandex_home.rs` (72 lines): OAuth state lifecycle and encrypted token persistence.
+    - `migrations.rs` (416 lines): database migrations, pgvector extension verification, semantic search, and live readiness probes.
+    - `shared_catalog.rs` (160 lines): transactional release activation, tombstones, and rollback safety.
+    - `personal_data.rs` (267 lines): last-writer-wins synchronization, cursor delta scoping, retention sweeps, and account purge.
+    - `tests/postgres_integration.rs` (31 lines): minimal facade preserving single test binary target for serial execution.
+  - Updated `docs/status.md` and `docs/tasks.md`.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` all green (all 9 OpenAPI contract tests pass; all 12 PostgreSQL integration tests compiled cleanly and ignored appropriately; all 184 library tests pass).
+- Status: complete; all test semantics, assertions, and execution controls preserved.
+
+## 2026-09-29 — ARCH: domain models, repository implementations, and search service decomposition for search (Step 7)
+
+- Goal: decompose the 849-line monolithic `src/search/mod.rs` by extracting domain models, in-memory repository implementations, and search service orchestration into dedicated submodules, turning `src/search/mod.rs` into a clean facade.
+- Scope:
+  - `src/search/domain.rs` (211 lines): extracted `SearchQuery`, `SearchConstraints`, `Station`, `StationHealth`, `RankedStation`, `SearchOutcome`, `MIN_RELEVANCE_SCORE`, `StationRepository`, and `RepositoryError`.
+  - `src/search/in_memory.rs` (298 lines): extracted `InMemoryStationRepository`, `UnavailableStationRepository`, pinned catalog conversion, and deterministic unit test fixtures.
+  - `src/search/service.rs` (343 lines): extracted `SearchService`, concurrent query parsing/embedding, fallback intent preservation, confidence-gated language filtering, and progressive genre fallback (`broaden_tags`).
+  - `src/search/mod.rs` (37 lines): reduced to a clean public facade re-exporting all submodules without breaking changes.
+  - Updated `src/ARCHITECTURE.md`, `docs/status.md`, and `docs/tasks.md`.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` all green (all 49 search unit tests and 184 library tests passed).
+- Status: complete; zero breaking changes to search domain contracts or public exports.
+
+## 2026-09-29 — ARCH: catalog resolution, target validation, and command router decomposition for device_control_command (Step 6)
+
+- Goal: decompose the 817-line monolithic `src/device_control_command.rs` by extracting catalog resolution, target validation, and command routing logic into dedicated submodules, reducing the root to a clean facade.
+- Scope:
+  - `src/device_control_command/catalog.rs` (91 lines): extracted station resolution, `StationCatalog` trait, `ResolvedStation`, and default `SearchService` integration.
+  - `src/device_control_command/target_validation.rs` (136 lines): extracted target manifest precondition validations (`validate_target`, `require_role_capability`, `display_supported`).
+  - `src/device_control_command/router.rs` (592 lines): extracted `CommandRouter`, in-flight state tracking, reservation, delivery over `ConnectionRegistry`, timeout handling, and terminal results.
+  - `src/device_control_command/tests.rs` (933 lines): adapted imports to reference submodules and external crates cleanly.
+  - `src/device_control_command.rs` (13 lines): reduced to a clean public facade re-exporting all submodules without breaking changes.
+  - Updated `src/ARCHITECTURE.md`, `docs/status.md`, and `docs/tasks.md`.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` all green (all 6 unit tests and 184 library tests passed).
+- Status: complete; zero breaking changes to command routing semantics or public exports.
+
+## 2026-09-29 — ARCH: transport and test isolation for http/control (Step 5)
+
+- Goal: decompose the 1088-line monolithic `src/http/control.rs` by extracting unit/transport tests, wire error framing, and state admission decisions into existing submodules.
+- Scope: 
+  - `src/http/control/tests.rs`: extracted 601 lines of unit and transport tests.
+  - `src/http/control/protocol.rs`: added wire scope mapping (`scope_name`) and command rejection envelope formatting (`send_command_error`).
+  - `src/http/control/state.rs`: added controller full-state observation checks (`requires_full_state`) and full snapshot persistence outcome acceptance (`accepted_full_snapshot`).
+  - `src/http/control.rs`: reduced from 1088 to 442 lines, keeping focused WebSocket upgrade (`connect`) and connection lifecycle loop (`run`).
+  - Updated `src/ARCHITECTURE.md`, `docs/status.md`, and `docs/tasks.md`.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` all green (14/14 control tests and all 184 library tests passed).
+- Status: complete; zero breaking changes to WebSocket and HTTP control protocol.
+
+## 2026-09-29 — ARCH: domain store and test isolation for personal_data and admin (Step 4)
+
+- Goal: decompose the massive domain files `src/personal_data.rs` (1281 lines) and `src/admin.rs` (885 lines) by separating domain models and traits from in-memory test stores and unit test blocks.
+- Scope: 
+  - `src/personal_data/`: extracted `domain.rs` (pure sync models, validation, limits, `PersonalDataStore` trait), `in_memory.rs` (`InMemoryPersonalDataStore`, revision generator, `delta_and_echo`), and `tests.rs` (unit tests). Replaced `src/personal_data.rs` with a 26-line facade.
+  - `src/admin/`: extracted `domain.rs` (`AdminPrincipal`, `AdminPasswordHash`, DTOs, `AdminStore` trait), `fake.rs` (`FakeAdminStore`, secret hash key, rotation), and `tests.rs` (unit tests). Replaced `src/admin.rs` with a 14-line facade.
+  - Updated `src/ARCHITECTURE.md`, `docs/status.md`, and `docs/tasks.md`.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` all green (184 unit/doc tests and all integration tests passed).
+- Status: complete; zero breaking changes to public domain and store contracts.
+
+## 2026-09-29 — ARCH: modular layering refactoring for http/endpoints (Step 3)
+
+- Goal: decompose the 1083-line monolithic `src/http/endpoints.rs` by introducing a `RouterBuilder` pattern, extracting route composition, and moving unit tests out of the router definition.
+- Scope: created `src/http/endpoints/builder.rs` (fluent `RouterBuilder` with sensible offline defaults and explicit dependency injection), `src/http/endpoints/routes.rs` (Axum route registration and middleware layering), and `src/http/endpoints/tests.rs` (extracted unit tests). Simplified 15 telescoping `router_with_*` functions in `src/http/endpoints.rs` to concise builder calls, re-exported `RouterBuilder` in `rockserver::http`, and simplified `control.rs` test harness. Updated `src/ARCHITECTURE.md`, `docs/status.md`, and `docs/tasks.md`.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` all green.
+- Status: complete; zero breaking changes to public router signatures.
+
+## 2026-09-29 — ARCH: modular layering refactoring for http/voice (Step 2)
+
+- Goal: decompose the 1353-line monolithic `src/http/voice.rs` into clean transport protocol, device voice orchestration, and handler layers.
+- Scope: created `src/http/voice/protocol.rs` (wire DTOs, JSON event envelopes, error codes, limits, framing helpers), `src/http/voice/device.rs` (device capability validation, intent resolution, command routing, execution polling), and restructured `src/http/voice.rs` (streaming WebSocket ingestion loop, session lifecycle, REST command handler, search completion). Updated `src/ARCHITECTURE.md`, `docs/status.md`, and `docs/tasks.md`.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` all green (including all `voice_stream_api` and `voice_command_api` tests).
+- Status: complete; zero breaking changes to HTTP or WebSocket behavior.
+
+## 2026-09-29 — ARCH: modular layering refactoring for station_icons (Step 1)
+
+- Goal: decompose the 1310-line monolithic `src/station_icons.rs` into distinct single-responsibility architectural layers matching project architecture guidelines.
+- Scope: created `src/station_icons/domain.rs` (models, keys, errors, traits, WebP raster preparation algorithm), `src/station_icons/storage.rs` (atomic filesystem storage), `src/station_icons/fetcher.rs` (external HTTP client, SSRF checks, HTML link parsing), `src/station_icons/coordinator.rs` (PostgreSQL job coordination, SQL queries, item planning), and `src/station_icons/tests.rs` (isolated unit tests). Preserved `src/station_icons.rs` as a 27-line stable facade. Updated `src/ARCHITECTURE.md`, `docs/status.md`, and `docs/tasks.md`.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` all green (15/15 station_icons tests passed).
+- Status: complete; all public contracts and behavior preserved with zero API changes.
+
+## 2026-09-28 — Opt-in PostgreSQL integration test rot repaired
+
+- Goal: make the opt-in PostgreSQL integration suite trustworthy again; five tests had been
+  failing identically on clean `master` before the personal-data work started.
+- Scope: test-side fixes only. Device-control gap-state expectation updated to the documented
+  full-snapshot overwrite semantics; admin bootstrap records its own refresh request instead
+  of depending on another test's leftovers; admin identity foundation truncates the
+  migration-0019 singleton tables before creating its principal; session rotation asserts the
+  server-stamped `created_at`; account cleanup binds a real `bytea` and expects the
+  deactivation counters to report only rows that deactivation itself flips. The suite's
+  header now documents the required serial run (`--test-threads=1`) because the tests share
+  one database and truncate its admin tables.
+- Checks: `cargo fmt --check`, strict Clippy, `cargo test` green; opt-in suite 12/12 on a
+  fresh disposable pgvector container run serially.
+- Status: complete; no production code changed.
+
+## 2026-09-28 — RM-012-A: personal-data sync (favourites + history)
+
+- Goal: give RockCast and RockMobile one server-held copy of favourites and listen history so
+  both devices always converge on the same profile.
+- Scope: migration `0025_add_personal_data_sync.sql` (`favourite_records`, `history_records`,
+  shared monotonic revision sequence); `personal_data` domain owning LWW merge, tombstones,
+  bounds, and retention; `PostgresPersonalDataStore`; one `POST /api/v1/sync` endpoint with the
+  contract promoted to OpenAPI 0.6.0; hourly opportunistic retention sweep; deleted-account row
+  purge. The native-endpoint authenticate-and-throttle helper was extracted to `control_auth.rs`
+  and reused by the device catalog (no duplicated auth logic). Clients are unchanged — client
+  integration is a separate task in their repositories (RM-012-B).
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and
+  `cargo test` passed; the opt-in PostgreSQL integration test passed against a disposable
+  pgvector container. Five pre-existing opt-in PostgreSQL test failures reproduce identically
+  on clean `master` and are unrelated.
+- Status: **deployed** as commit `2d8e27f` on 2026-09-28; readiness passed and the live
+  endpoint answered the contract 401 without a credential.
+
+## 2026-09-28 — DEPLOY fix: Windows system tar for the image manifest
+
+- Goal: unblock the release after `tar.exe` resolved to MSYS/GNU tar in a Git Bash session
+  and rejected the `C:\...` archive path as a remote `host:file` pair.
+- Scope: `deploy/ops-001-d.ps1` now resolves `$env:SystemRoot\System32\tar.exe` explicitly
+  for reading the saved image's `manifest.json`; the launcher regression suite asserts the
+  drive-letter-safe resolution.
+- Checks: `deploy/tests/ops-001-d-tests.ps1` passed; the manifest read verified against the
+  saved image before the retry.
+- Status: **deployed** (this fix is the release commit `2d8e27f`).
+
+## 2026-09-26 — DC playback track metadata
+
+- Goal: expose the current track observed by RockCast to the remote RockMobile player.
+- Scope: add optional `track_title` to the runtime playback contract and preserve it through the existing directory projection; no new endpoint or identity field.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed. External database and live service tests remain ignored.
+- Status: deployed as commit `a3f2a13` on 2026-09-26; readiness passed. Two live phone-to-desktop station switches showed distinct track titles; microphone input and the full physical matrix remain open.
+
+## 2026-09-25 — OPS: deploy-time pg_dump disabled and deploy debris cleaned
+
+- Goal: stop paying the per-release database dump on the small VPS and
+  remove accumulated deployment debris at the operator's request.
+- Result: `remote-ops-001-d.sh` no longer runs `pg_dump`, copies dumps, or
+  prunes the backup directory; the release record keeps the `backup_sha256`
+  continuity field with `-`. The launcher regression suite now asserts the
+  dump path stays absent and the seed/readiness ordering is unchanged. On
+  the VPS this removed the retained dumps (34 MiB), stale deploy logs, a
+  dead seed container, and 17 superseded release images (~1 GiB; disk use
+  fell from 45% to 40%). Local diagnostic scratch files were deleted. A
+  deploy with the change (`454cae7`) created no dump and passed readiness;
+  the icon backlog was wiped and restarted (`2c3e367a`), reaching
+  ready=151/252 processed in the first minutes with the candidate-fallback
+  fetcher active.
+- Checks: `deploy/tests/ops-001-d-tests.ps1` passed; live readiness 200;
+  backup directory verified empty after the deploy.
+- Status: **deployed.**
+## 2026-09-25 — RS-ICON-013: ordered favicon candidates with root fallback
+
+- Goal: stop losing stations whose first icon candidate is dead while a
+  usable one exists on the same site.
+- Result: homepage discovery now returns the ordered candidate list — every
+  declared HTTP(S) `icon`/`apple-touch-icon` link in document order
+  (deduplicated, at most four) followed by the homepage-root `/favicon.ico`
+  fallback — and the worker tries them in order until one normalizes. A
+  dead candidate (bad URL, 404, oversized) no longer dooms the station, and
+  any transport-level failure keeps the item retryable even when other
+  candidates are simply absent. Covers the two production cases found by
+  sampling: a deep-page relative `favicon.ico` that 404s while the root
+  icon lives, and a first declared candidate that cannot be decoded.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features --
+  -D warnings`, and `cargo test` passed (229 tests; 15 PostgreSQL/live
+  tests ignored as designed), including new candidate-order and
+  classification coverage.
+- Status: **implemented locally; production deploy pending.**
+## 2026-09-25 — RS-ICON-012 deployed with prefix inspection, swap, and a from-scratch import
+
+- Goal: ship the homepage-prefix fix and restart the icon backlog cleanly on
+  the operator's request.
+- Result: commit `f4afd57` deployed (`readiness=passed`); the homepage
+  inspection now parses the collected prefix of oversized pages instead of
+  discarding it, so heavy pages (~17% of the remaining permanent errors)
+  can still declare their icon. The VPS gained a persistent 3 GiB swapfile
+  after the earlier memory-pressure concern. Station icon metadata and job
+  history were cleared on explicit operator instruction, and a fresh job
+  (`67bfc4a7`) restarted over all 16,825 stations: the first 502 processed
+  items showed ready=307 (61%), missing=49, retryable=28 (6%),
+  permanent=118 (23%) — materially better than the 44%/23%/27% profile of
+  the first run before the fetcher fixes.
+- Checks: live counters through the protected admin API; public readiness
+  200; swap verified active on the host.
+- Status: **deployed; from-scratch import running.**
+
+## 2026-09-25 — RS-ICON-012 deployed: false icon-import failures reduced and import rerun
+
+- Goal: verify the fetcher fixes against production error rates and resume
+  the interrupted backlog.
+- Result: deploy `53e4968` (fetcher User-Agent, 1 MiB homepage bound, oversize
+  classification) passed readiness and the admin sidebar layout shipped with
+  it. The first rerun processed 2,423 items with retryable errors down from
+  ~23% to ~10% before a host restart interrupted the job by design (startup
+  marks unfinished jobs interrupted); a fresh rerun (`55c25b38`, 13,813
+  items) is continuing the backlog. Total ready icons reached 3,015 of 16,825
+  and grows during the run. Sampling of the remaining permanent errors shows
+  they are now mostly genuine: homepages that declare no icon link and a
+  404/redirecting `/favicon.ico`, plus dead domains — not fetcher defects.
+  Note: host memory is tight (~1.9 GiB total, ~110 MiB free); operators
+  should expect import jobs to interrupt on host restarts and rerun them.
+- Checks: live counters through the protected admin API; failed-station
+  sampling probed from the VPS; `cargo fmt --check`, strict Clippy, and
+  `cargo test` (225 passed) for the code change.
+- Status: **deployed; rerun job in progress.**
+
+## DOCS-002 — 2026-09-24 — refresh README and active backlog
+
+- Goal: bring the repository front page and near-term backlog in line with the implemented service and current cross-repository handoffs.
+- Scope: update README.md and TODO.md; record the documentation task in docs/status.md and this log.
+- Result: README now summarizes the current search, voice, account, administrator, Yandex Smart Home, and device-control capabilities, points to the canonical architecture/roadmap documents, and identifies known search-retrieval work. TODO.md now tracks remaining SRCH-002 through SRCH-004, the RC-4/RM-4 live-state handoff, voice reliability, and dependent ESP32/Home Assistant milestones. It distinguishes deployed or implemented behavior from work that remains open or hardware-blocked.
+- Checks: cargo fmt --check; cargo clippy --all-targets --all-features -- -D warnings; cargo test; git diff --check. All passed. PostgreSQL and live-provider integration tests were skipped by their explicit environment/credential guards.
+- Status: **complete.**
+
 ## SRCH-001 — 2026-09-24 — non-blocking ONNX inference and session pool
 
 - Goal: isolate CPU-intensive ONNX embedding inference from Tokio runtime worker threads and enable concurrent search inference without serializing on a single mutex.
@@ -2707,3 +3270,142 @@
 - Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`;
   `cargo test`; `git diff --check`.
 - Status: **complete.**
+## TOOLCHAIN-001 — 2026-09-30 — update Rust toolchain
+
+- Goal: update the project Rust version from 1.95.0 to 1.98.0.
+- Scope: CI toolchain and Docker builder image only; no application behavior change.
+- Result: CI uses `1.98.0`; Docker builds from the pinned `rust:1.98.0-bookworm` amd64 image.
+- Checks: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`;
+  `cargo test` — all passed with Rust 1.98.0. Twelve PostgreSQL and five external-provider tests
+  remain ignored because their existing environment/credential gates were not configured.
+- Status: **complete.**
+
+## Pairing session reuse — 2026-10-02
+
+- Goal: allow QR pairing to use an existing valid browser session without a second passkey prompt.
+- Scope: pairing page restoration, approval policy and contract, regression coverage.
+- Result: an active cookie plus CSRF can approve the specific request; missing or expired sessions still require sign-in.
+- Checks: Web regression tests 15/15, typecheck, production build, cargo fmt --check, strict Clippy and cargo test passed. Disposable PostgreSQL integration was not run (TEST_DATABASE_URL unset).
+- Status: implemented and locally checked; deployment and physical QR flow remain unverified.
+
+## Frontend redesign planning — 2026-10-02
+
+- Goal: make the RockServer UI redesign actionable and keep the three visual mockups with the project.
+- Scope: `docs/frontend-redesign-plan.md`, three conceptual HTML files in `docs/mockups/`, status and task log. No runtime or API change.
+- Result: P0/P1 implementation order, affected frontend components, acceptance criteria and manual verification scenarios include catalog, navigation, persistent player, devices and QR pairing.
+- Checks: documentation links/assets, `git diff --check`, `cargo fmt --check`, strict Clippy and `cargo test` passed. PostgreSQL and external-service opt-in tests remained ignored.
+- Status: plan complete; UI implementation and deployment pending.
+
+## Mockup encoding fix — 2026-10-02
+
+- Goal: make the three saved frontend mockups readable when opened as local files in Windows.
+- Result: wrapped each UTF-8 fragment as a standalone Russian-language HTML document with charset, viewport and BOM; kept the visual content and interaction examples.
+- Scope: documentation assets only; no frontend runtime or API change.
+- Checks: UTF-8 decoding, document metadata, Russian text and matching delivered copies verified.
+- Status: complete.
+
+## Frontend plan clarification — 2026-10-02
+
+- Goal: turn the P0/P1 overview into a usable step-by-step implementation sequence.
+- Result: seven ordered stages from baseline through release, each with concrete work and exit criteria, added to `docs/frontend-redesign-plan.md`.
+- Scope: documentation only; no runtime or mockup change.
+- Status: complete.
+
+## Frontend baseline findings — 2026-10-02
+
+- Goal: preserve the prior browser audit and code inspection as the baseline for the redesign.
+- Result: added a scenario table with evidence labels and redesign implications to `docs/frontend-redesign-plan.md`; marked browser-observed, code-reviewed and unverified QR cases separately.
+- Status: stage 1 partially complete; QR end-to-end checks on a phone remain.
+
+## Frontend redesign stage 2 — 2026-10-02
+
+- Goal: assemble the four-section cabinet shell without changing station cards, table, player, devices, API, or server behavior.
+- Scope: header search, side/bottom navigation, placement of existing genre presets, removal of duplicate search and static service panels, responsive layout, and web regression expectations.
+- Result: Эфир, Избранное, История, and Устройства open; one search still submits and clears; the player stays mounted and local WAV playback advances through section changes.
+- Checks: local browser fixture at 390×844, 800×1000, and 1440×900 showed the first station, search, and player access without overlap or horizontal overflow; web build/typecheck and 15/15 regression tests passed; `cargo fmt --check`, strict Clippy, and `cargo test` passed in sequence.
+- Status: stage 2 complete locally. Live authenticated data, external radio playback, and stage 1 QR phone outcomes remain unverified; stage 3 has not started.
+
+## Frontend redesign stage 3 — 2026-10-02
+
+- Goal: align catalog cards, table, favorites, and history around actual station data and clear actions.
+- Scope: station presentation, favorite projection/count, history name fallback, retry of the current search, focused regression and local browser fixture. Stage 2 navigation, player, devices, QR, API, and server were not changed.
+- Result: both station views show available distinguishing metadata, rounded bitrate, explicit play/favorite actions, and neutral missing-data text. Favorite count matches the saved-ID list; history retains available names. Empty results and retryable errors remain actionable.
+- Checks: local authenticated fixture covered search/clear, genre selection/reset, grid/table, play attempts in both views, favorite add/remove and count 1→0, history, empty result, absent metadata, and error/retry. `pnpm typecheck`, 16/16 web regression tests, `pnpm build`, `cargo fmt --check`, strict Clippy, and `cargo test` passed sequentially.
+- Status: stage 3 complete locally. The fixture does not provide playable audio, and external streams/live authenticated data were not verified. Disposable PostgreSQL and live-provider tests remained ignored by environment gates. Stage 4 remains untouched.
+
+## Restore Yandex Home in redesign artifacts — 2026-10-02
+
+- Goal: correct the omitted existing Yandex Home integration.
+- Scope: two HTML mockups, frontend redesign plan and project documentation.
+- Result: Devices navigation opens a Yandex Home concept; stage 6 and release checks include its existing capabilities and states.
+- Checks: mockup JavaScript syntax and UTF-8 metadata, cargo fmt, strict Clippy and cargo test passed. Real Yandex OAuth/sensor access remains unverified.
+- Status: design/documentation correction complete; implementation remains in stage 6.
+
+## Frontend redesign stage 4 — 2026-10-02
+
+- Goal: rebuild the persistent player per stage 4 of `docs/frontend-redesign-plan.md` without touching catalog, navigation, devices, QR pairing, or the server.
+- Scope: `PlayerDeck.tsx` desktop panel and compact mobile block, truthful status badges with `aria-live`, stream-error retry that reloads the stream, removal of fabricated LIVE ICY/DIRECT RELAY/CAST/320 KBPS indicators, reserved mobile scroll space in `style.css`, cabinet track-title placeholder cleanup, player fixtures in the browser harness (`--stage4`), and stage-4 regression assertions.
+- Result: playback continues across all four sections with one audio element; start, pause/resume, buffering, stream error plus «Повторить», next/previous station, volume persistence, favorite, and codec/bitrate-only-when-reported are visible and honest on desktop and mobile widths.
+- Checks: local harness browser run at 390, 800, and 1440 px covering the full player scenario list with frame-level retry tracing and inspected screenshots; `pnpm typecheck`, 17/17 web regression tests, `pnpm build`, `cargo fmt --check`, strict Clippy, and `cargo test` passed sequentially.
+- Status: stage 4 complete locally. Playback used fixture WAV streams — real external radio, a live authenticated account, and stage 1 QR phone outcomes remain unverified; disposable PostgreSQL and live-provider tests stayed ignored by their environment gates. Stage 5 has not started.
+
+## Frontend redesign stage 5 — 2026-10-02
+
+- Goal: rebuild the post-QR pairing page per stage 5 of `docs/frontend-redesign-plan.md` without touching server pairing logic, catalog, player, or account deletion rules.
+- Scope: `PairingView.tsx` mockup layout (device name/type, verification phrase, short code, expiry, explicit confirm), explicit loading/cancelled/unavailable states, cancel and retry handlers plus an in-flight approve guard in `app.tsx`, retryable server-outage approve failures, pairing styles in `style.css`, `--stage5` fixture family in the browser harness, stage-5 regression assertions.
+- Result: with a live browser session the screen shows the account and «Подключить» with no second passkey; without a session it offers login/registration and returns to the same request (`/register?code=…` keeps the code, never the secret). Loading never claims the link invalid and never shows a login form during session restore; repeated clicks produce exactly one approve request; success keeps the RockMobile return link and the cabinet handoff; cancel, expired/used link, and server unavailability each have a distinct card, unavailability with a working retry. The approval secret remains only in the in-memory handoff ref.
+- Checks: local harness browser run at 390, 800, and 1440 px through all states in both session modes plus the registration round trip; `pnpm typecheck`, 18/18 web regression tests, `pnpm build`, `cargo fmt --check`, strict Clippy, and `cargo test` passed sequentially.
+- Status: stage 5 complete locally except the real-device criterion: end-to-end QR scanning on a phone with a designated test device was not available and stays explicitly unverified — harness fixtures do not substitute for it. Not deployed to the public site. Stage 6 has not started.
+
+## Frontend redesign stage 6 — 2026-10-02
+
+- Goal: bring the devices section, Yandex Home, and the account screens to the common cabinet style per stage 6 of `docs/frontend-redesign-plan.md`, without touching server code, auth/pairing rules, catalog, player, or the stage-5 QR flow.
+- Scope: `HardwareHud.tsx` device cards (product tag, session-derived status, guarded dates, QR empty state, numbered pairing guide), `YandexHomeCard.tsx` state machine (not connected / loading / ready / no sensors / data error / expired) with rooms, units, per-property update times, kept OAuth return message, confirmed disconnect, `aria-live` body, `AccountCentre.tsx` devices banner + `initialTab` + styled account gate screens, `app.tsx` QR-success handoff onto the devices tab, `style.css` for all of the above plus mobile single-column and 44px touch targets, `--stage6` fixture family and stage-5-approve→device handoff in `browser-harness.mjs`, stage-6 regression suite in `ux-regression.mjs`.
+- Result: the devices tab reads as a first-class cabinet section; native devices are distinguishable (RockCast/RockMobile) and safely unbindable with per-device busy states and honest «нет данных» for missing activity; the empty list explains the QR path; Yandex Home renders every listed state with the right action and never substitutes zeros for missing values; a successful QR pairing opens the cabinet directly in «Устройства» with the «Только что подключено» marker and a refreshed list; playback continued through every transition and refresh.
+- Checks: local harness browser run at 390, 800, and 1440 px covering filled/empty device lists, rename busy+success, revoke cancel/confirm/busy/removal, device-mutation failure, all six Yandex states, OAuth round trip and its kept result message, disconnect cancel/confirm/failure, and the QR→devices handoff; no horizontal scroll or player overlap at any width. `pnpm typecheck`, 19/19 web regression tests, `pnpm build`, `cargo fmt --check`, strict Clippy, and `cargo test` passed sequentially.
+- Status: stage 6 complete locally. Fixtures are synthetic: real Yandex OAuth, live sensors, and real-device rename/revoke/disconnect remain unverified; not deployed to the public site. Stage 7 has not started.
+
+## Plan infinite scrolling and voice search — 2026-10-02
+
+- Goal: extend the released frontend with continued list loading and voice search.
+- Scope: existing frontend plan, status and task log; read-only inspection of RockMobile references.
+- Result: ordered stages 8/9 with cancellation, paging/error boundaries, personal-list handling, microphone lifecycle, server protocol/auth prerequisites and acceptance criteria.
+- Status: planned; no feature implementation or deployment in this task.
+Stage 8 also sets table view as the initial default while retaining the grid switch.
+Checks: cargo fmt, strict Clippy and cargo test passed sequentially; external-service and PostgreSQL opt-in tests retained their gates.
+
+## Frontend redesign stage 9 — 2026-10-02
+
+- Goal: add browser voice station search per stage 9 of `docs/frontend-redesign-plan.md` without server changes, without exposing device credentials to the browser, and without weakening text search or stage-8 paging.
+- Scope: `web/src/voice.ts` (protocol session client: start→ready→PCM→commit/cancel, 60 s audio cap, wall guard, cancel/late-result safety, guaranteed mic+socket release), `web/src/voicePcm.ts` (anti-aliased windowed-sinc 16 kHz downsampler), `web/src/voiceBrowser.ts` + `web/public/voice-worklet.js` (same-origin anonymous WebSocket without Authorization; getUserMedia capture graph with AudioWorklet tap and ScriptProcessor fallback), `web/src/useVoiceSearch.ts` + `web/src/components/VoiceSearchPanel.tsx` + mic button in `Header.tsx` (explicit click, permission, recording with finish/cancel and timer, processing, transcript + candidates, distinct failure states), `AccountCentre.tsx` (finite voice issuance instead of the paged catalog, transcript never re-run as a text query, player pause/restore that never restarts a stopped stream), `web/src/voiceFixture.ts` QA seam (`?voice-fixture=` gated synthetic 44.1 kHz mic + permission/device failures), `--stage9*` fixture family with a validating RFC 6455 server in `browser-harness.mjs`, `web/tests/voice.mjs` (17 tests over the real session and downsampler), stage-9 suite in `ux-regression.mjs`.
+- Result: on 390/800/1440 px a spoken fixture query yields the transcript and a finite candidate list the user picks from manually; cancel and obsolete results never touch the catalog; text search displaces the voice issuance; the player pauses under recording and restores exactly its prior state; the microphone, audio graph, and socket are released in every outcome including page exit; unsupported/denied/no-microphone/connection/timeout/provider/silence/empty states each have their own message; anonymous server limits are respected (permission is requested before any upgrade so denials spend no budget; 2 upgrades per 60 s are surfaced as a wait hint).
+- Checks: sequential `pnpm typecheck`, `pnpm test` 44/44 (incl. 17 voice tests executing real protocol/DSP logic), `pnpm build`, `cargo fmt --check`, strict Clippy, `cargo test` — all passed; local harness browser pass at 390/800/1440 px across recording, finish, cancel (recording and processing), results, empty result, all injected failures, mic-off accounting (opened === closed), player pause/restore (playing → paused → restored; stopped → stays stopped), text-search displacement, no horizontal overflow at any width; the harness protocol log recorded no frame-order/limit violations and the committed byte count matches the 44.1→16 kHz conversion exactly.
+- Status: stage 9 complete locally. Fixtures only: the real microphone (getUserMedia prompt, device-rate capture) and live SpeechKit recognition were not exercised — the harness browser cannot be granted mic access; those paths share the session/resampler code covered by unit tests and fixtures and remain for a manual on-site pass. Not deployed; no commit or push performed.
+
+## Long-lived sliding browser sessions — 2026-10-02
+
+- Goal: signed-in users stay signed in like on mainstream sites, instead of a fixed 30-minute browser session.
+- Scope: `src/auth/mod.rs` lifetime constants and the new `absolute_expires_at` field of `NewBrowserSession`; migration `0026_add_browser_session_absolute_expiry.sql`; `src/persistence/account_postgres/browser.rs` (policy-based creation, threshold-guarded `renew_browser_session` capped by the absolute expiry, renewal wired into both session resolvers); registration-transaction insert in `passkeys.rs`; explicit-timestamp insert in `accounts.rs`; 180-day cookie Max-Age on both issuance sites in `src/http/auth.rs`; OpenAPI cookie-scheme description; gated PostgreSQL integration test for the sliding window and the absolute cap.
+- Result: authenticated traffic renews a 30-day sliding idle window that can never extend past 180 days from the sign-in; the cookie Max-Age matches the absolute bound; reaching either bound requires a fresh passkey ceremony; logout, CSRF, trusted-proxy checks, and the fresh-passkey gate for account deletion are unchanged; pre-existing sessions are not extended by the migration.
+- Checks: sequential `cargo fmt --check`, strict Clippy, `cargo test` — all passed; the new PostgreSQL integration test stays behind the `TEST_DATABASE_URL` gate and was not executed (no disposable database configured); web checks unaffected and already green at 44/44 from the stage-8/9 commit.
+- Status: complete and deployed. Commits b03c463 (stages 8–9) and ddc1fb6 (sessions) pushed to origin/master; production deploy via deploy/ops-001-d.ps1 reported status=succeeded, readiness=passed; the live site serves the verified build (assets/index-BtS9bSRs.js), /voice-worklet.js, and answers /api/v1/voice/stream with the contractual 400 for non-upgrade requests.
+
+## Fix first-party microphone permission — 2026-10-02
+
+- Goal: allow the voice search permission prompt when site settings say Ask.
+- Evidence: live response and both Caddy templates denied all microphone use via microphone=().
+- Scope: production/local Caddy Permissions-Policy and its deployment regression check; no voice transport change.
+- Result: only the current origin is allowed to request microphone access; camera and geolocation remain disabled. Deployment regression tests, cargo fmt, strict Clippy and cargo test passed sequentially; optional external/database tests remain gated. Fix commit 8c1f818 pushed to origin/master and deployed successfully; verified live policy microphone=(self) and readiness HTTP 200. Real microphone retry after page reload remains a user check.
+
+## Automatic browser voice search — 2026-10-02
+
+- Implemented the RockCast-style PCM amplitude detector: 350 ms startup calibration, 1 s silence after speech, 4.5 s initial silence timeout, and an 8 s continuous-speech guard. Automatic commit preserves buffered pre-ready speech and the final partial PCM frame; processing status comes from the session event.
+- Removed Finish and Cancel buttons. The microphone stays enabled and its second click cancels immediately during permission, capture, or recognition. Cancelled/late results cannot change the catalog; late permission grants release the microphone without opening a socket.
+- Verification: sequential frontend typecheck, tests (48/48), production build, cargo fmt --check, strict Clippy, cargo test. Physical microphone, noisy-room behavior, and live SpeechKit recognition require a manual user check; the detector is an amplitude heuristic, not a speech classifier. Database/live-provider tests remain gated.
+- Deployment: commit 27b2645 pushed to origin/master and deployed successfully via the standard script (status=succeeded, readiness=passed). Production serves the verified assets/index-BLi5pzay.js bundle; /health/ready returns HTTP 200. Real microphone acceptance remains a manual user check.
+
+## Voice search paging follows RockCast — 2026-10-02
+
+- Root cause: `/api/v1/voice/stream` returns at most 10 candidates, and the cabinet previously treated that response as the complete list with `hasMore=false`.
+- RockCast behavior confirmed in `src/app/actions/poll/voice.rs` and `src/app/actions/catalog.rs`: show candidates, strip spoken command words from the transcript, then start normal paginated station search and continue loading by offset. The cabinet now follows that sequence using its existing 20-station paging hook and infinite-scroll footer. Text typing and genre selection leave voice results explicitly; a failed first page retains the candidate preview and offers retry.
+- Verification: sequential frontend typecheck, 48/48 frontend checks, frontend build, cargo fmt --check, strict Clippy, and cargo test passed. Real voice recognition and end-to-end scrolling remain for a manual user pass. Commit 64f7871 pushed to origin/master and deployed (status=succeeded, readiness=passed). Production serves assets/index-DLhxuI0t.js and /health/ready returns HTTP 200.

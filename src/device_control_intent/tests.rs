@@ -123,6 +123,7 @@ fn device(id: DeviceId, online: bool, sensor_count: usize) -> DirectoryDevice {
             playback: Some(PlaybackState {
                 status: "playing".into(),
                 station_id: Some("station.rock".into()),
+                track_title: None,
             }),
             volume: None,
             display: None,

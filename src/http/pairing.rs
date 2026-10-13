@@ -124,7 +124,7 @@ pub(super) async fn create_pairing_request(
     let payload: CreatePairingRequestDto =
         match parse_json_request(&headers, body, &request_id).await {
             Ok(payload) => payload,
-            Err(response) => return response,
+            Err(response) => return *response,
         };
     if payload.device_display_name.trim().is_empty()
         || payload.device_display_name.len() > 128
@@ -307,7 +307,7 @@ pub(super) async fn lookup_pairing_request(
     }
 }
 
-/// Approves a pairing request with a fresh browser session and double-submit CSRF proof.
+/// Approves a pairing request with an active browser session and double-submit CSRF proof.
 pub(super) async fn approve_pairing_request(
     State(state): State<AppState>,
     Path(pairing_id): Path<Uuid>,

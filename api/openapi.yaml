@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: RockServer API
-  version: 0.5.0
+  version: 0.6.0
   description: >-
     Contract for RockServer operational health checks, deterministic station search, and the
     Windows voice-command JSON and streaming boundaries. `POST /api/v1/voice/command` resolves
@@ -213,6 +213,103 @@ paths:
             image/webp: { schema: { type: string, format: binary } }
         "304": { description: The supplied ETag matches the stored artifact. }
         "404": { description: No ready stored icon exists for the station. }
+  /api/v1/stations/{station_id}/stream:
+    get:
+      operationId: relayStationStream
+      summary: Relay the current primary stream of an active catalog station
+      security: [{ RockserverBrowserCookie: [] }, { RockserverBearer: [] }]
+      description: >-
+        Requires an active account browser cookie through the trusted first-party proxy or an
+        active native device Bearer session. Admin, legacy Bearer and device_secret are invalid.
+        The station URL is selected from the server catalog; query parameters are rejected.
+        Upstream audio is passed through without transcoding. The server requests ICY upstream.
+        Clients sending Icy-MetaData: 1 receive interleaved ICY blocks and icy-metaint when
+        upstream supplies a valid interval; other clients receive audio only. On upstream EOF,
+        timeout, or error the current response ends. Clients should reconnect with bounded
+        exponential backoff and jitter, stop on 401/403, and respect 429 Retry-After. A reconnect
+        rechecks the session. Open streams have a one-hour maximum lifetime.
+      parameters:
+        - name: station_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: Icy-MetaData
+          in: header
+          schema: { type: string, enum: ["1"] }
+      responses:
+        "200":
+          description: Chunked audio, optionally interleaved with ICY metadata.
+          headers:
+            icy-metaint: { schema: { type: integer, minimum: 1 } }
+            Cache-Control: { schema: { type: string, example: no-store } }
+          content:
+            audio/mpeg: { schema: { type: string, format: binary } }
+            audio/aac: { schema: { type: string, format: binary } }
+            application/octet-stream: { schema: { type: string, format: binary } }
+        "400": { description: Invalid station identifier or any query parameters. }
+        "401": { description: Browser or native device session is absent, expired, revoked, or invalid. }
+        "404": { description: Station or active primary stream is unavailable. }
+        "429": { description: Relay capacity is exhausted; Retry-After is provided. }
+        "502": { description: Catalog upstream URL is unsafe, invalid, or unavailable. }
+        "503": { description: Catalog storage is unavailable. }
+  /api/v1/stations/{station_id}/now-playing:
+    get:
+      operationId: getStationNowPlaying
+      summary: Read the last locally observed ICY StreamTitle
+      security: [{ RockserverBrowserCookie: [] }, { RockserverBearer: [] }]
+      description: >-
+        Uses the same current browser or native device session and catalog-station checks as
+        the audio relay. This read never opens an upstream. A missing snapshot has null
+        rawTitle and updatedAt; a stale snapshot retains both with state stale. Snapshots are
+        process-local and best effort while listeners have separate upstreams. No query
+        parameters are accepted.
+      parameters:
+        - name: station_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      responses:
+        "200":
+          description: Current station metadata snapshot.
+          headers:
+            Cache-Control: { schema: { type: string, example: no-store } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StationNowPlaying" }
+        "400": { description: Invalid station identifier or query parameters. }
+        "401": { description: Current browser or native device session is required. }
+        "404": { description: Station or active primary stream is unavailable. }
+        "503": { description: Catalog storage is unavailable. }
+  /api/v1/stations/{station_id}/events:
+    get:
+      operationId: watchStationNowPlaying
+      summary: Subscribe to station ICY title snapshots
+      security: [{ RockserverBrowserCookie: [] }, { RockserverBearer: [] }]
+      description: >-
+        Sends a snapshot event immediately, then on observed StreamTitle changes. Event data
+        uses StationNowPlaying JSON. The connection ends after one hour; reconnect to receive
+        the latest snapshot and reauthorize. Slow subscribers are disconnected when their
+        bounded queue fills; a receiver that misses broadcast events receives the latest
+        snapshot. At most 64 subscribers and two queued events per subscriber are allowed.
+        This endpoint never opens an upstream. No query parameters are accepted.
+      parameters:
+        - name: station_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      responses:
+        "200":
+          description: Server-sent snapshot events.
+          headers:
+            Cache-Control: { schema: { type: string, example: no-store } }
+          content:
+            text/event-stream:
+              schema: { type: string, description: "event: snapshot with StationNowPlaying JSON data" }
+        "400": { description: Invalid station identifier or query parameters. }
+        "401": { description: Current browser or native device session is required. }
+        "404": { description: Station or active primary stream is unavailable. }
+        "429": { description: Subscriber capacity is exhausted; Retry-After is provided. }
+        "503": { description: Catalog storage is unavailable. }
   /api/v1/admin/devices:
     get:
       operationId: listAdminDevices
@@ -354,6 +451,41 @@ paths:
               schema: { $ref: "#/components/schemas/BrowserAccount" }
         "401": { description: Browser session cookie is absent, expired, or invalid. }
         "403": { description: Request did not arrive through the trusted first-party proxy. }
+  /api/v1/browser/sync:
+    post:
+      operationId: syncBrowserPersonalData
+      summary: Synchronize favourites and history for the signed-in browser account
+      description: >-
+        Pushes client favourites and history changes and pulls the account delta for the
+        authenticated browser session. Merges changes last-writer-wins on `updated_at`.
+        Enriches active favourites with catalog station representations.
+      security:
+        - RockserverBrowserCookie: []
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PersonalSyncRequest" }
+      responses:
+        "200":
+          description: Changes applied; payload contains the new cursor, deltas, and station metadata for active favourites.
+          headers:
+            Cache-Control: { schema: { type: string, example: no-store } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrowserPersonalSyncResponse" }
+        "400": { description: Request body is not valid JSON. }
+        "401": { description: Browser session cookie is absent, expired, or invalid. }
+        "403": { description: Trusted proxy, origin, or CSRF proof is missing. }
+        "413": { description: Batch body exceeded the sync byte budget. }
+        "422": { description: Batch validation failed or a bounded collection size would be exceeded. }
+        "429": { description: The user exhausted their sync quota. }
+        "503": { description: Personal-data persistence is temporarily unavailable. }
   /api/v1/browser/yandex-home/authorize:
     post:
       operationId: beginYandexHomeAuthorization
@@ -792,6 +924,45 @@ paths:
         "204": { description: Device revoked. }
         "401": { $ref: "#/components/responses/AuthenticationRequired" }
         "404": { description: Device is unknown or belongs to another account. }
+  /api/v1/sync:
+    post:
+      operationId: syncPersonalData
+      summary: Push one batch of favourites and history changes and pull the account delta
+      description: >-
+        One authenticated push+pull round trip for the RM-007-A personal profile (RM-012-A).
+        Changes merge last-writer-wins per record on `updated_at`; the response carries every
+        record the caller must apply (including tombstones) plus the monotonic cursor to send
+        as the next `since_revision`. A zero or absent cursor returns the full account
+        snapshot. Cursors are per device: each device persists its own last cursor.
+      security:
+        - RockserverBearer: []
+      x-rockserver-status: implemented
+      x-personal-data-policy:
+        max_favourites_per_account: 500
+        max_history_per_account: 500
+        max_batch_items_per_collection: 300
+        history_retention_days: 90
+        tombstone_retention_days: 90
+        deleted_account_purge_days: 30
+        max_request_body_bytes: 262144
+        max_metadata_bytes: 4096
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PersonalSyncRequest" }
+      responses:
+        "200":
+          description: Changes applied; the payload contains the new cursor and both collection deltas.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PersonalSyncResponse" }
+        "400": { description: Request body is not valid JSON. }
+        "401": { $ref: "#/components/responses/AuthenticationRequired" }
+        "413": { description: Batch body exceeded the sync byte budget. }
+        "422": { description: Batch validation failed or a bounded collection size would be exceeded. }
+        "429": { description: The device exhausted its sync quota. }
+        "503": { description: Personal-data persistence is temporarily unavailable. }
   /api/v1/browser/devices/{device_id}:
     patch:
       operationId: renameBrowserOwnedDevice
@@ -876,7 +1047,7 @@ paths:
   /api/v1/pairing-requests/{request_id}/approve:
     post:
       operationId: approvePairingRequest
-      summary: Approve a pairing request from a fresh browser session
+      summary: Approve a pairing request from an active browser session
       security:
         - RockserverBrowserCookie: []
       parameters:
@@ -1333,8 +1504,10 @@ components:
       name: rockserver_browser
       description: >-
         Secure, HttpOnly, SameSite browser session cookie issued after a verified passkey ceremony.
-        State-changing browser requests also require the X-CSRF-Token header and the trusted Caddy
-        proxy proof; those transport checks are enforced outside the bearer scheme.
+        The session uses a 30-day sliding idle window renewed by authenticated traffic and is capped
+        by an absolute 180-day lifetime from the sign-in; the cookie's Max-Age matches the absolute
+        lifetime. State-changing browser requests also require the X-CSRF-Token header and the
+        trusted Caddy proxy proof; those transport checks are enforced outside the bearer scheme.
     RockCastBearer:
       type: http
       scheme: bearer
@@ -1375,6 +1548,15 @@ components:
             request_id: req_01AUTH401
             details: {}
   schemas:
+    StationNowPlaying:
+      type: object
+      additionalProperties: false
+      required: [stationId, rawTitle, updatedAt, state]
+      properties:
+        stationId: { type: string, minLength: 1, maxLength: 128 }
+        rawTitle: { type: [string, "null"], maxLength: 512 }
+        updatedAt: { type: [string, "null"], format: date-time }
+        state: { type: string, enum: [missing, fresh, stale] }
     AdminLoginRequest:
       type: object
       additionalProperties: false
@@ -1957,6 +2139,7 @@ components:
       properties:
         status: { type: string, enum: [idle, playing, paused, stopped, buffering, error] }
         station_id: { type: [string, "null"], minLength: 1, maxLength: 128 }
+        track_title: { type: string, minLength: 1, maxLength: 256, description: Current stream metadata title when available; absent when unknown. }
     VolumeRuntimeState:
       type: object
       additionalProperties: false
@@ -3323,3 +3506,182 @@ components:
         details:
           type: object
           additionalProperties: true
+    PersonalSyncRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        since_revision:
+          type: integer
+          minimum: 0
+          description: >-
+            Cursor from this device's last successful sync; zero or absent returns the full
+            account snapshot.
+        favourites: { $ref: "#/components/schemas/FavouriteChanges" }
+        history: { $ref: "#/components/schemas/HistoryChanges" }
+      description: >-
+        One device's pushed personal-data changes. Both collections are optional; empty
+        requests are valid pulls.
+    FavouriteChanges:
+      type: object
+      additionalProperties: false
+      properties:
+        upserts:
+          type: array
+          maxItems: 300
+          items: { $ref: "#/components/schemas/FavouriteUpsert" }
+        deletes:
+          type: array
+          maxItems: 300
+          items: { $ref: "#/components/schemas/RecordDelete" }
+    HistoryChanges:
+      type: object
+      additionalProperties: false
+      properties:
+        upserts:
+          type: array
+          maxItems: 300
+          items: { $ref: "#/components/schemas/HistoryUpsert" }
+        deletes:
+          type: array
+          maxItems: 300
+          items: { $ref: "#/components/schemas/RecordDelete" }
+    FavouriteUpsert:
+      type: object
+      additionalProperties: false
+      required: [record_id, station_id, added_at, updated_at]
+      properties:
+        record_id: { type: string, format: uuid }
+        station_id: { type: string, minLength: 1, maxLength: 256 }
+        added_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    HistoryUpsert:
+      type: object
+      additionalProperties: false
+      required: [record_id, station_id, started_at, last_played_at, updated_at]
+      properties:
+        record_id: { type: string, format: uuid }
+        station_id: { type: string, minLength: 1, maxLength: 256 }
+        started_at: { type: string, format: date-time }
+        last_played_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        play_duration_ms: { type: integer, minimum: 0 }
+        metadata: { type: object }
+        updated_at: { type: string, format: date-time }
+      description: >-
+        One client listening-session record. Five-minute coalescing of retries stays a
+        client-side rule; the server stores entries as pushed.
+    RecordDelete:
+      type: object
+      additionalProperties: false
+      required: [record_id, updated_at]
+      properties:
+        record_id: { type: string, format: uuid }
+        updated_at: { type: string, format: date-time }
+      description: >-
+        Deletion marker; `updated_at` arms the tombstone so an older upsert replay cannot
+        resurrect the record.
+    PersonalSyncResponse:
+      type: object
+      additionalProperties: false
+      required: [server_revision, server_time, favourites, history]
+      properties:
+        server_revision:
+          type: integer
+          minimum: 0
+          description: Cursor to persist and send as the next `since_revision`.
+        server_time: { type: string, format: date-time }
+        favourites:
+          type: object
+          additionalProperties: false
+          required: [records]
+          properties:
+            records:
+              type: array
+              items: { $ref: "#/components/schemas/PersonalFavouriteRecord" }
+        history:
+          type: object
+          additionalProperties: false
+          required: [records]
+          properties:
+            records:
+              type: array
+              items: { $ref: "#/components/schemas/PersonalHistoryRecord" }
+      description: >-
+        Every record the caller must apply: account rows past the caller's cursor plus
+        echoes of pushed records, including tombstones for propagated deletions.
+    PersonalFavouriteRecord:
+      type: object
+      additionalProperties: false
+      required: [record_id, added_at, updated_at]
+      properties:
+        record_id: { type: string, format: uuid }
+        station_id: { type: string, minLength: 1 }
+        added_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        deleted_at: { type: string, format: date-time }
+      description: >-
+        Tombstoned records keep their last known station; a `deleted_at` presence means the
+        caller must delete the record locally.
+    PersonalHistoryRecord:
+      type: object
+      additionalProperties: false
+      required: [record_id, started_at, last_played_at, updated_at]
+      properties:
+        record_id: { type: string, format: uuid }
+        station_id: { type: string, minLength: 1 }
+        started_at: { type: string, format: date-time }
+        last_played_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        play_duration_ms: { type: integer, minimum: 0 }
+        metadata: { type: object }
+        updated_at: { type: string, format: date-time }
+        deleted_at: { type: string, format: date-time }
+    BrowserPersonalSyncResponse:
+      type: object
+      additionalProperties: false
+      required: [server_revision, server_time, favourites, history, stations]
+      properties:
+        server_revision:
+          type: integer
+          minimum: 0
+          description: Cursor to persist and send as the next `since_revision`.
+        server_time: { type: string, format: date-time }
+        favourites:
+          type: object
+          additionalProperties: false
+          required: [records]
+          properties:
+            records:
+              type: array
+              items: { $ref: "#/components/schemas/PersonalFavouriteRecord" }
+        history:
+          type: object
+          additionalProperties: false
+          required: [records]
+          properties:
+            records:
+              type: array
+              items: { $ref: "#/components/schemas/PersonalHistoryRecord" }
+        stations:
+          type: array
+          items: { $ref: "#/components/schemas/BrowserStation" }
+    BrowserStation:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - stream_url
+        - tags
+      properties:
+        id: { type: string, minLength: 1, maxLength: 128 }
+        name: { type: string, minLength: 1 }
+        stream_url: { type: string, format: uri }
+        homepage_url: { type: [string, "null"], format: uri }
+        favicon_url: { type: [string, "null"], format: uri-reference }
+        tags: { type: array, items: { type: string } }
+        language: { type: [string, "null"] }
+        country_code: { type: [string, "null"], pattern: "^[A-Z]{2}$" }
+        codec: { type: [string, "null"] }
+        bitrate_kbps: { type: [integer, "null"], minimum: 1 }
+
