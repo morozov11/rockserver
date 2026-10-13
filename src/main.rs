@@ -38,9 +38,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         (Some(provider), true) if provider.supports_semantic_intent_filters() => {
             match SemanticLanguageClassifier::load(provider.clone()).await {
                 Ok(classifier) => {
-                    tracing::info!(
-                        "semantic language classifier loaded; not used in the search request path (SRCH-004)"
-                    );
+                    tracing::info!("semantic language filters enabled");
                     Some(Arc::new(classifier))
                 }
                 Err(error) => {
