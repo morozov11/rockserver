@@ -1,5 +1,14 @@
 # Task log
 
+## 2026-10-17 — Accept legacy ICY status in authenticated relay
+
+- Goal: remove the 502 caused by `ICY 200 OK` for Radio Caprice - Black Metal while preserving the relay security policy.
+- Scope: RockServer upstream fallback and reader, deterministic local ICY tests, OpenAPI relay description, plan and status. No client or firmware changes.
+- Result: reproduced the station's legacy status line and HTTP parser rejection; implemented bounded plain-HTTP ICY header handling through the existing audio/metadata pump. Local tests cover ICY audio and metadata, clean audio, malformed source responses, disconnect, ordinary HTTP and existing URL/IP/redirect checks.
+- Checks: sequential `cargo fmt --check`, strict Clippy and `cargo test` passed; opt-in PostgreSQL and live-provider tests stayed ignored.
+- Status: implementation verified locally; production deployment and live station checks pending.
+
+
 ## 2026-10-10 — Apache-2.0 adoption, contributors recognition, and ecosystem cross-linking
 
 - Goal: enhance GitHub repository discoverability, establish permissive Apache-2.0 licensing, formally recognize contributors, and provide interlinked ecosystem documentation across the RockCast suite.

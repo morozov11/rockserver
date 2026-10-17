@@ -6,6 +6,8 @@ mod icy;
 mod metadata;
 #[path = "relay/security.rs"]
 mod security;
+#[path = "relay/upstream.rs"]
+mod upstream;
 
 pub(super) use metadata::{events, now_playing};
 
@@ -125,13 +127,13 @@ pub(super) async fn stream(
         .get("icy-metadata")
         .is_some_and(|value| value == "1");
     let metaint = upstream
-        .headers()
+        .0
         .get("icy-metaint")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| (1..=MAX_METAINT).contains(value));
     let content_type = upstream
-        .headers()
+        .0
         .get(header::CONTENT_TYPE)
         .cloned()
         .unwrap_or_else(|| HeaderValue::from_static("application/octet-stream"));
@@ -142,7 +144,7 @@ pub(super) async fn stream(
         tokio::select! {
             _ = sender.closed() => {},
             _ = tokio::time::sleep(STREAM_LIFETIME) => {},
-            _ = pump(icy::Reader::new(upstream), metaint, wants_icy, &station_id, relay, sender.clone()) => {},
+            _ = pump(upstream.1, metaint, wants_icy, &station_id, relay, sender.clone()) => {},
         }
     });
     let mut response = with_request_id(
@@ -247,7 +249,7 @@ async fn station_access(
 }
 
 // Each hop gets a fresh pinned client; a redirect never inherits trust from its parent.
-async fn open_upstream(mut url: Url, allow_loopback: bool) -> Result<reqwest::Response, ()> {
+async fn open_upstream(mut url: Url, allow_loopback: bool) -> Result<(HeaderMap, icy::Reader), ()> {
     for hop in 0..=MAX_REDIRECTS {
         let client = security::pinned_client(&url, allow_loopback).await?;
         let response = timeout(
@@ -255,8 +257,11 @@ async fn open_upstream(mut url: Url, allow_loopback: bool) -> Result<reqwest::Re
             client.get(url.clone()).header("Icy-MetaData", "1").send(),
         )
         .await
-        .map_err(|_| ())?
         .map_err(|_| ())?;
+        let response = match response {
+            Ok(response) => response,
+            Err(_) => return upstream::open_icy(&url, allow_loopback).await,
+        };
         if response.status().is_redirection() {
             if hop == MAX_REDIRECTS {
                 return Err(());
@@ -279,7 +284,7 @@ async fn open_upstream(mut url: Url, allow_loopback: bool) -> Result<reqwest::Re
         {
             return Err(());
         }
-        return Ok(response);
+        return Ok((response.headers().clone(), icy::Reader::new(response)));
     }
     Err(())
 }

@@ -1,6 +1,15 @@
 # Project status
 
-Last updated: 2026-10-10
+Last updated: 2026-10-17
+
+## Legacy ICY relay support — 2026-10-17
+
+- Reproduced the upstream status line `ICY 200 OK` for catalog station `rb-96427c67-0601-11e8-ae97-52543be04c81` (`http://79.120.77.11:9003/`); the existing HTTP client rejected it before audio delivery, leading to relay `502 upstream_unavailable`.
+- RockServer now accepts a bounded legacy ICY response from a revalidated, pinned plain-HTTP destination after the normal HTTP client rejects the response. Existing audio/metadata parser, authentication, URL/IP/redirect policy, connection cap and cancellation remain in use. HTTPS and conventional HTTP retain the ordinary client path.
+- Local deterministic ICY tests verified interleaved audio/metadata, clean audio, malformed source errors and disconnect slot release. Existing HTTP, SSRF and redirect tests passed in the complete suite. OpenAPI documents the additional upstream response form; `docs/service-diagrams.html` remains accurate because the relay topology is unchanged.
+- Verification: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed. PostgreSQL and live-provider opt-in suites remained ignored. Production deploy and authenticated station playback are pending.
+- Next step: deploy the committed change with OPS-001-D, verify readiness and both station types, and inspect production relay errors.
+
 
 ## Apache-2.0 adoption, contributors recognition, and ecosystem cross-linking — 2026-10-10
 

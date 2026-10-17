@@ -182,6 +182,79 @@ async fn icy_is_forwarded_or_removed_and_title_is_saved_across_reads() {
 }
 
 #[tokio::test]
+async fn legacy_icy_status_streams_audio_and_metadata() {
+    let mut body = b"ABCD".to_vec();
+    body.push(2);
+    body.extend_from_slice(b"StreamTitle='Song';");
+    body.resize(37, 0);
+    body.extend_from_slice(b"EFGH\x00");
+    let body = Box::leak(body.into_boxed_slice());
+    let (url, connections) = upstream(
+        "ICY 200 OK\r\nContent-Type: audio/mpeg\r\nicy-metaint: 4\r\n\r\n",
+        body,
+        false,
+    )
+    .await;
+    let (router, relay) = build_relay_router(url);
+    let response = get(
+        router.clone(),
+        "/api/v1/stations/station/stream",
+        true,
+        true,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["icy-metaint"], "4");
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "audio/mpeg");
+    assert_eq!(
+        to_bytes(response.into_body(), 1000).await.unwrap().as_ref(),
+        body
+    );
+    let response = get(router, "/api/v1/stations/station/stream", false, true).await;
+    assert_eq!(
+        to_bytes(response.into_body(), 1000).await.unwrap().as_ref(),
+        b"ABCDEFGH"
+    );
+    assert_eq!(relay.titles.lock().unwrap()["station"].raw_title, "Song");
+    assert!(connections.load(Ordering::SeqCst) >= 2);
+}
+
+#[tokio::test]
+async fn legacy_icy_errors_are_bad_gateway() {
+    for status in ["ICY 403 Forbidden\r\n\r\n", "ICY 200 OK\r\nBroken\r\n\r\n"] {
+        let (url, _) = upstream(status, b"audio", false).await;
+        let (router, _) = build_relay_router(url);
+        assert_eq!(
+            get(router, "/api/v1/stations/station/stream", false, true)
+                .await
+                .status(),
+            StatusCode::BAD_GATEWAY
+        );
+    }
+}
+
+#[tokio::test]
+async fn legacy_icy_disconnect_releases_slot() {
+    let (url, _) = upstream(
+        "ICY 200 OK\r\nContent-Type: audio/mpeg\r\n\r\n",
+        b"audio",
+        true,
+    )
+    .await;
+    let (router, relay) = build_relay_router(url);
+    let response = get(router, "/api/v1/stations/station/stream", false, true).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
+    for _ in 0..20 {
+        if relay.slots.available_permits() == MAX_CONNECTIONS {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("legacy relay slot was not released after disconnect");
+}
+
+#[tokio::test]
 async fn missing_and_broken_icy_keep_audio_and_disconnect_releases_slot() {
     let (url, _) = upstream(
         "HTTP/1.1 200 OK\r\nContent-Type: audio/aac\r\n\r\n",

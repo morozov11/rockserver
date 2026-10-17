@@ -46,6 +46,21 @@ fn public_ip(ip: IpAddr) -> bool {
 
 /// Validates every resolved address and pins the HTTP client to one checked destination.
 pub(super) async fn pinned_client(url: &Url, allow_loopback: bool) -> Result<Client, ()> {
+    let (host, address) = checked_endpoint(url, allow_loopback).await?;
+    Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(CONNECT_TIMEOUT)
+        .resolve(&host, address)
+        .build()
+        .map_err(|_| ())
+}
+
+/// Validates a hop and resolves its destination for a pinned connection.
+pub(super) async fn checked_endpoint(
+    url: &Url,
+    allow_loopback: bool,
+) -> Result<(String, SocketAddr), ()> {
     if !matches!(url.scheme(), "http" | "https")
         || !url.username().is_empty()
         || url.password().is_some()
@@ -68,13 +83,7 @@ pub(super) async fn pinned_client(url: &Url, allow_loopback: bool) -> Result<Cli
     {
         return Err(());
     }
-    Client::builder()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(CONNECT_TIMEOUT)
-        .resolve(host, addresses[0])
-        .build()
-        .map_err(|_| ())
+    Ok((host.to_owned(), addresses[0]))
 }
 
 #[cfg(test)]

@@ -222,7 +222,8 @@ paths:
         Requires an active account browser cookie through the trusted first-party proxy or an
         active native device Bearer session. Admin, legacy Bearer and device_secret are invalid.
         The station URL is selected from the server catalog; query parameters are rejected.
-        Upstream audio is passed through without transcoding. The server requests ICY upstream.
+        Upstream audio is passed through without transcoding. The server requests ICY upstream
+        and accepts a bounded legacy `ICY 200 OK` response from a validated plain-HTTP source.
         Clients sending Icy-MetaData: 1 receive interleaved ICY blocks and icy-metaint when
         upstream supplies a valid interval; other clients receive audio only. On upstream EOF,
         timeout, or error the current response ends. Clients should reconnect with bounded
