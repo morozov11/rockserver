@@ -6,8 +6,60 @@
 - Scope: RockServer upstream fallback and reader, deterministic local ICY tests, OpenAPI relay description, plan and status. No client or firmware changes.
 - Result: reproduced the station's legacy status line and HTTP parser rejection; implemented bounded plain-HTTP ICY header handling through the existing audio/metadata pump. Local tests cover ICY audio and metadata, clean audio, malformed source responses, disconnect, ordinary HTTP and existing URL/IP/redirect checks.
 - Checks: sequential `cargo fmt --check`, strict Clippy and `cargo test` passed; opt-in PostgreSQL and live-provider tests stayed ignored.
-- Status: implementation verified locally; production deployment and live station checks pending.
+- Deployment: OPS-001-D deployed `d71eec847e2be300f8efe04a614e503c05964ecc` with readiness passed. The owner confirmed both ICY and ordinary HTTP stations played through the authenticated Web player; access logs showed HTTP 200 for both stream routes. A 502 for separate T-Rock came from an unresolvable HTTPS source host. After a brief, overbroad rollback to `8c1f8189be7e30f72e26af9e1a32df2273bb1521`, owner clarification led to a successful redeploy of `d71eec847e2be300f8efe04a614e503c05964ecc`; it is the active release.
+- Status: ICY change verified locally and in production. T-Rock DNS/source availability is a separate outstanding issue.
 
+## 2026-10-17 — Sync ESP32 device-control status and service diagram
+
+- Goal: reconcile RockServer's ESP32/device-control status with current
+  firmware and board acceptance, including the standalone HTML diagram.
+- Scope: device-control roadmaps, `docs/status.md`, this log, and
+  `docs/service-diagrams.html`; documentation only.
+- Result: DC-017/DC-018/DC-039 are marked complete; DC-040 records the working
+  local player and physical speaker while retaining the outstanding RE-10
+  24-hour soak. DC-019/DC-020 remain hardware-deferred. The local ESP32 CASTV2
+  client is distinguished from the still-open RockServer RS-7 and RockMobile
+  RM-3 remote-control work. The diagram now shows the current radio and device
+  control plane and labels ESP32 voice/sensors as future work.
+- Documentation disposition: no files were deleted. Older progress documents
+  retain acceptance evidence; the older analytics designs are explicitly
+  marked superseded in `docs/status.md`.
+- Checks: cross-checked the firmware plan, hardware records, OpenAPI, fixtures
+  and server roadmap; `git diff --check` passed. No tests/builds were run.
+- Status: documentation aligned with the 2026-10-17 owner-confirmed state.
+
+## 2026-10-16 — Audit current service documentation
+
+- Goal: compare RockServer's current implementation with active documentation and correct confirmed drift.
+- Scope: `docs/architecture.md`, `docs/status.md`, and this log; no runtime, contract, migration, or client change.
+- Result: corrected obsolete SpeechKit-future wording; documented optional buffered-v1/streaming-v3 Yandex recognizers, the enforced voice WebSocket limits and device admission; corrected PostgreSQL startup and E5 partial HNSW-index descriptions. Confirmed the proposed listening/search analytics schema has no implementation and remains distinct from existing synced `history_records`.
+- Checks: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`, and `git diff --check` passed. PostgreSQL and live-provider suites remained explicitly ignored.
+- Status: documentation aligned with the inspected runtime, OpenAPI contract, and migrations.
+
+## 2026-10-16 — Simplify analytics to three server-side history tables
+
+- Goal: retain useful search/listening data and next-search personalization without reworking all clients.
+- Scope: rewrote the design document, aligned relay/voice-roadmap links and the planned service overview, updated status/log; documentation only.
+- Result: three proposed tables for searches, authenticated relay connections and song observations; explicit write timing, joins, example and minimal history-based ranking. Removed first-stage client events, exposure/transition tables, universal event journal and dedicated profile projections. MIN-001—MIN-003 supersede the earlier detailed stages.
+- Constraints: anonymous/shared-token searches cannot be attributed to a person; direct/offline playback is unseen; adjacent connections are only possible transitions. Existing client protocols remain unchanged in the proposal.
+- Checks: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` and `git diff --check` passed. Opt-in PostgreSQL/live-provider suites remained ignored; the proposed feature is not implemented or measured.
+- Status: simplified plan prepared; implementation not started. Next: review existing identity coverage with the voice-search developer.
+
+## 2026-10-16 — Add real-time personalization to the analytics plan
+
+- Goal: make current listening behavior and accumulated user preferences affect the next search, rather than only generating reports for later search improvements.
+- Scope: analytics plan, voice-search roadmap, explicitly planned service diagram overview, status and task log; documentation only.
+- Result: proposed online-profile/context tables and projection cursor, snapshot provenance per result set, user-aware candidate generation/ranking, signal/decay rules, freshness budgets, replay/deletion/fallback behavior and AN-007 acceptance criteria. Explicit query constraints retain priority; current paging stays stable.
+- Checks: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` and `git diff --check` passed. Opt-in PostgreSQL/live-provider suites remained ignored; proposed personalization freshness/performance is not measured.
+- Status: design updated; personalization remains unimplemented. Next: agree the concrete profile contract and freshness objectives.
+
+## 2026-10-16 — Plan listening, song-transition and search analytics
+
+- Goal: preserve the discussion as a developer-readable design for improving voice search using search history and listening behavior.
+- Scope: new `docs/listening-search-analytics-plan.md`, links from the relay/voice roadmaps, explicitly planned overview in `docs/service-diagrams.html`, status and task log. No code, migrations, API or client changes.
+- Result: proposed tables with types/keys and write timing; STT/query/intent/result/exposure separation; per-upstream metadata, sessions, reconnects and explicit station transitions; derived metrics, genre evidence, synthetic export example, deletion/reliability rules and AN-001—AN-006 acceptance criteria.
+- Checks: source/migration baseline and existing service diagrams inspected; sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`, and `git diff --check` passed. Opt-in PostgreSQL/live-provider tests remained ignored; no analytics implementation exists to validate yet.
+- Status: planning document prepared; implementation not started. Next: developer review of AN-001 contracts and policy choices.
 
 ## 2026-10-10 — Apache-2.0 adoption, contributors recognition, and ecosystem cross-linking
 

@@ -67,18 +67,19 @@
     <section id="ecosystem">
       <h2>1. Общая экосистема</h2>
       <div class="flow">
-        <article class="node future"><span class="badge future">FUTURE</span><h3>Пользователь / голос</h3><p>Голосовой ввод, production STT и ESP32-клиент.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>Пользователь / voice</h3><p>RockCast и браузер используют текущий voice/search path; ESP32 push-to-talk на устройстве ещё не реализован.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>RockCast Windows</h3><p>Отправляет Bearer-токен для RockServer voice WebSocket; локальный каталог остаётся fallback.</p></article>
-        <article class="node current"><span class="badge current">CURRENT</span><h3>RockServer</h3><p>Health routes и защищённые Bearer application API: поиск и voice.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>RockServer</h3><p>Search/voice APIs и paired-device control plane: native-session WebSocket, presence, manifests/state, directory, device catalog и безопасная station resolution.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>Каталог / поиск</h3><p>PostgreSQL обязателен для запущенного сервиса; in-memory repository остаётся только для deterministic tests. Проверенный full-catalog export создаёт SQLite для RockMobile.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>StationResult</h3><p>Voice result передаётся RockCast; remote text-search UI остаётся NEXT.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>PlaybackController</h3><p>RockCast воспроизводит принятый voice result и сохраняет fallback кандидатов.</p></article>
       </div>
       <div class="grid" style="margin-top:.75rem">
-        <article class="node future"><h3>LocalPlayer</h3><p>Существующий путь воспроизведения RockCast.</p></article>
-        <article class="node future"><h3>CastService / StreamRelay</h3><p>Существующий клиентский путь к Chromecast/саундбару; вне этого репозитория.</p></article>
-        <article class="node future"><h3>Chromecast / саундбар</h3><p>Конечное устройство воспроизведения.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>LocalPlayer / StreamRelay</h3><p>RockCast Windows и ESP32 радио воспроизводят подтверждённые потоки; радио переключает общий source между локальным динамиком и relay.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>RockCast radio · ESP32-P4</h3><p>Pairing, authenticated catalog, touch browse/search, station playback и локальный CASTV2-клиент приняты на плате. Локальный Cast пока не управляется командами RockServer.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>Chromecast / саундбар</h3><p>Локальный ESP32 CASTV2-путь и RockCast client Cast работают; RockServer remote Cast commands и RockMobile controls остаются отдельными задачами RS-7/RM-3.</p></article>
       </div>
+      <p><strong>ESP32 follow-up:</strong> DC-017/DC-018/DC-039 приняты; физический динамик подтверждён. DC-040 ждёт полного 24-часового integration soak (RE-10). Сенсоры DC-019/DC-020 отложены до появления hardware; voice PTT/wake word остаются будущей работой.</p>
     </section>
 
     <section id="text-search">
@@ -164,6 +165,13 @@
       <p><code>ErrorResponse</code> всегда содержит <code>code</code>, <code>message</code>, <code>request_id</code> и <code>details</code>. Search реализует 200, 400, 401, 422 и 500; 429 остаётся FUTURE. Readiness отдельно возвращает 503 + <code>{"status":"not_ready"}</code> при потере PostgreSQL.</p>
     </section>
 
+    <section id="listening-analytics-plan">
+      <h2>План: аналитика поиска и прослушиваний</h2>
+      <p><strong>PLANNED · 2026-10-16 · не реализовано.</strong> Минимум из трёх таблиц: запросы поиска, авторизованные relay-подключения пользователей к станциям и ICY-наблюдения песен в этих подключениях. Запись выполняется сервером через ограниченную очередь, без новых событий клиента; аудио её не ждёт. Потери учитываются явно.</p>
+      <p>Upstream сейчас отдельный на слушателя: история песен привязана к подключению. Явные переходы и показы не собираются; прямое/offline playback не покрывается. Identity поиска известна только при уже переданной личной авторизации. <a href="listening-search-analytics-plan.md">Таблицы, схема и описание для разработчика голосового поиска</a>.</p>
+      <p><strong>PLANNED: персонализация.</strong> Следующий поиск читает ограниченную свежую историю пользователя и учитывает предпочтения в релевантных кандидатах/порядке. Отдельные профили, суточная аналитика и переобучение не обязательны. Явные фильтры приоритетны, paging требует стабильного порядка; без identity или при сбое используется обычный поиск. Свежесть ограничена очередью и checkpoints, а не обещанным мгновенным обновлением.</p>
+    </section>
+
     <section id="delivery">
       <h2>6. Этапы поставки</h2>
       <ol class="grid">
@@ -182,6 +190,6 @@
       </ol>
     </section>
   </main>
-  <footer>Документ отражает состояние RS-8 owner-scoped runtime-state проекции directory на 2026-09-17. HTML автономен; import и embedding backfill требуют <code>DATABASE_URL</code>, запускаются отдельно и не меняют схемы HTTP API.</footer>
+  <footer>Состояние устройства и device-control синхронизировано с roadmap на 2026-10-17. ESP32 local Cast не означает поддержку remote chromecast.* commands: их серверная часть RS-7 и UI RockMobile RM-3 ещё открыты. HTML автономен; import и embedding backfill требуют <code>DATABASE_URL</code>, запускаются отдельно и не меняют схемы HTTP API.</footer>
 </body>
 </html>

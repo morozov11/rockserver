@@ -2,7 +2,17 @@
 
 ## Статус и цель
 
-Это **планируемая** архитектура; она не описывает реализованное поведение RockServer. Текущий публичный контракт RockServer отвечает за поиск станций и голосовой поток. Новый контур управления должен быть добавлен отдельными совместимыми этапами, не меняя существующие search и voice-маршруты.
+Это архитектурный план с уже работающей основой и открытыми расширениями.
+RockServer реализует paired-device control plane: native-session WebSocket,
+presence, manifests/state, owner-scoped directory, device-catalog endpoints,
+`station.play_station` resolution и device-session voice flow. Эти этапы не
+меняют существующие search/voice маршруты. ESP32 firmware уже прошла
+DC-017/DC-018 и завершила device-side browse/player работу DC-039; локальный
+Chromecast-клиент RE-17 также принят владельцем. Серверные remote Chromecast
+commands (RS-7), mobile Cast controls (RM-3), ESP32 PTT/wake word, sensors и
+долгий integration soak остаются отдельными открытыми задачами. RC-4/RM-4
+authoritative playback UI также остаётся в работе до установки совместимого
+RockCast и завершения USB-приёмки.
 
 ### Уже реализованная основа аккаунтов и устройств
 
@@ -274,7 +284,7 @@ Home Assistant подключается через отдельный provider a
 - RockServer повторно использует реализованные account/device pairing, sessions, list/revoke и реализует только control-plane domain DTO/validation, связанные с существующим `devices.id` capabilities/entities/surfaces, connection registry, state/telemetry normalization, intent routing, presentation building, server-side executor registry, durable scheduler/operations, TTS/audio delivery, command routing, idempotency/audit и contract/integration tests.
 - RockCast реализует persistent device ID, reconnect/backoff, capabilities/state adapters и исполнение поддерживаемых команд через существующий playback/Chromecast/relay код. Он сохраняет локальный каталог как offline fallback.
 - Rockmobile повторно использует существующие login/pairing/device-list/session flows и добавляет selector target device, capability-driven controls, optimistic-but-pending command UI, список/cancel долгоживущих operations и отображение online/stale/error state.
-- ESP32 реализует совместимый multi-role device после стабилизации protocol v1: сначала provisioning/transport core, display surface и sensors (DC-017–DC-020), затем voice input и `speech_output`; локальный player и интерактивный browse — только за явными продуктовыми решениями DC-039/DC-040. Firmware не создаёт второй API или прямой мобильный протокол. Транспортно-агностичный протокольный слой RockCast (`device_control/protocol.rs`) и pairing state machine — кандидаты на общий клиентский crate в отдельном репозитории после стабилизации; десктоповый egui-GUI RockCast на ESP32 не переиспользуется, переносится только визуальная тема как дизайн-референс.
+- ESP32 уже реализовала совместимый device-control transport/display core (DC-017/DC-018) и выбранные владельцем local browse/player extensions (DC-039/DC-040); долгий audio soak относится к RE-10. Voice input/`speech_output` и sensors остаются открытыми направлениями (DC-019/DC-020, Phase 8). Firmware не создаёт второй API или прямой мобильный протокол. Транспортно-агностичный протокольный слой RockCast (`device_control/protocol.rs`) и pairing state machine — кандидаты на общий клиентский crate в отдельном репозитории после стабилизации; десктоповый egui-GUI RockCast на ESP32 не переиспользуется, переносится только визуальная тема как дизайн-референс.
 - Home Assistant adapter остаётся изолированным provider boundary: credentials, native entity IDs, websocket/event subscriptions и service calls не протекают в публичный device protocol.
 
 ## Этапы реализации
@@ -331,20 +341,23 @@ Home Assistant подключается через отдельный provider a
 
 Железо зафиксировано: плата JC4880P443C_I_W (ESP32-P4 v1.3 без радио, Wi-Fi через ESP32-C6 по
 ESP-Hosted/SDIO, 4.3" дисплей, 16 MB flash); прошивка — Rust поверх ESP-IDF 6.1 в репозитории
-rock-esp32. Текущий исполнимый порядок: DC-017, DC-018, затем выбранная владельцем DC-039;
-DC-019/DC-020 отложены до появления физических датчиков и описаны в
+rock-esp32. DC-017, DC-018 и выбранная владельцем DC-039 выполнены. DC-019/DC-020
+отложены до появления физических датчиков и описаны в
 [`device-control-tasks.md`](device-control-tasks.md).
 
 - [x] DC-017: поднять Wi-Fi через ESP32-C6 (ESP-Hosted/SDIO), выполнить SNTP/HTTPS readiness до TLS-трафика и подтвердить SDIO recovery; P4/C6 используют ESP-Hosted 3.0.7.
 - [x] DC-017: подключить ESP32 к существующему pairing/device-session flow с provisioning-экраном, хранить `device_id`/device secret в NVS и реализовать bounded WSS reconnect/heartbeat/state resync. Контрактные тесты прошли 6/6, P4 прошит без стирания NVS.
-- [ ] DC-018: на подтверждённом LVGL v9 + `esp_lvgl_port` стеке зарегистрировать `display.main`, поддержать идемпотентный `display.show_view` для `now_playing`, `text` и `sensor_grid`, а также инициализировать GT911 touch. Touch ограничен локальным UI и не добавляет on-device browse/search protocol.
-- [ ] Провести DC-018 soak/golden tests для Wi-Fi loss, power cycle, server restart, malformed/unknown messages, восстановления ESP32-C6 и отображения offline/error state.
-- [ ] ESP32 profile уже присутствует в канонических contract fixtures (`tests/fixtures/device-control/v1/`); Rockmobile работает без изменений.
+- [x] DC-018: на подтверждённом LVGL v9 + `esp_lvgl_port` стеке зарегистрировать `display.main`, поддержать идемпотентный `display.show_view` для `now_playing`, `text` и `sensor_grid`, а также инициализировать GT911 touch. Touch ограничен локальным UI и не добавляет on-device browse/search protocol.
+- [x] DC-018 physical acceptance: golden views, power-cycle touch и reconnect/offline states приняты с RE-6; protocol tests покрывают malformed/unknown presentations и идемпотентность.
+- [x] ESP32 profile присутствует в канонических contract fixtures.
+- [x] Device directory, свежие state snapshots и capability-driven controls реализованы; финальная USB-приёмка RC-4/RM-4 остаётся открытой в текущем handoff.
 
-Локальный `playback`/`volume` на самом ESP32 и интерактивный browse каталога не входят в v1:
-они отложены в продуктовые расширения DC-039/DC-040 (Milestone D2 в
-[`device-control-tasks.md`](device-control-tasks.md)). Прошивка обязана публиковать только
-физически доступные capabilities.
+Локальные `playback`/`volume`, station browse и audio output были отдельными
+продуктовыми расширениями за пределами первоначального protocol v1. DC-039
+выполнена, DC-040 реализована; её полный 24-часовой интеграционный soak остаётся
+в RE-10. Локальный CASTV2 клиента RE-17 не проходит через RockServer remote
+Cast commands: RS-7 и RM-3 остаются отдельными задачами. Прошивка публикует
+только физически доступные capabilities.
 
 DC-019 и зависимая DC-020 отложены владельцем 2026-09-09, поскольку датчики ещё недоступны;
 это не отменяет их scope или acceptance criteria. В тот же день владелец выбрал DC-039 для

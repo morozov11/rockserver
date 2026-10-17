@@ -7,9 +7,65 @@ Last updated: 2026-10-17
 - Reproduced the upstream status line `ICY 200 OK` for catalog station `rb-96427c67-0601-11e8-ae97-52543be04c81` (`http://79.120.77.11:9003/`); the existing HTTP client rejected it before audio delivery, leading to relay `502 upstream_unavailable`.
 - RockServer now accepts a bounded legacy ICY response from a revalidated, pinned plain-HTTP destination after the normal HTTP client rejects the response. Existing audio/metadata parser, authentication, URL/IP/redirect policy, connection cap and cancellation remain in use. HTTPS and conventional HTTP retain the ordinary client path.
 - Local deterministic ICY tests verified interleaved audio/metadata, clean audio, malformed source errors and disconnect slot release. Existing HTTP, SSRF and redirect tests passed in the complete suite. OpenAPI documents the additional upstream response form; `docs/service-diagrams.html` remains accurate because the relay topology is unchanged.
-- Verification: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed. PostgreSQL and live-provider opt-in suites remained ignored. Production deploy and authenticated station playback are pending.
-- Next step: deploy the committed change with OPS-001-D, verify readiness and both station types, and inspect production relay errors.
+- Verification: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed. PostgreSQL and live-provider opt-in suites remained ignored. OPS-001-D deployed `d71eec847e2be300f8efe04a614e503c05964ecc`, and public readiness returned HTTP 200. The owner confirmed audible playback of this station and `1-fm-classic-rock` in the authenticated Web player; production access logs recorded HTTP 200 for both `/stream` requests.
+- A separate 502 appeared for T-Rock (`rb-3493572b-9798-40b2-98fb-aef2295b6133`): its unrelated HTTPS source host `trock.fluidstream.eu` did not resolve in a direct DNS check. An overbroad rollback interpretation briefly redeployed prior release `8c1f8189be7e30f72e26af9e1a32df2273bb1521`; after owner clarification, OPS-001-D restored `d71eec847e2be300f8efe04a614e503c05964ecc` with `status=succeeded` and readiness passed. This DNS failure remains a catalog/upstream limitation, not an ICY regression.
+- Next step: separately investigate T-Rock's unavailable source; retain the ICY fix in production.
 
+## ESP32 and device-control status sync — 2026-10-17
+
+- Reconciled the RockServer device-control roadmaps and service diagram with the
+  accepted firmware/hardware records in `rock-esp32`: DC-017, DC-018 and the
+  product extension DC-039 are complete; the radio's local player/audio and
+  Chromecast client are implemented and the owner confirmed the physical
+  speaker. DC-040 remains in progress only for the separate 24-hour integrated
+  soak tracked as RE-10.
+- DC-019/DC-020 remain deferred until sensors are available. ESP32 PTT and wake
+  word remain unimplemented. Local CASTV2 on the radio is not RockServer remote
+  Cast support: RS-7 and RockMobile RM-3 remain open.
+- Scope: documentation only; no API, fixture, runtime or deployment behavior
+  changed. No documentation files were deleted: the candidate older progress
+  notes contain hardware evidence, while superseded analytics designs are
+  already labeled as historical in this status log.
+- Verification: reviewed the ESP32 plan, hardware acceptance records, server
+  device-control roadmap and OpenAPI implementation markers; `git diff --check`
+  passed. Build and test suites were not run for this documentation-only update.
+
+## Documentation audit — 2026-10-16
+
+- Reconciled [architecture notes](architecture.md) with the current runtime, OpenAPI contract, and migrations. The document now correctly records the implemented optional Yandex SpeechKit buffered-v1/streaming-v3 adapters, actual WebSocket voice limits, native-device voice admission, the required PostgreSQL process startup path, and the partial E5 cosine HNSW index from migration `0005`.
+- Confirmed that listening/search analytics remains proposal-only: no analytics tables or writes exist in migrations or Rust modules. Existing `history_records` remains the separate client-synchronised personal-data feature.
+- Scope: documentation only; no runtime, API, migration, or deployment behavior changed.
+- Verification: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`, and `git diff --check` passed. The ordinary suite ran 195 library tests plus target and API suites; PostgreSQL and live-provider suites remained explicitly ignored.
+
+## Minimal server-side listening/search history plan — 2026-10-16
+
+- Replaced the earlier detailed analytics and online-profile design with [a three-table proposal](listening-search-analytics-plan.md): `search_history`, `relay_listening_sessions`, and `listening_track_observations`. MIN-001—MIN-003 supersede AN-001—AN-007 below.
+- Goal: collect server-visible search text, authenticated station connections and per-connection song metadata without new client analytics events. Next-search personalization reads bounded recent history; dedicated profile tables and event journals are deferred.
+- Verified constraints: search/voice may be anonymous or use a shared application token; personal attribution requires an already-transmitted valid user session. Only relay traffic is observed. Exact search-to-choice links, impressions and manual-switch reasons are unavailable without additional client context.
+- Scope: documentation only; no code, migrations, API or client behavior changed. Queue/checkpoint freshness and per-listener ICY accuracy remain design limitations, not measured guarantees.
+- Verification: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed; `git diff --check` passed. Opt-in PostgreSQL/live-provider suites remained ignored. The proposed tables and personalization remain unimplemented and are not validated by these checks.
+- Next step: discuss MIN-001 identity coverage and the three-table schema with the search developer; then agree a simple personal ranking rule and stable pagination.
+
+## Real-time search personalization design — 2026-10-16
+
+Superseded by the minimal server-side plan above; the dedicated online-profile design is no longer required for the first stage.
+
+- Expanded [the analytics plan](listening-search-analytics-plan.md) with required online personalization: per-user durable feature projections, short-lived listening contexts, versioned search snapshots, bounded personalized candidate retrieval/ranking and a separate projection cursor.
+- Specified signal strength, time decay, reconnect/progress deduplication, explicit-intent priority, anonymous/cold-start behavior, stable paging, deletion epochs and generic fallback. Proposed freshness/latency targets are design goals, not measured guarantees.
+- Current stage: planning only. AN-007 follows the basic event stages without waiting for daily reports, genre inference or model retraining. No implementation, migrations or API changes.
+- Verification: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed; `git diff --check` passed. Opt-in PostgreSQL/live-provider suites remained ignored. These checks do not validate the unimplemented online profile or its proposed SLOs.
+- Next step: agree profile/event schemas, identity propagation, weights, context lifetime and measurable SLOs with the voice-search developer.
+
+## Listening and search analytics design — 2026-10-16
+
+Superseded by the minimal server-side plan above; client analytics events and detailed reporting are outside the first stage.
+
+- Added [the Russian-language discussion plan](listening-search-analytics-plan.md) for the voice-search developer: proposed table formats, write lifecycle, correlation IDs, architecture diagram, worked scenario, quality metrics, export shape, retention/deletion, failure handling and phased acceptance criteria.
+- Current stage: design only, AN-001 pending discussion. No application code, migrations, HTTP contracts, clients or deployed behavior changed.
+- Verified baseline: relay currently uses independent upstreams and process-local metadata; search can be anonymous; existing client-synced `history_records` remains separate. Proposed airplay attribution preserves per-upstream evidence instead of assuming a single station timeline.
+- Known limitations: schema/policies are proposals; metadata is approximate, direct/offline playback is outside relay coverage, and actual analytics collection is not implemented.
+- Verification: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed; `git diff --check` passed. Opt-in PostgreSQL/live-provider suites remained ignored; proposed analytics tables and behavior are not implemented or tested by these checks.
+- Next step: discuss event contracts, playback correlation, retention and success metrics with the voice-search developer before AN-001 implementation.
 
 ## Apache-2.0 adoption, contributors recognition, and ecosystem cross-linking — 2026-10-10
 
