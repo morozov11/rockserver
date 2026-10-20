@@ -1,6 +1,13 @@
 # Project status
 
-Last updated: 2026-10-17
+Last updated: 2026-10-20
+
+## Web player relay reconnect — 2026-10-20
+
+- The relay deliberately ends each stream after 60 minutes (`STREAM_LIFETIME`); an upstream EOF or read timeout can end it sooner. The Web player's `<audio>` previously had no `ended` handler and treated `error` as terminal, so playback stayed stopped until the station URL was reloaded.
+- The Web player now reloads the same station after `ended` or `error`, and after 20 seconds of continuous buffering. Reconnect uses up to five delayed attempts with backoff and jitter; a user pause or station change cancels pending timers. The existing Retry action remains available after attempts are exhausted.
+- Verification: `pnpm typecheck`, 48 Web tests, `pnpm build`, `cargo fmt --check`, strict Clippy, and `cargo test` passed sequentially. The existing Web suite does not simulate a timed media-stream cutoff; real browser playback beyond one hour remains to be checked after deployment. Production logs could not be read because SSH host-key verification failed; no host-key bypass was used. This change has not been deployed.
+- Next step: verify automatic reconnection on the live site after a normal deploy, and restore trusted SSH host-key access for log correlation.
 
 ## Legacy ICY relay support — 2026-10-17
 

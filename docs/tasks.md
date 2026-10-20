@@ -1,5 +1,13 @@
 # Task log
 
+## 2026-10-20 — Restore Web playback after relay disconnect
+
+- Goal: investigate why a playing Web station eventually stops and needs switching away and back.
+- Scope: Web player reconnect behavior and project status; server relay lifetime and production log access inspected read-only. No public API or relay behavior changed.
+- Result: identified the relay's intentional 60-minute connection lifetime and the player's missing recovery from `ended`; added bounded same-station reconnect for `ended`, `error`, and sustained buffering, with cancellation on pause or station change and the existing manual Retry after exhaustion. Production logs were unavailable because SSH host-key verification failed; no bypass was used.
+- Checks: sequential `pnpm typecheck`, Web tests (48/48), `pnpm build`, `cargo fmt --check`, strict Clippy, and `cargo test` passed. The Web tests do not exercise a real timed stream cutoff.
+- Status: fixed and verified locally; not deployed. Live playback beyond one hour remains to be checked after deployment.
+
 ## 2026-10-17 — Accept legacy ICY status in authenticated relay
 
 - Goal: remove the 502 caused by `ICY 200 OK` for Radio Caprice - Black Metal while preserving the relay security policy.
