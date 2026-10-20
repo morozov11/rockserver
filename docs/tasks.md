@@ -4,9 +4,10 @@
 
 - Goal: investigate why a playing Web station eventually stops and needs switching away and back.
 - Scope: Web player reconnect behavior and project status; server relay lifetime and production log access inspected read-only. No public API or relay behavior changed.
-- Result: identified the relay's intentional 60-minute connection lifetime and the player's missing recovery from `ended`; added bounded same-station reconnect for `ended`, `error`, and sustained buffering, with cancellation on pause or station change and the existing manual Retry after exhaustion. Production logs were unavailable because SSH host-key verification failed; no bypass was used.
+- Result: identified the relay's intentional 60-minute connection lifetime and the player's missing recovery from `ended`; added bounded same-station reconnect for `ended`, `error`, and sustained buffering, with cancellation on pause or station change and the existing manual Retry after exhaustion. An initial sandbox SSH attempt lacked the trusted host key; the normal operator context verified the host and used the configured key.
 - Checks: sequential `pnpm typecheck`, Web tests (48/48), `pnpm build`, `cargo fmt --check`, strict Clippy, and `cargo test` passed. The Web tests do not exercise a real timed stream cutoff.
-- Status: fixed and verified locally; not deployed. Live playback beyond one hour remains to be checked after deployment.
+- Deployment: pushed `e2fe35ac52da7ae00e3be3cc938d25486287d945` to `origin/master` and deployed it through OPS-001-D. The remote worker returned `status=succeeded`; public readiness and Web returned HTTP 200 and the page referenced `index-CtKr2FDc.js`.
+- Status: deployed; live browser playback beyond one hour remains to be checked.
 
 ## 2026-10-17 — Accept legacy ICY status in authenticated relay
 
