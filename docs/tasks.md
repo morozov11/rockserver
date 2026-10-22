@@ -1,5 +1,13 @@
 # Task log
 
+## 2026-10-22 — Recover device voice commands when structured parsing fails
+
+- Goal: investigate the radio's repeated “Ошибка распознавания” after a spoken request.
+- Evidence: the radio sent 80,108 PCM samples with peak 12,656; RockServer replied `intent_resolution_failed` after speech recognition.
+- Scope: server voice-command interpreter and deterministic fallback; public WebSocket schema unchanged. The ESP32 firmware error label is updated separately in its own repository.
+- Result: provider and malformed-output failures fall back to a local classifier; rock and jazz requests retain their genre, and basic stop/volume commands remain available. No transcript or credential is logged.
+- Checks: `cargo fmt --check`, strict Clippy, full `cargo test`, and `git diff --check` passed sequentially. PostgreSQL and live-provider tests stayed ignored because they require external services or credentials. Production deployment is pending.
+
 ## 2026-10-20 — Restore Web playback after relay disconnect
 
 - Goal: investigate why a playing Web station eventually stops and needs switching away and back.

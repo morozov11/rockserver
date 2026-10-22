@@ -1,6 +1,12 @@
 # Project status
 
-Last updated: 2026-10-20
+Last updated: 2026-10-22
+
+## Device voice command fallback — 2026-10-22
+
+- An ESP32 voice session recorded non-silent audio and received `intent_resolution_failed` after speech recognition. The failure occurs in the server's structured command interpreter, not in the microphone or speech recognizer.
+- The structured interpreter now uses the existing local command classifier when its provider fails or returns an invalid command. The fallback preserves basic rock/jazz genre requests and stop/volume commands. Provider failures are logged without transcripts or credentials.
+- The public voice protocol is unchanged. Local checks and deployment status are recorded in `docs/tasks.md`; production still needs the updated server release before the radio can benefit from this fallback.
 
 ## Web player relay reconnect — 2026-10-20
 
