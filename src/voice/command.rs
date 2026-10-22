@@ -171,6 +171,11 @@ impl CommandInterpreter for DeterministicCommandInterpreter {
                         .any(|token| matches!(token.as_str(), "джаз" | "jazz"))
                     {
                         "jazz"
+                    } else if tokens
+                        .iter()
+                        .any(|token| matches!(token.as_str(), "метал" | "металл" | "metal"))
+                    {
+                        "metal"
                     } else {
                         "radio"
                     }
@@ -228,23 +233,32 @@ impl CommandInterpreter for LlmCommandInterpreter {
             Ok(command) => Ok(command),
             Err(error) => {
                 // shortcut: expand this whitelist only when a new basic voice command is verified.
-                if !crate::search::tokenize(transcript).iter().any(|token| {
-                    matches!(
-                        token.as_str(),
-                        "рок"
-                            | "rock"
-                            | "джаз"
-                            | "jazz"
-                            | "радио"
-                            | "radio"
-                            | "стоп"
-                            | "stop"
-                            | "останови"
-                            | "остановить"
-                            | "громкость"
-                            | "volume"
-                    )
-                }) {
+                let tokens = crate::search::tokenize(transcript);
+                let play_metal = tokens
+                    .iter()
+                    .any(|token| matches!(token.as_str(), "включи" | "играй" | "поставь" | "play"))
+                    && tokens
+                        .iter()
+                        .any(|token| matches!(token.as_str(), "метал" | "металл" | "metal"));
+                if !play_metal
+                    && !tokens.iter().any(|token| {
+                        matches!(
+                            token.as_str(),
+                            "рок"
+                                | "rock"
+                                | "джаз"
+                                | "jazz"
+                                | "радио"
+                                | "radio"
+                                | "стоп"
+                                | "stop"
+                                | "останови"
+                                | "остановить"
+                                | "громкость"
+                                | "volume"
+                        )
+                    })
+                {
                     return Err(error);
                 }
                 tracing::warn!(reason = %error, "voice command interpreter failed; using local fallback");

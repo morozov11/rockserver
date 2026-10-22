@@ -28,6 +28,16 @@ async fn provider_failure_preserves_basic_rock_command() {
 }
 
 #[tokio::test]
+async fn provider_failure_preserves_black_metal_command() {
+    let interpreter = LlmCommandInterpreter::new(Arc::new(FailingProvider));
+    for transcript in ["Включи блэк метал", "Включи блэк металл"] {
+        let command = interpreter.interpret(transcript, "ru").await.unwrap();
+        assert_eq!(command.intent, Intent::PlayRadio);
+        assert_eq!(command.query.unwrap().genres, ["metal"]);
+    }
+}
+
+#[tokio::test]
 async fn malformed_provider_response_preserves_stop_command() {
     let interpreter = LlmCommandInterpreter::new(Arc::new(MalformedProvider));
     let command = interpreter.interpret("останови", "ru").await.unwrap();
