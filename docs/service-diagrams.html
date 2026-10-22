@@ -67,7 +67,7 @@
     <section id="ecosystem">
       <h2>1. Общая экосистема</h2>
       <div class="flow">
-        <article class="node current"><span class="badge current">CURRENT</span><h3>Пользователь / voice</h3><p>RockCast и браузер используют текущий voice/search path; ESP32 push-to-talk реализован в прошивке, сквозная проверка голосовой команды продолжается.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>Пользователь / voice</h3><p>RockCast и браузер используют текущий voice/search path; ESP32 push-to-talk на устройстве ещё не реализован.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>RockCast Windows</h3><p>Отправляет Bearer-токен для RockServer voice WebSocket; локальный каталог остаётся fallback.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>RockServer</h3><p>Search/voice APIs и paired-device control plane: native-session WebSocket, presence, manifests/state, directory, device catalog и безопасная station resolution.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>Каталог / поиск</h3><p>PostgreSQL обязателен для запущенного сервиса; in-memory repository остаётся только для deterministic tests. Проверенный full-catalog export создаёт SQLite для RockMobile.</p></article>
@@ -79,7 +79,7 @@
         <article class="node current"><span class="badge current">CURRENT</span><h3>RockCast radio · ESP32-P4</h3><p>Pairing, authenticated catalog, touch browse/search, station playback и локальный CASTV2-клиент приняты на плате. Локальный Cast пока не управляется командами RockServer.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>Chromecast / саундбар</h3><p>Локальный ESP32 CASTV2-путь и RockCast client Cast работают; RockServer remote Cast commands и RockMobile controls остаются отдельными задачами RS-7/RM-3.</p></article>
       </div>
-      <p><strong>ESP32 follow-up:</strong> DC-017/DC-018/DC-039 приняты; физический динамик подтверждён. DC-040 ждёт полного 24-часового integration soak (RE-10). Сенсоры DC-019/DC-020 отложены до появления hardware; voice PTT проходит приёмку, wake word остаётся будущей работой.</p>
+      <p><strong>ESP32 follow-up:</strong> DC-017/DC-018/DC-039 приняты; физический динамик подтверждён. DC-040 ждёт полного 24-часового integration soak (RE-10). Сенсоры DC-019/DC-020 отложены до появления hardware; voice PTT/wake word остаются будущей работой.</p>
     </section>
 
     <section id="text-search">

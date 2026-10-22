@@ -160,22 +160,7 @@ impl CommandInterpreter for DeterministicCommandInterpreter {
         VoiceCommand {
             intent: Intent::PlayRadio,
             query: Some(RadioQuery {
-                genres: vec![
-                    if tokens
-                        .iter()
-                        .any(|token| matches!(token.as_str(), "рок" | "rock"))
-                    {
-                        "rock"
-                    } else if tokens
-                        .iter()
-                        .any(|token| matches!(token.as_str(), "джаз" | "jazz"))
-                    {
-                        "jazz"
-                    } else {
-                        "radio"
-                    }
-                    .to_owned(),
-                ],
+                genres: vec!["radio".to_owned()],
                 ..RadioQuery::default()
             }),
             volume_delta: None,
@@ -216,43 +201,15 @@ impl CommandInterpreter for LlmCommandInterpreter {
     ) -> Result<VoiceCommand, CommandInterpretationError> {
         validate_input(transcript, locale)?;
         let request = voice_command_request(transcript, locale);
-        let result = match self.provider.generate_json(&request).await {
-            Ok(json) => serde_json::from_str::<VoiceCommand>(&json)
-                .map_err(|_| {
-                    CommandInterpretationError::safe("LLM returned a malformed voice command")
-                })
-                .and_then(VoiceCommand::validate),
-            Err(error) => Err(CommandInterpretationError::safe(error.to_string())),
-        };
-        match result {
-            Ok(command) => Ok(command),
-            Err(error) => {
-                // shortcut: expand this whitelist only when a new basic voice command is verified.
-                if !crate::search::tokenize(transcript).iter().any(|token| {
-                    matches!(
-                        token.as_str(),
-                        "рок"
-                            | "rock"
-                            | "джаз"
-                            | "jazz"
-                            | "радио"
-                            | "radio"
-                            | "стоп"
-                            | "stop"
-                            | "останови"
-                            | "остановить"
-                            | "громкость"
-                            | "volume"
-                    )
-                }) {
-                    return Err(error);
-                }
-                tracing::warn!(reason = %error, "voice command interpreter failed; using local fallback");
-                DeterministicCommandInterpreter
-                    .interpret(transcript, locale)
-                    .await
-            }
-        }
+        let json = self
+            .provider
+            .generate_json(&request)
+            .await
+            .map_err(|error| CommandInterpretationError::safe(error.to_string()))?;
+        let command = serde_json::from_str::<VoiceCommand>(&json).map_err(|_| {
+            CommandInterpretationError::safe("LLM returned a malformed voice command")
+        })?;
+        command.validate()
     }
 }
 
@@ -402,9 +359,6 @@ fn normalize_optional(value: Option<String>) -> Option<String> {
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
 }
-
-#[cfg(test)]
-mod fallback_tests;
 
 #[cfg(test)]
 mod tests {
