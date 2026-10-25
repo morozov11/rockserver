@@ -5,7 +5,8 @@
 - Goal: publish the verified voice-intent changes already on `master` and refresh the locked Rust and Web dependencies.
 - Scope: `Cargo.lock` updates `rustls` to 0.23.45; the Web workspace pins `source-map-js` to 1.2.2 in its workspace and lock files. No application source or public behavior changed in this release-preparation step.
 - Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed sequentially. PostgreSQL and live-provider tests remain gated.
-- Status: local verification passed; push and staging deployment pending.
+- Deployment: pushed `aa352f9bc70618b77fb7b3fdbcb800ff2970699d` to `origin/master`; OPS-001-D reported `status=succeeded`, `readiness=passed`. The initial Docker Hub Node image download stalled near completion; retry reused cached layers, built the Rust and Web images, and reattached to the detached worker.
+- Status: pushed, deployed, and readiness-verified. Firmware adoption remains pending in `rock-esp32`.
 
 ## 2026-10-25 — Device voice intents and list-based voice search
 
@@ -14,7 +15,7 @@
 - Result: the LLM schema classifies `resume` and `add_favorite` in any language (default ±5 volume step in the prompt). Device sessions route stop/resume/volume/navigation through the same command pipeline as device buttons; navigation is manifest-gated, so the current ESP32 manifest (play/pause/stop) receives `capability_not_supported` without playback changes. `add_favorite` writes the device's currently reported station into the personal-data store behind `POST /api/v1/sync` (the RE-15 star and RockMobile path) idempotently, confirmed only after the stored outcome shows the live record; new `favourite_limit_exceeded` stream error; no current station is a terminal `station_not_found`. Voice search no longer executes server-side: the terminal frame carries the ranked list with `intent=play_radio` and the device itself plays the first entry through the same `station.play_station` path as a catalog tap (RockMobile autoplay semantics); empty results stay `station_not_found`, a failed search reports `search_unavailable`, and the equal-top-score clarification is gone. Command results echo a typed `intent` on success and failure. Legacy anonymous/RockMobile/RockCast/web frames are unchanged and never carry the intent marker.
 - Checks: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed (204 library tests, voice stream API 19/19, OpenAPI contract 11/11; 281 total). Live-provider and PostgreSQL suites remain gated.
 - Firmware follow-ups (rock-esp32 repository, out of scope here): add `"surface_id":"voice.main"` to the voice start frame (`components/rock_platform/rock_voice.c`, start JSON near line 291); accept result frames by `status`/`intent` instead of requiring `transcript` and skip the local transcript catalog search (`rock_voice.c` `voice_ws_event`, `src/firmware/transport/session.rs` `tick_voice`); autoplay the first entry of a `play_radio` result through the existing PlayStation path; map `capability_not_supported` and `favourite_limit_exceeded` in `error_state()` (`rock_voice.c`); optional distinct «Ничего не нашлось» label for `station_not_found`; later declare `next`/`previous` playback actions in the device manifest to enable navigation intents without server changes.
-- Status: complete; production deployment and live verification pending firmware adoption.
+- Status: server changes deployed and readiness-verified; live command/autoplay acceptance remains pending firmware adoption in `rock-esp32`.
 
 ## 2026-10-22 — Recover device voice commands when structured parsing fails
 
