@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use crate::{
     device_control::{
-        CommandId, Device, DeviceCapability, DeviceId, DeviceRole, SurfaceKind, Timestamp,
+        CommandId, CommandStatus, Device, DeviceCapability, DeviceId, DeviceRole, SurfaceKind,
+        Timestamp,
     },
     device_control_auth::DeviceControlPrincipal,
     device_control_intent::{
@@ -17,6 +18,7 @@ use crate::{
         MediaIntentAction, ResolutionActor, ResolutionContext, ResolutionRequest, ResolutionResult,
         UserIntent,
     },
+    personal_data::{CollectionChanges, FavouriteUpsert, PersonalDataError, SyncRequest},
     search::{SearchConstraints, normalize_query},
     voice::{Intent as VoiceIntent, VoiceCommand},
 };
@@ -94,6 +96,12 @@ pub(super) async fn finish_device_voice(
             return;
         }
     };
+    // Favourites are account data, not device playback: they skip the command
+    // pipeline and use the same personal-data store as POST /api/v1/sync.
+    if voice_command.intent == VoiceIntent::AddFavorite {
+        add_favourite_voice(socket, state, request_id, &principal).await;
+        return;
+    }
     let intent = match device_user_intent(state, start, principal, transcript, voice_command).await
     {
         Ok(intent) => intent,
@@ -273,6 +281,143 @@ pub(super) async fn finish_device_voice(
             .await;
         }
     }
+}
+
+/// Adds the device's currently reported station to the account favourites.
+///
+/// Uses the same personal-data store as `POST /api/v1/sync` (the RE-15 device star and
+/// RockMobile), so every client observes the same collection. The write is idempotent:
+/// an already-favourited station succeeds without a second record. Confirmation is sent
+/// only after the stored outcome shows the live record.
+async fn add_favourite_voice(
+    socket: &mut WebSocket,
+    state: &AppState,
+    request_id: &str,
+    principal: &DeviceControlPrincipal,
+) {
+    let Some(store) = state.personal_store.as_ref() else {
+        let _ = send_stream_error(
+            socket,
+            request_id,
+            VoiceStreamErrorCode::PersistenceUnavailable,
+            "Favourite state is temporarily unavailable.",
+            json!({}),
+        )
+        .await;
+        return;
+    };
+    let target = DeviceId(principal.device_id);
+    let Some(station_id) = current_station_id(state, principal.user_id, target) else {
+        let _ = send_stream_error(
+            socket,
+            request_id,
+            VoiceStreamErrorCode::StationNotFound,
+            "No station is currently playing.",
+            json!({}),
+        )
+        .await;
+        return;
+    };
+    let is_live = |records: &[crate::personal_data::FavouriteRecord]| {
+        records.iter().any(|record| {
+            record.deleted_at.is_none() && record.station_id.as_deref() == Some(station_id.as_str())
+        })
+    };
+    let snapshot = match store
+        .synchronize(principal.user_id, SyncRequest::default())
+        .await
+    {
+        Ok(outcome) => outcome,
+        Err(_) => {
+            send_favourite_store_failure(socket, request_id).await;
+            return;
+        }
+    };
+    if is_live(&snapshot.favourites) {
+        let _ = send_stream_event(
+            socket,
+            &VoiceStreamServerEvent::DeviceResult {
+                request_id: request_id.to_owned(),
+                status: CommandStatus::Succeeded,
+            },
+        )
+        .await;
+        return;
+    }
+    let now_text = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .expect("RFC3339 format is valid");
+    let now = crate::personal_data::Timestamp::parse(now_text).expect("server timestamp is valid");
+    let upsert = FavouriteUpsert {
+        record_id: Uuid::new_v4(),
+        station_id: station_id.clone(),
+        added_at: now.clone(),
+        updated_at: now,
+    };
+    let request = SyncRequest {
+        since_revision: snapshot.server_revision,
+        favourites: CollectionChanges {
+            upserts: vec![upsert],
+            deletes: Vec::new(),
+        },
+        history: CollectionChanges::default(),
+    };
+    match store.synchronize(principal.user_id, request).await {
+        Ok(outcome) if is_live(&outcome.favourites) => {
+            let _ = send_stream_event(
+                socket,
+                &VoiceStreamServerEvent::DeviceResult {
+                    request_id: request_id.to_owned(),
+                    status: CommandStatus::Succeeded,
+                },
+            )
+            .await;
+        }
+        Ok(_) => {
+            let _ = send_stream_error(
+                socket,
+                request_id,
+                VoiceStreamErrorCode::InternalError,
+                "The favourite could not be confirmed.",
+                json!({}),
+            )
+            .await;
+        }
+        Err(PersonalDataError::FavouriteLimitExceeded) => {
+            let _ = send_stream_error(
+                socket,
+                request_id,
+                VoiceStreamErrorCode::FavouriteLimitExceeded,
+                "The account favourites limit was reached.",
+                json!({}),
+            )
+            .await;
+        }
+        Err(_) => send_favourite_store_failure(socket, request_id).await,
+    }
+}
+
+/// Reports a transient personal-data failure without echoing store internals.
+async fn send_favourite_store_failure(socket: &mut WebSocket, request_id: &str) {
+    let _ = send_stream_error(
+        socket,
+        request_id,
+        VoiceStreamErrorCode::PersistenceUnavailable,
+        "Favourite state is temporarily unavailable.",
+        json!({}),
+    )
+    .await;
+}
+
+/// Returns the station the device last reported as current, regardless of playback status:
+/// a paused station is still the user's current station and may be favourited.
+fn current_station_id(state: &AppState, user_id: Uuid, target: DeviceId) -> Option<String> {
+    state
+        .control_state_hub
+        .device_state(user_id, target)
+        .and_then(|snapshot| snapshot.state.playback)
+        .and_then(|playback| playback.station_id)
+        .filter(|station_id| !station_id.is_empty())
 }
 
 async fn device_user_intent(

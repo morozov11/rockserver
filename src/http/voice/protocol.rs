@@ -209,6 +209,7 @@ pub(super) enum VoiceStreamErrorCode {
     SearchUnavailable,
     TargetOffline,
     CapabilityNotSupported,
+    FavouriteLimitExceeded,
     Forbidden,
     InvalidPayload,
     CommandTimeout,

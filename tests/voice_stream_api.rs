@@ -15,13 +15,19 @@ use rockserver::{
         CATALOG_STATION_SOURCE, CommandBody, CommandId, CommandLifecycle, CommandReservation,
         CommandResult, CommandStatus, DeviceCapabilities, DeviceCapability, DeviceCommand,
         DeviceControlScope, DeviceControlStore, DeviceId, DeviceManifest, DeviceRole,
-        DeviceStateSnapshot, DomainError, Entity, EntityState, StoreError, StoreOutcome, Surface,
-        SurfaceKind, Timestamp, VolumeCommand,
+        DeviceRuntimeState, DeviceStateSnapshot, DomainError, Entity, EntityState, PlaybackState,
+        StoreError, StoreOutcome, Surface, SurfaceKind, Timestamp, VolumeCommand,
     },
     device_control_command::CommandRouter,
     device_control_presence::{ConnectionRegistration, ConnectionRegistry, OutboundFrame},
+    device_control_state::StateHub,
     http::{
-        DEFAULT_VOICE_COMMAND_TIMEOUT, router_with_device_voice_services, router_with_services,
+        DEFAULT_VOICE_COMMAND_TIMEOUT, router_with_device_voice_personal_services,
+        router_with_device_voice_services, router_with_services,
+    },
+    personal_data::{
+        CollectionChanges, FavouriteUpsert, InMemoryPersonalDataStore, PersonalDataStore,
+        SyncRequest,
     },
     search::{
         RankedStation, RepositoryError, SearchConstraints, SearchQuery, SearchService, Station,
@@ -134,6 +140,93 @@ async fn navigation_without_manifest_support_is_rejected_without_side_effects() 
         assert_eq!(harness.run_error().await, "capability_not_supported");
         assert!(harness.store.commands.lock().unwrap().is_empty());
     }
+}
+
+#[tokio::test]
+async fn voice_like_adds_the_current_station_to_account_favourites() {
+    for (transcript, status) in [("лайк", "playing"), ("like", "paused")] {
+        let personal = Arc::new(InMemoryPersonalDataStore::default());
+        let harness = Harness::with_favourites(
+            transcript,
+            Some(personal.clone()),
+            Some((status, "station-9")),
+        );
+        let result = harness.run_direct_result().await;
+        assert_eq!(result["type"], "result");
+        assert_eq!(result["status"], "succeeded");
+        let outcome = personal
+            .synchronize(harness.owner_id, SyncRequest::default())
+            .await
+            .unwrap();
+        let live: Vec<_> = outcome
+            .favourites
+            .iter()
+            .filter(|record| record.deleted_at.is_none())
+            .collect();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].station_id.as_deref(), Some("station-9"));
+    }
+}
+
+#[tokio::test]
+async fn voice_like_is_idempotent_for_an_already_favourited_station() {
+    let personal = Arc::new(InMemoryPersonalDataStore::default());
+    let harness = Harness::with_favourites(
+        "лайк",
+        Some(personal.clone()),
+        Some(("playing", "station-9")),
+    );
+    let added_at = rockserver::personal_data::Timestamp::parse("2026-10-24T00:00:00Z").unwrap();
+    personal
+        .synchronize(
+            harness.owner_id,
+            SyncRequest {
+                since_revision: 0,
+                favourites: CollectionChanges {
+                    upserts: vec![FavouriteUpsert {
+                        record_id: Uuid::new_v4(),
+                        station_id: "station-9".to_owned(),
+                        added_at: added_at.clone(),
+                        updated_at: added_at,
+                    }],
+                    deletes: Vec::new(),
+                },
+                history: CollectionChanges::default(),
+            },
+        )
+        .await
+        .unwrap();
+    let result = harness.run_direct_result().await;
+    assert_eq!(result["type"], "result");
+    assert_eq!(result["status"], "succeeded");
+    let outcome = personal
+        .synchronize(harness.owner_id, SyncRequest::default())
+        .await
+        .unwrap();
+    let live: Vec<_> = outcome
+        .favourites
+        .iter()
+        .filter(|record| record.deleted_at.is_none())
+        .collect();
+    assert_eq!(live.len(), 1);
+}
+
+#[tokio::test]
+async fn voice_like_without_a_current_station_changes_nothing() {
+    let personal = Arc::new(InMemoryPersonalDataStore::default());
+    let harness = Harness::with_favourites("лайк", Some(personal.clone()), None);
+    assert_eq!(harness.run_error().await, "station_not_found");
+    let outcome = personal
+        .synchronize(harness.owner_id, SyncRequest::default())
+        .await
+        .unwrap();
+    assert!(outcome.favourites.is_empty());
+}
+
+#[tokio::test]
+async fn voice_like_without_a_personal_store_is_persistence_unavailable() {
+    let harness = Harness::with_favourites("лайк", None, Some(("playing", "station-9")));
+    assert_eq!(harness.run_error().await, "persistence_unavailable");
 }
 
 #[tokio::test]
@@ -316,7 +409,6 @@ struct Harness {
     target_messages: Mutex<Option<mpsc::Receiver<OutboundFrame>>>,
     session_drops: Arc<AtomicUsize>,
 }
-
 impl Harness {
     fn new(transcript: &str, stations: Vec<RankedStation>, timeout: Duration) -> Self {
         Self::with_recognizer(
@@ -385,6 +477,82 @@ impl Harness {
             true,
             manifest,
         )
+    }
+
+    /// Harness for account-favourite scenarios: wires the personal-data store and
+    /// pre-seeds the device's reported playback state. `playing` is `(status, station_id)`.
+    fn with_favourites(
+        transcript: &str,
+        personal: Option<Arc<InMemoryPersonalDataStore>>,
+        playing: Option<(&str, &str)>,
+    ) -> Self {
+        let owner_id = Uuid::new_v4();
+        let device_id = Uuid::new_v4();
+        let connection_id = Uuid::new_v4();
+        let recognizer = FakeRecognizer::new(Some(transcript));
+        let resolver = Arc::new(FakeResolver::new("native-token", owner_id, device_id));
+        let search = SearchService::new(Arc::new(FakeRepository::new(stations(1))));
+        let router = CommandRouter::default().with_station_catalog(Arc::new(search.clone()));
+        let registry = ConnectionRegistry::default();
+        let store = Arc::new(MemoryStore::default());
+        let (replacement, _) = registry.replacement_channel();
+        let (outbound, receiver) = registry.outbound_channel();
+        registry.register(
+            ConnectionRegistration {
+                user_id: owner_id,
+                device_id,
+                connection_id,
+                replacement,
+                outbound,
+                manifest: radio_manifest(),
+                scopes: vec![DeviceControlScope::MediaControl],
+            },
+            Instant::now(),
+        );
+        let hub = StateHub::default();
+        hub.publish_device_state(
+            owner_id,
+            DeviceId(device_id),
+            DeviceStateSnapshot {
+                state_revision: 1,
+                observed_at: Timestamp::parse("2026-10-25T00:00:00Z").unwrap(),
+                received_at: None,
+                state: DeviceRuntimeState {
+                    playback: playing.map(|(status, station)| PlaybackState {
+                        status: status.to_owned(),
+                        station_id: Some(station.to_owned()),
+                        track_title: None,
+                    }),
+                    volume: None,
+                    display: None,
+                },
+            },
+        );
+        let app = router_with_device_voice_personal_services(
+            search,
+            Arc::new(recognizer.clone()),
+            Arc::new(FakeInterpreter::new(transcript)),
+            DEFAULT_VOICE_COMMAND_TIMEOUT,
+            resolver,
+            (
+                registry.clone(),
+                router.clone(),
+                store.clone() as Arc<dyn DeviceControlStore>,
+            ),
+            personal.map(|store| store as Arc<dyn PersonalDataStore>),
+            hub,
+        );
+        Self {
+            app,
+            owner_id,
+            device_id,
+            connection_id,
+            registry,
+            router,
+            store,
+            target_messages: Mutex::new(Some(receiver)),
+            session_drops: Arc::clone(&recognizer.drops),
+        }
     }
 
     fn build(
@@ -562,6 +730,24 @@ impl Harness {
         error["code"].as_str().unwrap().to_owned()
     }
 
+    /// Runs one session whose terminal frame is produced without a device command
+    /// (favourites) and returns that terminal frame for inspection.
+    async fn run_direct_result(&self) -> Value {
+        let (mut stream, server) = self.connect(Some("native-token")).await;
+        assert!(
+            read_http_headers(&mut stream)
+                .await
+                .starts_with("HTTP/1.1 101 Switching Protocols")
+        );
+        start(&mut stream, true, 16_000).await;
+        assert_eq!(read_json_frame(&mut stream).await["type"], "ready");
+        write_client_frame(&mut stream, 0x1, br#"{"type":"commit"}"#).await;
+        assert_eq!(read_json_frame(&mut stream).await["type"], "transcript");
+        let result = read_json_frame(&mut stream).await;
+        server.abort();
+        result
+    }
+
     async fn run_start_error(&self) -> String {
         let (mut stream, server) = self.connect(Some("native-token")).await;
         assert!(
@@ -696,6 +882,7 @@ impl CommandInterpreter for FakeInterpreter {
             "quieter" | "тише" => (Intent::VolumeChange, None, Some(-5), None),
             "next" | "дальше" => (Intent::NextStation, None, None, None),
             "previous" | "назад" => (Intent::PreviousStation, None, None, None),
+            "like" | "лайк" => (Intent::AddFavorite, None, None, None),
             _ => (Intent::Unknown, None, None, None),
         };
         Ok(VoiceCommand {
