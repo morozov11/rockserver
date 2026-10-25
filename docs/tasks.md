@@ -1,5 +1,12 @@
 # Task log
 
+## 2026-10-25 — Prepare device voice intent release
+
+- Goal: publish the verified voice-intent changes already on `master` and refresh the locked Rust and Web dependencies.
+- Scope: `Cargo.lock` updates `rustls` to 0.23.45; the Web workspace pins `source-map-js` to 1.2.2 in its workspace and lock files. No application source or public behavior changed in this release-preparation step.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed sequentially. PostgreSQL and live-provider tests remain gated.
+- Status: local verification passed; push and staging deployment pending.
+
 ## 2026-10-25 — Device voice intents and list-based voice search
 
 - Goal: implement items 1–2 of `rock-esp32/docs/plan-voice-control.md` — seven device voice intents executed through the command pipeline and list-based voice search on RockServer — without changing legacy voice clients.
