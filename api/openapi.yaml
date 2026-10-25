@@ -1442,10 +1442,14 @@ paths:
         `x-voice-stream-limits`. A device voice endpoint authenticates with its RockserverBearer
         device session, announces its required `voice.main` surface in the start frame, and
         RockServer derives `source_device_id` server-side and echoes it in `ready`. Its recognized
-        radio intent is submitted through the normal device command router to that explicit
-        source device. The client may send one `VoiceStreamCancel` text frame before commit to
+        control intents (stop, resume, relative and absolute volume, station navigation,
+        favourites) are submitted through the normal device command router to that explicit
+        source device and terminate in a `VoiceDeviceCommandResult` carrying a typed intent echo;
+        a recognized station request instead terminates in the ranked station list
+        (`VoiceStreamResult` with `intent=play_radio`) so the device itself plays the first
+        entry. The client may send one `VoiceStreamCancel` text frame before commit to
         cancel a session deterministically. Anonymous and legacy sessions retain the established
-        station-search result shape.
+        station-search result shape without the intent marker.
       parameters:
         - name: X-Request-Id
           in: header
@@ -3253,13 +3257,19 @@ components:
     VoiceStreamResult:
       type: object
       additionalProperties: false
-      description: Established anonymous and legacy station-search result.
+      description: >-
+        Established station-search result. Anonymous and legacy sessions never carry the
+        intent marker; a device voice session sets intent=play_radio and the device itself
+        plays the first entry of the returned ranked list.
       required: [type, request_id, transcript, normalized_query, selected_station, stations]
       properties:
         type:
           const: result
         request_id:
           type: string
+        intent:
+          type: string
+          enum: [play_radio]
         transcript:
           type: string
         normalized_query:
@@ -3275,8 +3285,10 @@ components:
     VoiceDeviceCommandResult:
       type: object
       additionalProperties: false
-      description: Terminal lifecycle status for a device-session voice command.
-      required: [type, request_id, status]
+      description: >-
+        Terminal lifecycle status for a device-session voice command with a typed echo of
+        the intent that was executed, including on failure so clients can name what failed.
+      required: [type, request_id, status, intent]
       properties:
         type:
           const: result
@@ -3285,6 +3297,9 @@ components:
         status:
           type: string
           enum: [succeeded, failed]
+        intent:
+          type: string
+          enum: [stop, resume, next_station, previous_station, volume_change, set_volume, add_favorite]
     VoiceStreamErrorCode:
       type: string
       enum:
@@ -3306,6 +3321,7 @@ components:
         - search_unavailable
         - target_offline
         - capability_not_supported
+        - favourite_limit_exceeded
         - forbidden
         - invalid_payload
         - command_timeout

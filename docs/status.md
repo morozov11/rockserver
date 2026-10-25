@@ -1,6 +1,15 @@
 # Project status
 
-Last updated: 2026-10-22
+Last updated: 2026-10-25
+
+## Device voice intents and list-based voice search — 2026-10-25
+
+- Implements items 1–2 of `rock-esp32/docs/plan-voice-control.md` inside the opt-in device voice flow (`surface_id=voice.main` device sessions). The structured interpreter schema gained `resume` and `add_favorite`; the system prompt describes every supported action language-neutrally, including the default ±5 relative volume step. The deterministic outage fallback is deliberately unchanged and does not cover the new intents.
+- Control intents now execute through the same command pipeline as device buttons: stop/resume route playback actions, `volume_change` routes the interpreter's signed `media.volume` delta, and station navigation is manifest-gated — the current ESP32 firmware manifest declares only play/pause/stop, so «дальше»/«назад» return `capability_not_supported` without touching playback and will work without server changes once a firmware manifest declares `next`/`previous`. `add_favorite` writes the device's currently reported station into the personal-data store behind `POST /api/v1/sync` (the RE-15 star and RockMobile path): idempotent, confirmed only after the stored outcome shows the live record, with the new `favourite_limit_exceeded` stream error; no current station is a terminal `station_not_found`.
+- Voice search no longer executes server-side. A recognized station request terminates in the ranked station list (`VoiceStreamResult` with `intent=play_radio`, up to the session limit) and the device itself plays the first entry through the same `station.play_station` path as a catalog tap — RockMobile autoplay semantics. Empty results remain `station_not_found`, a failed search reports `search_unavailable`, and the equal-top-score clarification is gone because the visible list resolves ambiguity. Terminal command results (`VoiceDeviceCommandResult`) now echo a typed `intent` on both success and failure.
+- Anonymous, RockMobile, RockCast, and web voice sessions are unchanged: the legacy result frame never carries the intent marker. The current ESP32 firmware (start frame without `surface_id`) keeps today's behavior exactly; enabling the new flow needs the rock-esp32 follow-ups recorded in `docs/tasks.md`.
+- Verification: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed (204 library tests, voice stream API 19/19, OpenAPI contract 11/11; 281 tests total). Live-provider and PostgreSQL suites remain gated. Not yet deployed.
+- Next step: firmware adoption in rock-esp32 (start-frame `surface_id`, result handling by `status`/`intent` with autoplay-first, error-code mapping), then live verification of the seven commands and voice search.
 
 ## Device voice command fallback — 2026-10-22
 
