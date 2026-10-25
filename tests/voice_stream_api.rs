@@ -50,6 +50,9 @@ async fn device_voice_routes_play_stop_and_volume_through_the_normal_router() {
         ("play rock", ExpectedCommand::Play),
         ("stop", ExpectedCommand::Stop),
         ("volume 37", ExpectedCommand::Volume(37)),
+        ("resume", ExpectedCommand::Resume),
+        ("громче", ExpectedCommand::VolumeChange(5)),
+        ("тише", ExpectedCommand::VolumeChange(-5)),
     ] {
         let harness = Harness::new(transcript, stations(1), DEFAULT_VOICE_COMMAND_TIMEOUT);
         let command = harness.run_success().await;
@@ -86,14 +89,50 @@ async fn device_voice_routes_play_stop_and_volume_through_the_normal_router() {
             (ExpectedCommand::Stop, CommandBody::Playback { action }) => {
                 assert_eq!(action, "stop");
             }
+            (ExpectedCommand::Resume, CommandBody::Playback { action }) => {
+                assert_eq!(action, "play");
+            }
             (
                 ExpectedCommand::Volume(level),
                 CommandBody::Volume {
                     command: VolumeCommand::SetLevel { level: actual },
                 },
             ) => assert_eq!(actual, level),
+            (
+                ExpectedCommand::VolumeChange(delta),
+                CommandBody::Volume {
+                    command: VolumeCommand::Change { delta: actual },
+                },
+            ) => assert_eq!(actual, delta),
             (_, body) => panic!("unexpected routed command: {body:?}"),
         }
+    }
+}
+
+#[tokio::test]
+async fn device_voice_routes_navigation_when_the_manifest_declares_it() {
+    for (transcript, expected_action) in [("next", "next"), ("previous", "previous")] {
+        let harness = Harness::with_manifest(
+            transcript,
+            stations(1),
+            DEFAULT_VOICE_COMMAND_TIMEOUT,
+            navigating_manifest(),
+        );
+        let command = harness.run_success().await;
+        assert_eq!(command.target.device_id, DeviceId(harness.device_id));
+        match command.body {
+            CommandBody::Playback { action } => assert_eq!(action, expected_action),
+            body => panic!("unexpected routed command: {body:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn navigation_without_manifest_support_is_rejected_without_side_effects() {
+    for transcript in ["next", "previous"] {
+        let harness = Harness::new(transcript, stations(1), DEFAULT_VOICE_COMMAND_TIMEOUT);
+        assert_eq!(harness.run_error().await, "capability_not_supported");
+        assert!(harness.store.commands.lock().unwrap().is_empty());
     }
 }
 
@@ -261,7 +300,9 @@ async fn recognized_text_is_not_written_to_logs() {
 enum ExpectedCommand {
     Play,
     Stop,
+    Resume,
     Volume(u8),
+    VolumeChange(i8),
 }
 
 struct Harness {
@@ -329,6 +370,23 @@ impl Harness {
         )
     }
 
+    fn with_manifest(
+        transcript: &str,
+        stations: Vec<RankedStation>,
+        timeout: Duration,
+        manifest: DeviceManifest,
+    ) -> Self {
+        Self::build_with_manifest(
+            FakeRecognizer::new(Some(transcript)),
+            transcript,
+            stations,
+            timeout,
+            Duration::ZERO,
+            true,
+            manifest,
+        )
+    }
+
     fn build(
         recognizer: FakeRecognizer,
         transcript: &str,
@@ -336,6 +394,27 @@ impl Harness {
         timeout: Duration,
         search_delay: Duration,
         register_device: bool,
+    ) -> Self {
+        Self::build_with_manifest(
+            recognizer,
+            transcript,
+            stations,
+            timeout,
+            search_delay,
+            register_device,
+            radio_manifest(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_with_manifest(
+        recognizer: FakeRecognizer,
+        transcript: &str,
+        stations: Vec<RankedStation>,
+        timeout: Duration,
+        search_delay: Duration,
+        register_device: bool,
+        manifest: DeviceManifest,
     ) -> Self {
         let owner_id = Uuid::new_v4();
         let device_id = Uuid::new_v4();
@@ -347,7 +426,6 @@ impl Harness {
         let router = CommandRouter::default().with_station_catalog(Arc::new(search.clone()));
         let registry = ConnectionRegistry::default();
         let store = Arc::new(MemoryStore::default());
-        let manifest = radio_manifest();
         let target_messages = if register_device {
             let (replacement, _) = registry.replacement_channel();
             let (outbound, receiver) = registry.outbound_channel();
@@ -596,23 +674,34 @@ impl CommandInterpreter for FakeInterpreter {
         _locale: &str,
     ) -> Result<VoiceCommand, CommandInterpretationError> {
         assert_eq!(transcript, self.transcript);
-        let (intent, volume_level, query) = match transcript {
+        // Stand-in for the production LLM classifier: identical transcripts in
+        // any language map to the same typed intent, proving the server path
+        // below the interpreter is language-agnostic.
+        let (intent, volume_level, volume_delta, query) = match transcript {
             "play rock" => (
                 Intent::PlayRadio,
+                None,
                 None,
                 Some(RadioQuery {
                     genres: vec!["rock".to_owned()],
                     ..RadioQuery::default()
                 }),
             ),
-            "stop" => (Intent::Stop, None, None),
-            "volume 37" => (Intent::SetVolume, Some(37), None),
-            _ => (Intent::Unknown, None, None),
+            "stop" => (Intent::Stop, None, None, None),
+            "volume 37" => (Intent::SetVolume, Some(37), None, None),
+            "resume" | "продолжай воспроизведение" => {
+                (Intent::Resume, None, None, None)
+            }
+            "louder" | "громче" => (Intent::VolumeChange, None, Some(5), None),
+            "quieter" | "тише" => (Intent::VolumeChange, None, Some(-5), None),
+            "next" | "дальше" => (Intent::NextStation, None, None, None),
+            "previous" | "назад" => (Intent::PreviousStation, None, None, None),
+            _ => (Intent::Unknown, None, None, None),
         };
         Ok(VoiceCommand {
             intent,
             query,
-            volume_delta: None,
+            volume_delta,
             volume_level,
         })
     }
@@ -837,7 +926,7 @@ fn radio_manifest() -> DeviceManifest {
             revision: 1,
             items: vec![
                 DeviceCapability::Playback {
-                    actions: vec!["stop".to_owned()],
+                    actions: vec!["play".to_owned(), "stop".to_owned()],
                 },
                 DeviceCapability::Station {
                     sources: vec![CATALOG_STATION_SOURCE.to_owned()],
@@ -859,6 +948,21 @@ fn radio_manifest() -> DeviceManifest {
             views: Vec::new(),
         }],
     }
+}
+
+/// Manifest of a future firmware that declares playback navigation actions.
+fn navigating_manifest() -> DeviceManifest {
+    let mut manifest = radio_manifest();
+    let Some(DeviceCapability::Playback { actions }) = manifest
+        .capabilities
+        .items
+        .iter_mut()
+        .find(|capability| matches!(capability, DeviceCapability::Playback { .. }))
+    else {
+        panic!("radio manifest must contain a playback capability");
+    };
+    actions.extend(["next".to_owned(), "previous".to_owned()]);
+    manifest
 }
 
 fn stations(count: usize) -> Vec<RankedStation> {

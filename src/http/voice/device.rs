@@ -339,6 +339,28 @@ async fn device_user_intent(
             action: MediaIntentAction::Stop,
             target,
         }),
+        VoiceIntent::Resume => Ok(UserIntent::Media {
+            action: MediaIntentAction::Play,
+            target,
+        }),
+        VoiceIntent::NextStation => Ok(UserIntent::Media {
+            action: MediaIntentAction::Next,
+            target,
+        }),
+        VoiceIntent::PreviousStation => Ok(UserIntent::Media {
+            action: MediaIntentAction::Previous,
+            target,
+        }),
+        VoiceIntent::VolumeChange => match command.volume_delta {
+            Some(delta) => Ok(UserIntent::Media {
+                action: MediaIntentAction::ChangeVolume { delta },
+                target,
+            }),
+            None => Err((
+                VoiceStreamErrorCode::InvalidPayload,
+                "The volume command is invalid.",
+            )),
+        },
         VoiceIntent::SetVolume => match command.volume_level {
             Some(level) => Ok(UserIntent::Media {
                 action: MediaIntentAction::SetVolume { level },
@@ -349,12 +371,7 @@ async fn device_user_intent(
                 "The volume command is invalid.",
             )),
         },
-        VoiceIntent::NextStation
-        | VoiceIntent::PreviousStation
-        | VoiceIntent::VolumeChange
-        | VoiceIntent::Resume
-        | VoiceIntent::AddFavorite
-        | VoiceIntent::Unknown => Err((
+        VoiceIntent::AddFavorite | VoiceIntent::Unknown => Err((
             VoiceStreamErrorCode::UnsupportedIntent,
             "This voice intent is not supported.",
         )),
