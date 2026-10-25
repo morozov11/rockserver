@@ -352,6 +352,8 @@ async fn device_user_intent(
         VoiceIntent::NextStation
         | VoiceIntent::PreviousStation
         | VoiceIntent::VolumeChange
+        | VoiceIntent::Resume
+        | VoiceIntent::AddFavorite
         | VoiceIntent::Unknown => Err((
             VoiceStreamErrorCode::UnsupportedIntent,
             "This voice intent is not supported.",
