@@ -51,47 +51,19 @@ use tracing_subscriber::fmt::MakeWriter;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn device_voice_routes_play_stop_and_volume_through_the_normal_router() {
-    for (transcript, expected) in [
-        ("play rock", ExpectedCommand::Play),
-        ("stop", ExpectedCommand::Stop),
-        ("volume 37", ExpectedCommand::Volume(37)),
-        ("resume", ExpectedCommand::Resume),
-        ("громче", ExpectedCommand::VolumeChange(5)),
-        ("тише", ExpectedCommand::VolumeChange(-5)),
+async fn device_voice_routes_stop_resume_and_volume_through_the_normal_router() {
+    for (transcript, expected, expected_intent) in [
+        ("stop", ExpectedCommand::Stop, "stop"),
+        ("volume 37", ExpectedCommand::Volume(37), "set_volume"),
+        ("resume", ExpectedCommand::Resume, "resume"),
+        ("громче", ExpectedCommand::VolumeChange(5), "volume_change"),
+        ("тише", ExpectedCommand::VolumeChange(-5), "volume_change"),
     ] {
         let harness = Harness::new(transcript, stations(1), DEFAULT_VOICE_COMMAND_TIMEOUT);
-        let command = harness.run_success().await;
+        let (command, frame) = harness.run_success_pair().await;
         assert_eq!(command.target.device_id, DeviceId(harness.device_id));
+        assert_eq!(frame["intent"], expected_intent);
         match (expected, command.body) {
-            (
-                ExpectedCommand::Play,
-                CommandBody::PlayStream {
-                    source,
-                    station_id,
-                    station,
-                    stream_uri,
-                },
-            ) => {
-                assert_eq!(source.as_str(), CATALOG_STATION_SOURCE);
-                assert_eq!(station_id.as_deref(), Some("station-1"));
-                assert_eq!(station.unwrap().name, "Station 1");
-                assert_eq!(stream_uri, "https://streams.example.com/1.mp3");
-                let stored = harness
-                    .store
-                    .load_command(
-                        harness.owner_id,
-                        DeviceId(harness.device_id),
-                        command.command_id,
-                    )
-                    .await
-                    .unwrap()
-                    .unwrap();
-                assert!(matches!(
-                    stored.command.body,
-                    CommandBody::PlayStation { .. }
-                ));
-            }
             (ExpectedCommand::Stop, CommandBody::Playback { action }) => {
                 assert_eq!(action, "stop");
             }
@@ -116,16 +88,63 @@ async fn device_voice_routes_play_stop_and_volume_through_the_normal_router() {
 }
 
 #[tokio::test]
+async fn device_voice_search_returns_the_ranked_list_for_device_autoplay() {
+    let harness = Harness::new("play rock", stations(3), DEFAULT_VOICE_COMMAND_TIMEOUT);
+    let frame = harness.run_direct_result().await;
+    assert_eq!(frame["type"], "result");
+    assert_eq!(frame["intent"], "play_radio");
+    assert_eq!(frame["transcript"], "play rock");
+    assert_eq!(frame["selected_station"]["id"], "station-1");
+    assert_eq!(frame["stations"].as_array().unwrap().len(), 3);
+    assert!(frame.get("status").is_none());
+    // The server dispatches nothing for search: the device plays the first
+    // entry itself through the same station.play_station path as a catalog tap.
+    assert!(
+        harness
+            .target_messages
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .try_recv()
+            .is_err()
+    );
+    assert!(harness.store.commands.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn device_voice_search_reports_nothing_found_without_side_effects() {
+    let harness = Harness::new("play rock", Vec::new(), DEFAULT_VOICE_COMMAND_TIMEOUT);
+    assert_eq!(harness.run_error().await, "station_not_found");
+    assert!(harness.store.commands.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn equal_top_scores_no_longer_block_the_device_search() {
+    // The device shows the ranked list and plays the first entry itself, so a
+    // top-2 score tie is no longer a clarification: it is a normal result.
+    let harness = Harness::new("play rock", stations(2), DEFAULT_VOICE_COMMAND_TIMEOUT);
+    let frame = harness.run_direct_result().await;
+    assert_eq!(frame["intent"], "play_radio");
+    assert_eq!(frame["stations"].as_array().unwrap().len(), 2);
+    assert_eq!(frame["selected_station"]["id"], "station-1");
+}
+
+#[tokio::test]
 async fn device_voice_routes_navigation_when_the_manifest_declares_it() {
-    for (transcript, expected_action) in [("next", "next"), ("previous", "previous")] {
+    for (transcript, expected_action, expected_intent) in [
+        ("next", "next", "next_station"),
+        ("previous", "previous", "previous_station"),
+    ] {
         let harness = Harness::with_manifest(
             transcript,
             stations(1),
             DEFAULT_VOICE_COMMAND_TIMEOUT,
             navigating_manifest(),
         );
-        let command = harness.run_success().await;
+        let (command, frame) = harness.run_success_pair().await;
         assert_eq!(command.target.device_id, DeviceId(harness.device_id));
+        assert_eq!(frame["intent"], expected_intent);
         match command.body {
             CommandBody::Playback { action } => assert_eq!(action, expected_action),
             body => panic!("unexpected routed command: {body:?}"),
@@ -154,6 +173,7 @@ async fn voice_like_adds_the_current_station_to_account_favourites() {
         let result = harness.run_direct_result().await;
         assert_eq!(result["type"], "result");
         assert_eq!(result["status"], "succeeded");
+        assert_eq!(result["intent"], "add_favorite");
         let outcome = personal
             .synchronize(harness.owner_id, SyncRequest::default())
             .await
@@ -199,6 +219,7 @@ async fn voice_like_is_idempotent_for_an_already_favourited_station() {
     let result = harness.run_direct_result().await;
     assert_eq!(result["type"], "result");
     assert_eq!(result["status"], "succeeded");
+    assert_eq!(result["intent"], "add_favorite");
     let outcome = personal
         .synchronize(harness.owner_id, SyncRequest::default())
         .await
@@ -232,8 +253,10 @@ async fn voice_like_without_a_personal_store_is_persistence_unavailable() {
 #[tokio::test]
 async fn device_voice_returns_failed_terminal_command_status() {
     let harness = Harness::new("stop", stations(1), DEFAULT_VOICE_COMMAND_TIMEOUT);
-    let command = harness.run_terminal(CommandStatus::Failed, "failed").await;
+    let (command, frame) = harness.run_terminal(CommandStatus::Failed, "failed").await;
     assert!(matches!(command.body, CommandBody::Playback { .. }));
+    // The intent echo survives a failure so clients can say what did not work.
+    assert_eq!(frame["intent"], "stop");
 }
 
 #[tokio::test]
@@ -291,10 +314,7 @@ async fn invalid_device_session_is_401_while_anonymous_search_remains_unchanged(
 }
 
 #[tokio::test]
-async fn ambiguity_and_unsupported_intent_are_deterministic_errors() {
-    let ambiguous = Harness::new("play rock", stations(2), DEFAULT_VOICE_COMMAND_TIMEOUT);
-    assert_eq!(ambiguous.run_error().await, "clarification_required");
-
+async fn unsupported_intent_is_a_deterministic_error() {
     let unsupported = Harness::new("show sensors", stations(1), DEFAULT_VOICE_COMMAND_TIMEOUT);
     assert_eq!(unsupported.run_error().await, "unsupported_intent");
 }
@@ -317,6 +337,8 @@ async fn device_session_without_surface_keeps_legacy_station_search() {
     assert_eq!(result["type"], "result");
     assert!(result["selected_station"].is_object());
     assert!(result.get("status").is_none());
+    // The legacy frame never carries the device intent marker.
+    assert!(result.get("intent").is_none());
     server.abort();
 }
 
@@ -391,7 +413,6 @@ async fn recognized_text_is_not_written_to_logs() {
 
 #[derive(Clone, Copy)]
 enum ExpectedCommand {
-    Play,
     Stop,
     Resume,
     Volume(u8),
@@ -640,16 +661,20 @@ impl Harness {
         (websocket_request(address, token).await, server)
     }
 
-    async fn run_success(&self) -> DeviceCommand {
+    /// Runs one command-intent session to a succeeded terminal and returns the
+    /// routed device command together with the terminal result frame.
+    async fn run_success_pair(&self) -> (DeviceCommand, Value) {
         self.run_terminal(CommandStatus::Succeeded, "succeeded")
             .await
     }
 
+    /// Runs one command-intent session end to end and returns the routed device
+    /// command together with the terminal result frame for intent-echo checks.
     async fn run_terminal(
         &self,
         terminal_status: CommandStatus,
         expected_status: &str,
-    ) -> DeviceCommand {
+    ) -> (DeviceCommand, Value) {
         let mut target_messages = self.target_messages.lock().unwrap().take().unwrap();
         let router = self.router.clone();
         let registry = self.registry.clone();
@@ -705,9 +730,10 @@ impl Harness {
         assert_eq!(result["type"], "result");
         assert_eq!(result["status"], expected_status);
         assert!(result.get("transcript").is_none());
+        assert!(result.get("stations").is_none());
         let command = responder.await.unwrap();
         server.abort();
-        command
+        (command, result)
     }
 
     async fn run_error(&self) -> String {

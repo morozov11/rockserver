@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::{
     device_control::CommandStatus,
-    voice::{SpeechProviderError, SpeechRecognizerMode, TranscriptUpdate},
+    voice::{Intent, SpeechProviderError, SpeechRecognizerMode, TranscriptUpdate},
 };
 
 use super::super::{
@@ -179,6 +179,9 @@ pub(super) enum VoiceStreamServerEvent {
     DeviceResult {
         request_id: String,
         status: CommandStatus,
+        /// Typed echo of the intent that was executed; identical vocabulary to
+        /// the interpreter schema, so clients render feedback without guessing.
+        intent: Intent,
     },
     Error {
         code: VoiceStreamErrorCode,
@@ -222,6 +225,9 @@ pub(super) enum VoiceStreamErrorCode {
 #[derive(Serialize)]
 pub(super) struct VoiceStreamResultPayload {
     pub(super) request_id: String,
+    /// Present only on device voice sessions; the legacy search flow omits it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) intent: Option<Intent>,
     pub(super) transcript: String,
     pub(super) normalized_query: NormalizedQueryDto,
     pub(super) selected_station: Option<StationResultDto>,

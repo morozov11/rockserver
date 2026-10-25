@@ -19,7 +19,6 @@ use crate::{
         UserIntent,
     },
     personal_data::{CollectionChanges, FavouriteUpsert, PersonalDataError, SyncRequest},
-    search::{SearchConstraints, normalize_query},
     voice::{Intent as VoiceIntent, VoiceCommand},
 };
 
@@ -102,8 +101,22 @@ pub(super) async fn finish_device_voice(
         add_favourite_voice(socket, state, request_id, &principal).await;
         return;
     }
-    let intent = match device_user_intent(state, start, principal, transcript, voice_command).await
-    {
+    // Search requests do not execute anything server-side: the terminal frame
+    // carries the ranked list and the device itself plays the first entry
+    // through the same station.play_station path as a catalog tap.
+    if voice_command.intent == VoiceIntent::PlayRadio {
+        super::finish_stream_search(
+            socket,
+            state,
+            request_id,
+            start,
+            transcript,
+            super::VoiceSearchFlavor::Device,
+        )
+        .await;
+        return;
+    }
+    let intent = match device_user_intent(&voice_command, principal.device_id) {
         Ok(intent) => intent,
         Err((code, message)) => {
             let _ = send_stream_error(socket, request_id, code, message, json!({})).await;
@@ -256,6 +269,7 @@ pub(super) async fn finish_device_voice(
                 &VoiceStreamServerEvent::DeviceResult {
                     request_id: request_id.to_owned(),
                     status: result.status,
+                    intent: voice_command.intent,
                 },
             )
             .await;
@@ -339,6 +353,7 @@ async fn add_favourite_voice(
             &VoiceStreamServerEvent::DeviceResult {
                 request_id: request_id.to_owned(),
                 status: CommandStatus::Succeeded,
+                intent: VoiceIntent::AddFavorite,
             },
         )
         .await;
@@ -369,6 +384,7 @@ async fn add_favourite_voice(
                 &VoiceStreamServerEvent::DeviceResult {
                     request_id: request_id.to_owned(),
                     status: CommandStatus::Succeeded,
+                    intent: VoiceIntent::AddFavorite,
                 },
             )
             .await;
@@ -420,66 +436,21 @@ fn current_station_id(state: &AppState, user_id: Uuid, target: DeviceId) -> Opti
         .filter(|station_id| !station_id.is_empty())
 }
 
-async fn device_user_intent(
-    state: &AppState,
-    start: &ValidatedVoiceStreamStart,
-    principal: DeviceControlPrincipal,
-    transcript: String,
-    command: VoiceCommand,
+/// Maps one classified control intent onto the media command vocabulary.
+///
+/// Search (`play_radio`) and favourites (`add_favorite`) never reach this mapping:
+/// their dedicated terminal flows run earlier in `finish_device_voice`. The arms
+/// for them below are a defensive fallback that keeps the match exhaustive.
+fn device_user_intent(
+    command: &VoiceCommand,
+    device_id: Uuid,
 ) -> Result<UserIntent, (VoiceStreamErrorCode, &'static str)> {
     let target = Some(IntentTarget {
-        device_id: Some(DeviceId(principal.device_id)),
+        device_id: Some(DeviceId(device_id)),
         surface_id: None,
         area_id: None,
     });
     match command.intent {
-        VoiceIntent::PlayRadio => {
-            let query = normalize_query(transcript, start.locale.clone());
-            let constraints = SearchConstraints {
-                limit: 2,
-                offset: 0,
-                excluded_station_ids: start.exclude_station_ids.clone(),
-            };
-            let stations = match tokio::time::timeout(
-                state.voice_command_timeout,
-                state.search_service.search(&query, &constraints),
-            )
-            .await
-            {
-                Ok(Ok(stations)) => stations,
-                Ok(Err(_)) => {
-                    return Err((
-                        VoiceStreamErrorCode::SearchUnavailable,
-                        "Station search is temporarily unavailable.",
-                    ));
-                }
-                Err(_) => {
-                    return Err((
-                        VoiceStreamErrorCode::SearchTimeout,
-                        "Station search timed out.",
-                    ));
-                }
-            };
-            let Some(first) = stations.first() else {
-                return Err((
-                    VoiceStreamErrorCode::StationNotFound,
-                    "No matching station was found.",
-                ));
-            };
-            if stations
-                .get(1)
-                .is_some_and(|second| first.score == second.score)
-            {
-                return Err((
-                    VoiceStreamErrorCode::ClarificationRequired,
-                    "The station request needs clarification.",
-                ));
-            }
-            Ok(UserIntent::PlayRadio {
-                station_id: first.station.id.clone(),
-                target,
-            })
-        }
         VoiceIntent::Stop => Ok(UserIntent::Media {
             action: MediaIntentAction::Stop,
             target,
@@ -516,7 +487,7 @@ async fn device_user_intent(
                 "The volume command is invalid.",
             )),
         },
-        VoiceIntent::AddFavorite | VoiceIntent::Unknown => Err((
+        VoiceIntent::PlayRadio | VoiceIntent::AddFavorite | VoiceIntent::Unknown => Err((
             VoiceStreamErrorCode::UnsupportedIntent,
             "This voice intent is not supported.",
         )),
