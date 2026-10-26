@@ -75,11 +75,15 @@ pub(super) async fn finish_device_voice(
     principal: DeviceControlPrincipal,
     transcript: String,
 ) {
+    // Devices are addressed by a spoken wake word that the recognizer often
+    // glues to the command ("Роксерверрок"): strip it before classification
+    // and ranking so the interpreter sees only the command itself.
+    let command_text = strip_wake_word(&transcript);
     let voice_command = match tokio::time::timeout(
         DEFAULT_STREAM_OPERATION_TIMEOUT,
         state
             .voice_command_interpreter
-            .interpret(&transcript, &start.locale),
+            .interpret(&command_text, &start.locale),
     )
     .await
     {
@@ -117,7 +121,7 @@ pub(super) async fn finish_device_voice(
             .await;
             return;
         };
-        let query = device_search_query(&transcript, &start.locale, filters);
+        let query = device_search_query(&command_text, &start.locale, filters);
         super::finish_stream_search(
             socket,
             state,
@@ -320,6 +324,19 @@ fn device_search_query(transcript: &str, locale: &str, filters: &RadioQuery) -> 
     query.language = filters.language.clone();
     query.country_code = filters.country_code.clone();
     query
+}
+
+/// Removes the spoken device wake word from the start of a transcript,
+/// including recognizer forms where the word is glued to the command
+/// ("Роксерверрок"). Transcripts without the wake word are returned unchanged.
+fn strip_wake_word(transcript: &str) -> String {
+    let lowered = transcript.trim().to_lowercase();
+    for prefix in ["роксервер", "рок сервер", "рок-сервер"] {
+        if let Some(rest) = lowered.strip_prefix(prefix) {
+            return rest.trim_start().to_owned();
+        }
+    }
+    transcript.trim().to_owned()
 }
 
 /// Adds the device's currently reported station to the account favourites.
@@ -589,4 +606,23 @@ fn timestamp_now() -> Timestamp {
             .expect("RFC3339 format is valid"),
     )
     .expect("server timestamp is valid")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_wake_word;
+
+    #[test]
+    fn wake_word_prefix_is_stripped_including_glued_forms() {
+        assert_eq!(strip_wake_word("Роксерверрок"), "рок");
+        assert_eq!(strip_wake_word("Роксервер стоп"), "стоп");
+        assert_eq!(strip_wake_word("рок сервер джаз"), "джаз");
+        assert_eq!(strip_wake_word("  Рок-сервер  громче  "), "громче");
+    }
+
+    #[test]
+    fn transcripts_without_the_wake_word_pass_through() {
+        assert_eq!(strip_wake_word("включи рок"), "включи рок");
+        assert_eq!(strip_wake_word("стоп"), "стоп");
+    }
 }
