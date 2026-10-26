@@ -1,6 +1,15 @@
 # Project status
 
-Last updated: 2026-10-25
+Last updated: 2026-10-26
+
+## Device voice reliability: interpreter rescue and wake-word stripping — 2026-10-26
+
+- Diagnosis from the ESP32 board (RE-8): every spoken device command answered «Команда не поддерживается» (`VOICE_UNSUPPORTED=7`). Serial capture with exact stream error codes showed the device branch and the command pipeline healthy (a recorded «Роксервер стоп» executed twice); failures came from interpretation. Two measured modes: `intent_resolution_failed` when the LLM provider errored and the transcript missed the narrow fallback whitelist (device state 14), and `unsupported_intent` when the provider returned `unknown` for a valid command — no deterministic rescue existed for an `unknown` verdict (device state 7).
+- The interpreter now rescues `unknown` verdicts through the local deterministic classifier whenever a basic-command token is present, and the outage fallback vocabulary grew to the verified core commands: старт/продолжи (resume), лайк/избранное (add_favorite), громче/тише (volume_change ±5) alongside the existing стоп and genre words. Unrelated speech («какая погода») still yields `unknown`/`intent_resolution_failed` and never becomes radio playback.
+- A second measured failure: the recognizer glues the spoken wake word to the command — transcript «Роксерверрок» contains no «рок» token, so the search phrase classified as `unknown` every time. Device sessions now strip the wake word («роксервер», «рок сервер», «рок-сервер», glued forms included) before interpretation and search ranking; the result frame still echoes the original transcript.
+- Post-deploy board verification (synthetic TTS through the device microphone, serial log with STT transcripts): «Роксервер стоп» → `intent=stop status=succeeded`; «громче» executed through the command pipeline; «Роксервер рок» transcripts read exactly «Роксерверрок». One flaky sample stays open: a single «тише» returned a failed command result with no `device.command` reaching the board.
+- Verification: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed (285 tests, then 287 with wake-word strip tests). OPS-001-D deployed `d0b7f6e04565d433d69b99d6dae3003c8386410c` with `status=succeeded`, `readiness=passed`, `yandex_keys=4`; transient infra failures (Docker Hub TLS timeout, SSH banner timeout, a Docker context file lock) cleared on retry.
+- Known remaining gaps, by design or open: «дальше»/«назад» stay manifest-gated `capability_not_supported` until firmware declares `next`/`previous`; `add_favorite` with nothing playing is a terminal `station_not_found`; resume after stop executes the command but the firmware player does not restart playback; owner live-voice verification is pending.
 
 ## Device voice intents and list-based voice search — 2026-10-25
 

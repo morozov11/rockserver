@@ -3511,3 +3511,11 @@ Checks: cargo fmt, strict Clippy and cargo test passed sequentially; external-se
 - Scope: device voice search query construction and result handling, one integration test, OpenAPI description and status. Legacy voice search and the command fallback vocabulary are unchanged.
 - Result: device ranking receives classified genre, mood, language and country filters; deterministic normalization supplies text terms. The returned normalized query reports the filters used for ranking.
 - Checks: `cargo fmt --check`, strict Clippy and `cargo test` passed; PostgreSQL and live-provider tests stayed gated. Status: implemented locally, not deployed or checked with physical ESP32 audio.
+
+## Device voice interpreter rescue and wake-word stripping — 2026-10-26
+
+- Measured on the ESP32 board over serial: device voice sessions failed with `intent_resolution_failed` (LLM provider errors outside the narrow fallback whitelist) and `unsupported_intent` (provider `unknown` verdicts for valid commands, no rescue path). STT transcripts logged on-device showed the wake word glued to the command («Роксерверрок»), hiding the «рок» token from both classifier layers.
+- Server: `LlmCommandInterpreter` rescues `unknown` verdicts through the deterministic classifier when a basic-command token is present; the deterministic classifier and outage whitelist gained старт/продолжи, лайк/избранное, громче/тише; `finish_device_voice` strips the wake-word prefix (incl. glued and hyphen/spaced forms) before interpretation and ranking.
+- Checks: `cargo fmt --check`, strict Clippy, `cargo test` (287) passed sequentially; PostgreSQL and live-provider suites stayed gated.
+- Deployment: `d0b7f6e…` and `61d8dcc…` deployed through OPS-001-D with `readiness=passed` after clearing transient Docker Hub/SSH failures on retry.
+- Board verification: стоп/старт/громче execute via the command pipeline (`command.accepted`/`command.result`, device state 4); «тише» once returned a failed result with no `device.command` (open); live owner-voice pass pending.
