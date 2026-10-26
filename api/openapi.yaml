@@ -1447,7 +1447,9 @@ paths:
         source device and terminate in a `VoiceDeviceCommandResult` carrying a typed intent echo;
         a recognized station request instead terminates in the ranked station list
         (`VoiceStreamResult` with `intent=play_radio`) so the device itself plays the first
-        entry. The client may send one `VoiceStreamCancel` text frame before commit to
+        entry. For device station requests, the classified genre, mood, language and country
+        filters feed ranking directly; legacy clients keep transcript-based search. The client
+        may send one `VoiceStreamCancel` text frame before commit to
         cancel a session deterministically. Anonymous and legacy sessions retain the established
         station-search result shape without the intent marker.
       parameters:
@@ -3260,7 +3262,8 @@ components:
       description: >-
         Established station-search result. Anonymous and legacy sessions never carry the
         intent marker; a device voice session sets intent=play_radio and the device itself
-        plays the first entry of the returned ranked list.
+        plays the first entry of the returned ranked list. Its normalized_query uses the
+        classified device filters, while legacy sessions interpret the transcript as before.
       required: [type, request_id, transcript, normalized_query, selected_station, stations]
       properties:
         type:

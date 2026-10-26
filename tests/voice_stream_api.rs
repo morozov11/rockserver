@@ -113,6 +113,20 @@ async fn device_voice_search_returns_the_ranked_list_for_device_autoplay() {
 }
 
 #[tokio::test]
+async fn device_voice_search_uses_classified_filters() {
+    let harness = Harness::new("play deep rock", stations(1), DEFAULT_VOICE_COMMAND_TIMEOUT);
+    let frame = harness.run_direct_result().await;
+    assert_eq!(frame["intent"], "play_radio");
+    assert_eq!(frame["normalized_query"]["action"], "play");
+    assert_eq!(
+        frame["normalized_query"]["tags"],
+        serde_json::json!(["jazz"])
+    );
+    assert_eq!(frame["normalized_query"]["language"], "de");
+    assert_eq!(frame["normalized_query"]["country_code"], "DE");
+}
+
+#[tokio::test]
 async fn device_voice_search_reports_nothing_found_without_side_effects() {
     let harness = Harness::new("play rock", Vec::new(), DEFAULT_VOICE_COMMAND_TIMEOUT);
     assert_eq!(harness.run_error().await, "station_not_found");
@@ -896,6 +910,17 @@ impl CommandInterpreter for FakeInterpreter {
                 None,
                 Some(RadioQuery {
                     genres: vec!["rock".to_owned()],
+                    ..RadioQuery::default()
+                }),
+            ),
+            "play deep rock" => (
+                Intent::PlayRadio,
+                None,
+                None,
+                Some(RadioQuery {
+                    genres: vec!["jazz".to_owned()],
+                    language: Some("de".to_owned()),
+                    country_code: Some("DE".to_owned()),
                     ..RadioQuery::default()
                 }),
             ),

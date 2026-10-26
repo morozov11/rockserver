@@ -19,7 +19,8 @@ use crate::{
         UserIntent,
     },
     personal_data::{CollectionChanges, FavouriteUpsert, PersonalDataError, SyncRequest},
-    voice::{Intent as VoiceIntent, VoiceCommand},
+    search::{SearchAction, SearchQuery, normalize_query, taxonomy::canonical_tags},
+    voice::{Intent as VoiceIntent, RadioQuery, VoiceCommand},
 };
 
 use super::super::state::AppState;
@@ -105,6 +106,18 @@ pub(super) async fn finish_device_voice(
     // carries the ranked list and the device itself plays the first entry
     // through the same station.play_station path as a catalog tap.
     if voice_command.intent == VoiceIntent::PlayRadio {
+        let Some(filters) = voice_command.query.as_ref() else {
+            let _ = send_stream_error(
+                socket,
+                request_id,
+                VoiceStreamErrorCode::InvalidPayload,
+                "The radio search command is invalid.",
+                json!({}),
+            )
+            .await;
+            return;
+        };
+        let query = device_search_query(&transcript, &start.locale, filters);
         super::finish_stream_search(
             socket,
             state,
@@ -112,6 +125,7 @@ pub(super) async fn finish_device_voice(
             start,
             transcript,
             super::VoiceSearchFlavor::Device,
+            Some(query),
         )
         .await;
         return;
@@ -295,6 +309,17 @@ pub(super) async fn finish_device_voice(
             .await;
         }
     }
+}
+
+// Reuse deterministic text normalization for ranking terms while keeping the
+// already interpreted voice filters authoritative.
+fn device_search_query(transcript: &str, locale: &str, filters: &RadioQuery) -> SearchQuery {
+    let mut query = normalize_query(transcript.to_owned(), locale.to_owned());
+    query.action = SearchAction::Play;
+    query.tags = canonical_tags(filters.genres.iter().chain(&filters.moods).cloned());
+    query.language = filters.language.clone();
+    query.country_code = filters.country_code.clone();
+    query
 }
 
 /// Adds the device's currently reported station to the account favourites.

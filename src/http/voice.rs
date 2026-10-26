@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 
 use crate::{
     device_control_auth::{DeviceControlAuthenticationError, DeviceControlPrincipal},
-    search::{QueryParserInput, SearchConstraints},
+    search::{QueryParserInput, SearchConstraints, SearchOutcome, SearchQuery},
     voice::SpeechStreamConfig,
 };
 
@@ -338,6 +338,7 @@ async fn run_voice_stream(
                         &start,
                         transcript,
                         VoiceSearchFlavor::Legacy,
+                        None,
                     )
                     .await;
                 }
@@ -523,6 +524,7 @@ async fn finish_stream_search(
     start: &ValidatedVoiceStreamStart,
     transcript: String,
     flavor: VoiceSearchFlavor,
+    prepared_query: Option<SearchQuery>,
 ) {
     tracing::info!(
         %request_id,
@@ -537,18 +539,32 @@ async fn finish_stream_search(
         offset: 0,
         excluded_station_ids: start.exclude_station_ids.clone(),
     };
-    let outcome = match tokio::time::timeout(
-        state.voice_command_timeout,
-        state.search_service.interpret_and_search_private(
-            QueryParserInput {
-                query: transcript.clone(),
-                locale: start.locale.clone(),
-            },
-            &constraints,
-        ),
-    )
-    .await
-    {
+    let search = async {
+        if let Some(query) = prepared_query {
+            let stations = state.search_service.search(&query, &constraints).await?;
+            let total = stations
+                .first()
+                .and_then(|station| station.total_matches)
+                .unwrap_or(stations.len());
+            Ok(SearchOutcome {
+                query,
+                stations,
+                total,
+            })
+        } else {
+            state
+                .search_service
+                .interpret_and_search_private(
+                    QueryParserInput {
+                        query: transcript.clone(),
+                        locale: start.locale.clone(),
+                    },
+                    &constraints,
+                )
+                .await
+        }
+    };
+    let outcome = match tokio::time::timeout(state.voice_command_timeout, search).await {
         Ok(Ok(outcome)) => outcome,
         Ok(Err(_)) => {
             let (code, message) = match flavor {

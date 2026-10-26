@@ -105,6 +105,12 @@ Superseded by the minimal server-side plan above; client analytics events and de
 - RockCast behavior confirmed in `src/app/actions/poll/voice.rs` and `src/app/actions/catalog.rs`: show candidates, strip spoken command words from the transcript, then start normal paginated station search and continue loading by offset. The cabinet now follows that sequence using its existing 20-station paging hook and infinite-scroll footer. Text typing and genre selection leave voice results explicitly; a failed first page retains the candidate preview and offers retry.
 - Verification: sequential frontend typecheck, 48/48 frontend checks, frontend build, cargo fmt --check, strict Clippy, and cargo test passed. Real voice recognition and end-to-end scrolling remain for a manual user pass. Commit 64f7871 pushed to origin/master and deployed (status=succeeded, readiness=passed). Production serves assets/index-DLhxuI0t.js and /health/ready returns HTTP 200.
 
+## Device voice search filter correction — 2026-10-25
+
+Device `voice.main` station requests now rank using the already classified genre, mood, language and country filters. Deterministic text normalization still supplies ranking terms; the search LLM no longer reinterprets the same transcript. Anonymous and legacy voice sessions retain their existing search path and wire shape. The protocol description was updated without changing JSON fields.
+
+Local checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings` and `cargo test` passed, including a device voice test whose classified filters deliberately differ from the transcript. PostgreSQL and live-provider tests remained ignored by their environment gates. This change is local and has not been deployed; the ESP32 firmware and hardware voice flow still require their own checks. The optional command fallback vocabulary was left unchanged as requested.
+
 ## Automatic browser voice search — 2026-10-02
 
 - Implemented the RockCast-style PCM amplitude detector: 350 ms startup calibration, 1 s silence after speech, 4.5 s initial silence timeout, and an 8 s continuous-speech guard. Automatic commit preserves buffered pre-ready speech and the final partial PCM frame; processing status comes from the session event.
