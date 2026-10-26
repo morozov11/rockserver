@@ -161,6 +161,37 @@ impl CommandInterpreter for DeterministicCommandInterpreter {
         }) {
             return Ok(control_command(Intent::Stop));
         }
+        if tokens
+            .iter()
+            .any(|token| matches!(token.as_str(), "старт" | "продолжи" | "продолжить"))
+        {
+            return Ok(control_command(Intent::Resume));
+        }
+        if tokens
+            .iter()
+            .any(|token| matches!(token.as_str(), "лайк" | "избранное"))
+        {
+            return Ok(control_command(Intent::AddFavorite));
+        }
+        if tokens
+            .iter()
+            .any(|token| matches!(token.as_str(), "громче"))
+        {
+            return Ok(VoiceCommand {
+                intent: Intent::VolumeChange,
+                query: None,
+                volume_delta: Some(5),
+                volume_level: None,
+            });
+        }
+        if tokens.iter().any(|token| matches!(token.as_str(), "тише")) {
+            return Ok(VoiceCommand {
+                intent: Intent::VolumeChange,
+                query: None,
+                volume_delta: Some(-5),
+                volume_level: None,
+            });
+        }
         VoiceCommand {
             intent: Intent::PlayRadio,
             query: Some(RadioQuery {
@@ -233,36 +264,41 @@ impl CommandInterpreter for LlmCommandInterpreter {
                 .and_then(VoiceCommand::validate),
             Err(error) => Err(CommandInterpretationError::safe(error.to_string())),
         };
+        let tokens = crate::search::tokenize(transcript);
         match result {
+            // Measured on device sessions: the provider classifies valid basic
+            // commands (wake-word-prefixed Russian transcripts) as unknown far
+            // more often than it rejects genuinely unsupported speech. When a
+            // recognized basic-command token is present, the local classifier
+            // rescues the session instead of failing it.
+            Ok(command)
+                if command.intent == Intent::Unknown && basic_command_candidate(&tokens) =>
+            {
+                let rescued = DeterministicCommandInterpreter
+                    .interpret(transcript, locale)
+                    .await
+                    .ok()
+                    .filter(|rescue| rescue.intent != Intent::Unknown);
+                match rescued {
+                    Some(rescue) => {
+                        tracing::warn!(
+                            "voice command interpreter returned unknown; rescued a local basic command"
+                        );
+                        Ok(rescue)
+                    }
+                    None => Ok(command),
+                }
+            }
             Ok(command) => Ok(command),
             Err(error) => {
                 // shortcut: expand this whitelist only when a new basic voice command is verified.
-                let tokens = crate::search::tokenize(transcript);
                 let play_metal = tokens
                     .iter()
                     .any(|token| matches!(token.as_str(), "включи" | "играй" | "поставь" | "play"))
                     && tokens
                         .iter()
                         .any(|token| matches!(token.as_str(), "метал" | "металл" | "metal"));
-                if !play_metal
-                    && !tokens.iter().any(|token| {
-                        matches!(
-                            token.as_str(),
-                            "рок"
-                                | "rock"
-                                | "джаз"
-                                | "jazz"
-                                | "радио"
-                                | "radio"
-                                | "стоп"
-                                | "stop"
-                                | "останови"
-                                | "остановить"
-                                | "громкость"
-                                | "volume"
-                        )
-                    })
-                {
+                if !play_metal && !basic_command_candidate(&tokens) {
                     return Err(error);
                 }
                 tracing::warn!(reason = %error, "voice command interpreter failed; using local fallback");
@@ -272,6 +308,37 @@ impl CommandInterpreter for LlmCommandInterpreter {
             }
         }
     }
+}
+
+/// Tokens that signal one of the locally verified basic commands and allow the
+/// deterministic classifier to rescue an `unknown` verdict or a provider
+/// failure. Keep in sync with `DeterministicCommandInterpreter`.
+fn basic_command_candidate(tokens: &[String]) -> bool {
+    tokens.iter().any(|token| {
+        matches!(
+            token.as_str(),
+            "рок"
+                | "rock"
+                | "джаз"
+                | "jazz"
+                | "радио"
+                | "radio"
+                | "стоп"
+                | "stop"
+                | "останови"
+                | "остановить"
+                | "выключи"
+                | "громкость"
+                | "volume"
+                | "старт"
+                | "продолжи"
+                | "продолжить"
+                | "лайк"
+                | "избранное"
+                | "громче"
+                | "тише"
+        )
+    })
 }
 
 /// Builds the strict JSON-Schema request shared by production and live tests.
