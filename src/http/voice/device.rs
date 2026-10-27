@@ -79,6 +79,20 @@ pub(super) async fn finish_device_voice(
     // glues to the command ("Роксерверрок"): strip it before classification
     // and ranking so the interpreter sees only the command itself.
     let command_text = strip_wake_word(&transcript);
+    if command_text.is_empty() {
+        // Only the wake word was captured (the user paused before the command
+        // or it stayed under the recognition threshold): ask for the command
+        // instead of failing interpretation with "intent_resolution_failed".
+        let _ = send_stream_error(
+            socket,
+            request_id,
+            VoiceStreamErrorCode::ClarificationRequired,
+            "Say the command after the wake word.",
+            json!({}),
+        )
+        .await;
+        return;
+    }
     let voice_command = match tokio::time::timeout(
         DEFAULT_STREAM_OPERATION_TIMEOUT,
         state
