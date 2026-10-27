@@ -320,10 +320,49 @@ pub(super) async fn finish_device_voice(
 fn device_search_query(transcript: &str, locale: &str, filters: &RadioQuery) -> SearchQuery {
     let mut query = normalize_query(transcript.to_owned(), locale.to_owned());
     query.action = SearchAction::Play;
-    query.tags = canonical_tags(filters.genres.iter().chain(&filters.moods).cloned());
+    // The structured provider answers with genre names in the transcript's
+    // language ("рок"), which the canonical-only filter drops: translate the
+    // base Russian genre words first, and if nothing canonical survives,
+    // keep the transcript parser's own transliteration-aware tags instead
+    // of wiping them (a tag-less Play search can return nothing, which the
+    // device reports as "command not supported").
+    let interpreted = canonical_tags(
+        filters
+            .genres
+            .iter()
+            .chain(&filters.moods)
+            .filter_map(|value| genre_alias(value).map(str::to_owned)),
+    );
+    if !interpreted.is_empty() {
+        query.tags = interpreted;
+    }
     query.language = filters.language.clone();
     query.country_code = filters.country_code.clone();
     query
+}
+
+/// Maps base Russian genre words the voice provider commonly returns onto
+/// their canonical catalog tags. Inflected forms are handled by falling back
+/// to the transcript parser's tag extraction.
+fn genre_alias(value: &str) -> Option<&'static str> {
+    match value.trim().to_lowercase().as_str() {
+        "рок" => Some("rock"),
+        "джаз" => Some("jazz"),
+        "метал" | "металл" => Some("metal"),
+        "блюз" => Some("blues"),
+        "классика" => Some("classical"),
+        "электроника" => Some("electronic"),
+        "поп" | "попса" => Some("pop"),
+        "рэп" => Some("hip hop"),
+        "кантри" => Some("country"),
+        "фолк" => Some("folk"),
+        "фанк" => Some("funk"),
+        "регги" => Some("reggae"),
+        "панк" => Some("punk"),
+        "соул" => Some("soul"),
+        "танцевальная" => Some("dance"),
+        _ => None,
+    }
 }
 
 /// Removes the spoken device wake word from the start of a transcript,
@@ -610,7 +649,7 @@ fn timestamp_now() -> Timestamp {
 
 #[cfg(test)]
 mod tests {
-    use super::strip_wake_word;
+    use super::{RadioQuery, device_search_query, strip_wake_word};
 
     #[test]
     fn wake_word_prefix_is_stripped_including_glued_forms() {
@@ -624,5 +663,28 @@ mod tests {
     fn transcripts_without_the_wake_word_pass_through() {
         assert_eq!(strip_wake_word("включи рок"), "включи рок");
         assert_eq!(strip_wake_word("стоп"), "стоп");
+    }
+
+    #[test]
+    fn russian_provider_genres_translate_to_canonical_tags() {
+        let filters = RadioQuery {
+            genres: vec!["рок".to_owned(), "металл".to_owned()],
+            ..RadioQuery::default()
+        };
+        let query = device_search_query("включи рок", "ru-RU", &filters);
+        assert_eq!(query.tags, vec!["metal".to_owned(), "rock".to_owned()]);
+    }
+
+    #[test]
+    fn untranslatable_provider_genres_keep_the_transcript_tags() {
+        // An inflected provider genre ("классическую") survives no canonical
+        // mapping: the transcript parser's own tags must remain instead of an
+        // empty tag set that turns the search into "nothing found".
+        let filters = RadioQuery {
+            genres: vec!["классическую".to_owned()],
+            ..RadioQuery::default()
+        };
+        let query = device_search_query("включи рок", "ru-RU", &filters);
+        assert_eq!(query.tags, vec!["rock".to_owned()]);
     }
 }
