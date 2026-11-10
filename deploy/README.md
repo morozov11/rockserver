@@ -138,6 +138,12 @@ image reference с digest (`...@sha256:<64 hex>`), рендерит production C
 для несовместимой схемы сначала требуется восстановление backup по recovery procedure. Скрипт не
 принимает production env-file из репозитория и не печатает его значения. Пример безопасного dry-run:
 
+После применения миграций `0027`/`0028` предрелизный image `930d31dd` не стартует:
+старый SQLx migrator возвращает `VersionMissing(27)`, хотя сами SQL-изменения добавочные.
+Без backup нельзя восстановить старую schema; для операционного отката нужен новый
+совместимый image, содержащий эти миграции. Владелец явно отказался от backup для выпуска
+2026-11-10, поэтому прежнюю image-пару нельзя считать готовым rollback target.
+
 ```text
 powershell -ExecutionPolicy Bypass -File deploy/release.ps1 `
   -Mode preflight `

@@ -325,7 +325,6 @@ impl StationRepository for PostgresStationRepository {
         let parameters = PostgresSearchParameters::from_domain(query, constraints, embedding)
             .map_err(|error| RepositoryError::new("parameter conversion", error))?;
         let started_at = Instant::now();
-        let use_ann = parameters.ann_embedding.is_some();
         let search = sqlx::query_as::<_, StationRow>(SEARCH_SQL)
             .bind(&parameters.terms)
             .bind(&parameters.tags)
@@ -345,36 +344,12 @@ impl StationRepository for PostgresStationRepository {
             .bind(&parameters.station_name_hint_queries)
             .bind(parameters.offset)
             .bind(&parameters.ann_embedding);
-        let rows = if use_ann {
-            // Transaction-local HNSW settings avoid leaking search depth across pooled requests.
-            let mut transaction = self
-                .pool
-                .begin()
-                .await
-                .map_err(|error| RepositoryError::new("search transaction", error))?;
-            sqlx::query("SET LOCAL hnsw.ef_search = 200")
-                .execute(&mut *transaction)
-                .await
-                .map_err(|error| RepositoryError::new("HNSW search depth", error))?;
-            sqlx::query("SET LOCAL hnsw.iterative_scan = 'strict_order'")
-                .execute(&mut *transaction)
-                .await
-                .map_err(|error| RepositoryError::new("HNSW filtered scan", error))?;
-            let rows = search
-                .fetch_all(&mut *transaction)
-                .await
-                .map_err(|error| RepositoryError::new("search", error))?;
-            transaction
-                .commit()
-                .await
-                .map_err(|error| RepositoryError::new("search transaction commit", error))?;
-            rows
-        } else {
-            search
-                .fetch_all(&self.pool)
-                .await
-                .map_err(|error| RepositoryError::new("search", error))?
-        };
+        // shortcut: Default HNSW depth can underfill filtered candidates; revisit after
+        // measuring production latency and recall before raising search depth again.
+        let rows = search
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|error| RepositoryError::new("search", error))?;
         tracing::debug!(
             elapsed_ms = started_at.elapsed().as_millis(),
             result_count = rows.len(),

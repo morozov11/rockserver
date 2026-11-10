@@ -1,5 +1,13 @@
 # Task log
 
+## Production search outage and temporary recovery — 2026-11-10
+
+- Goal: restore station-list availability after the owner-authorized release `f74ce1110fe5d2f917e1e51b8268f92c5a6dc867` caused public search timeouts.
+- Result: the release worker succeeded, new images were healthy, all 16,825 vectors had source hashes, and migrations reached `0028`. Public catalog browse was 200/0.213 s, while text search returned 504/5.68 s. A direct rollback to pre-release `930d31dd` could not start because old SQLx rejected migration `0027` (`VersionMissing(27)`); the new images were restored. A runtime metadata fallback with Yandex credentials present and LLM timeout 500 ms returned five of five public searches with HTTP 200 in 1.90–4.07 s. Semantic E5 ranking is temporarily unavailable; stored vectors are untouched.
+- Scope/checks: read-only release/database/health inspection, public HTTP probes with status/latency only, aggregate timing/log-event checks without request text, and controlled Compose image/config recovery. No schema downgrade or backup was made; the owner had explicitly waived backup. Local code hotfix removes forced HNSW depth and gives only public text search a ten-second deadline; it still needs serial checks and deployment.
+- Index evidence: bounded read-only live-catalog EXPLAIN probes used the E5 HNSW index for 20 neighbours (28.872 ms) and the FTS GIN index for a rare term (18.538 ms); common `rock` used a Seq Scan (69.970 ms). These are simplified queries, not the full search route plan.
+- Status: **public station lists restored in metadata fallback; hotfix pending verification.** The old image cannot be used for rollback against migrations `0027`/`0028`.
+
 ## Direct production release preparation — 2026-11-10
 
 - Goal: prepare the owner-authorized update of the current `rockplatform.win` server after the owner withdrew the isolated-canary requirement and explicitly waived a backup for this release.

@@ -1,6 +1,6 @@
 //! Station-search HTTP handlers and search-request validation.
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, time::Duration};
 
 use axum::{
     Json,
@@ -26,6 +26,7 @@ const SEARCH_LIMIT: PublicLimit = PublicLimit {
     requests: 120,
     burst: 60,
 };
+const PUBLIC_SEARCH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Transport representation of the `SearchRequest` OpenAPI schema.
 #[derive(Debug, Deserialize)]
@@ -139,7 +140,7 @@ pub(super) fn is_valid_locale(locale: &str) -> bool {
         })
 }
 
-/// Serves the approved anonymous, bounded station-search operation.
+/// Serves the anonymous station-search operation with its own ten-second deadline.
 pub(super) async fn public_search(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -191,7 +192,7 @@ async fn search_impl(
         excluded_station_ids: validated.exclude_station_ids,
     };
     let outcome = match tokio::time::timeout(
-        state.voice_command_timeout,
+        PUBLIC_SEARCH_TIMEOUT,
         state.search_service.interpret_and_search(
             QueryParserInput {
                 query: validated.query,
@@ -224,7 +225,7 @@ async fn search_impl(
                 "search_timeout",
                 "Station search timed out.",
                 &request_id,
-                json!({"timeout_ms": state.voice_command_timeout.as_millis()}),
+                json!({"timeout_ms": PUBLIC_SEARCH_TIMEOUT.as_millis()}),
             );
         }
     };

@@ -1165,6 +1165,8 @@ paths:
         Locale alone does not constrain station language. Ranking is deterministic,
         with station ID ascending as the final tie-break, and optional semantic-provider
         failures degrade to metadata search.
+        Public search has a ten-second deadline; voice search keeps its separate
+        five-second deadline.
         A syntactically malformed JSON body produces 400. A well-formed JSON body
         that violates this operation's schema or semantic validation rules produces 422.
       requestBody:
@@ -1291,6 +1293,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Public station search exceeded its ten-second deadline.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: search_timeout
+                message: Station search timed out.
+                request_id: req_01JAZ504
+                details:
+                  timeout_ms: 10000
   /api/v1/voice/command:
     post:
       operationId: resolveVoiceCommand

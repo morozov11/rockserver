@@ -47,3 +47,17 @@ fn station_result_accepts_metadata_scores_above_one() {
     negative["score"] = json!(-0.1);
     assert_component_invalid(&document, "StationResult", &negative, "negative score");
 }
+
+#[test]
+fn public_search_timeout_is_separate_from_voice_timeout() {
+    let document: JsonValue = serde_yaml::from_str(OPENAPI).unwrap();
+    let timeout = &document["paths"]["/api/v1/search"]["post"]["responses"]["504"]["content"]["application/json"]
+        ["example"];
+    assert_eq!(timeout["code"], "search_timeout");
+    assert_eq!(timeout["details"]["timeout_ms"], 10_000);
+    assert_eq!(
+        document["paths"]["/api/v1/voice/command"]["post"]["responses"]["504"]["content"]["application/json"]
+            ["example"]["details"]["timeout_ms"],
+        5_000
+    );
+}

@@ -2,6 +2,14 @@
 
 Last updated: 2026-11-10
 
+## Search outage during production release — 2026-11-10
+
+- Release `f74ce1110fe5d2f917e1e51b8268f92c5a6dc867` completed on `rockplatform.win`: the detached worker reported `status=succeeded`, both new images and PostgreSQL were healthy, public readiness returned 200, migrations reached `0028`, and all 16,825 embeddings received source hashes. The owner explicitly waived backup for this release; `backup_sha256` remains `-`.
+- Public catalog browse returned HTTP 200 in 0.213 s, but representative `POST /api/v1/search` returned 504 after 5.68 s and station lists failed in web/native clients. A direct application-image rollback to pre-release `930d31dd` failed startup with SQLx `VersionMissing(27)`; the new image pair was immediately restored. No schema or vector rows were reverted. The pre-release image pair is therefore not a usable rollback target after migrations `0027`/`0028` without a compatibility build or database restore.
+- A temporary runtime mitigation is active on the new RockServer image: `ROCKSERVER_SEMANTIC_PROVIDER=deterministic-dev`, `YANDEX_LLM_TIMEOUT_MS=500`, with Yandex credentials present. Five public search probes returned HTTP 200 in 1.90–4.07 s, with nonempty responses; five `search_observation` events had `vector_branch=false` and no timeout. This restores metadata-based station lists but reduces semantic ranking quality. The E5 vectors remain stored. Caddy and PostgreSQL were not changed for this mitigation.
+- Structured completed-search timings before mitigation showed parser/embedding 0.90–2.00 s and repository 1.90–2.05 s; cancelled searches emitted `search_timeout` without a completion event. A local hotfix now removes forced HNSW depth/iterative scans and gives only public text search a ten-second deadline; voice retains five seconds. It has not yet been checked or deployed. Production-sized E5 performance and candidate-quality effects remain to be verified.
+- Read-only, three-second-bounded `EXPLAIN (ANALYZE, BUFFERS)` on simplified live-catalog probes confirmed the `station_embeddings_e5_small_hnsw_cosine_idx` Index Scan for an E5/384 nearest-neighbour selection (20 rows, 28.872 ms). A rare synthetic FTS term used `Bitmap Index Scan on stations_searchable_tsv_idx` (18.538 ms); common `rock` used a Seq Scan (69.970 ms), which the planner preferred for 4,640 matches. These isolated probes do not establish the full prepared `SEARCH_SQL` plan or end-to-end route latency.
+
 ## Production release preflight and owner decision — 2026-11-10
 
 - The owner authorized updating the existing `rockplatform.win` server directly and explicitly waived a backup for this release. The earlier isolated-canary requirement and SSH failure below describe the first preflight, before the owner clarified the target and network access. SSH read-only access now succeeds through the permitted network path. No production mutation has occurred as of this entry.
