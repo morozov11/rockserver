@@ -17,13 +17,35 @@ pub use crate::account_cleanup::{
 pub use account_postgres::{AdminDeviceReadModel, EncryptedYandexHomeToken, PostgresAccountStore};
 pub use admin_postgres::PostgresAdminStore;
 pub use device_control_postgres::PostgresDeviceControlStore;
-pub use embedding_postgres::PostgresEmbeddingStore;
+pub use embedding_postgres::{EmbeddingReleaseReadiness, PostgresEmbeddingStore};
 pub use import_postgres::{OwnedCatalogReplacement, PostgresImportStore};
 pub use personal_data_postgres::PostgresPersonalDataStore;
 pub use postgres::PostgresStationRepository;
 
 use crate::search::StationRepository;
-use crate::search::taxonomy::{GenreRow, GenreTaxonomy};
+use crate::search::taxonomy::{GenreRow, GenreTaxonomy, GenreTaxonomySource};
+use async_trait::async_trait;
+
+/// PostgreSQL source for the current controlled genre vocabulary.
+pub struct PostgresGenreTaxonomySource {
+    pool: sqlx::PgPool,
+}
+
+impl PostgresGenreTaxonomySource {
+    /// Reuses a migrated PostgreSQL pool for request-time taxonomy reads.
+    pub fn from_pool(pool: sqlx::PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl GenreTaxonomySource for PostgresGenreTaxonomySource {
+    async fn load(&self) -> Result<GenreTaxonomy, String> {
+        load_genre_hierarchy(&self.pool)
+            .await
+            .map_err(|error| error.to_string())
+    }
+}
 
 /// Environment variable that enables the PostgreSQL catalog backend.
 pub const DATABASE_URL_ENV: &str = "DATABASE_URL";
@@ -52,15 +74,15 @@ pub async fn repository_from_env()
 /// Loads the genre taxonomy from PostgreSQL, falling back to the compiled-in defaults on error.
 pub async fn taxonomy_from_pool(pool: &sqlx::PgPool) -> GenreTaxonomy {
     match load_genre_hierarchy(pool).await {
-        Ok(taxonomy) => {
+        Ok(taxonomy) if taxonomy.is_usable() => {
             tracing::info!(
                 tags = taxonomy.canonical_tags().len(),
                 "genre taxonomy loaded from database"
             );
             taxonomy
         }
-        Err(error) => {
-            tracing::warn!(%error, "genre taxonomy query failed; using builtin fallback");
+        other => {
+            tracing::warn!(error = ?other.err(), "genre taxonomy unavailable; using builtin fallback");
             GenreTaxonomy::builtin()
         }
     }
@@ -68,10 +90,16 @@ pub async fn taxonomy_from_pool(pool: &sqlx::PgPool) -> GenreTaxonomy {
 
 async fn load_genre_hierarchy(pool: &sqlx::PgPool) -> Result<GenreTaxonomy, sqlx::Error> {
     let rows = sqlx::query_as::<_, GenreHierarchyRow>(
-        "SELECT tag, parent_tag, is_canonical FROM genre_hierarchy",
+        "SELECT tag, parent_tag, is_canonical FROM genre_hierarchy ORDER BY tag LIMIT 2049",
     )
     .fetch_all(pool)
     .await?;
+
+    if rows.len() > 2048 {
+        return Err(sqlx::Error::Protocol(
+            "genre taxonomy exceeds 2048 rows".into(),
+        ));
+    }
 
     let genre_rows: Vec<GenreRow> = rows
         .into_iter()

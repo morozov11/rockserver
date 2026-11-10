@@ -1,8 +1,11 @@
 //! Search domain, provider boundaries, fallback semantics, and catalog boundary.
 
+mod circuit_breaker;
 mod domain;
 mod embedding;
+mod embedding_release;
 mod in_memory;
+mod language;
 mod llm;
 mod query;
 mod ranking;
@@ -22,6 +25,7 @@ pub use embedding::{
     EmbeddingProviderError, EmbeddingStore, EmbeddingStoreError, EmbeddingValidationError,
     MAX_EMBEDDING_DIMENSION, StationEmbeddingDocument,
 };
+pub use embedding_release::EmbeddingQualityReview;
 pub use in_memory::{InMemoryStationRepository, UnavailableStationRepository};
 pub use llm::{
     LlmProvider, LlmProviderError, LlmQueryParser, LlmRequest, MAX_LLM_INTENT_JSON_BYTES,
@@ -30,7 +34,7 @@ pub use query::{
     DeterministicQueryParser, QueryIntent, QueryParser, QueryParserError, QueryParserInput,
     SearchAction, normalize_query, tokenize,
 };
-pub use ranking::{METADATA_WEIGHT, SEMANTIC_WEIGHT, hybrid_score};
+pub use ranking::{METADATA_WEIGHT, SEMANTIC_WEIGHT};
 pub use semantic_filters::{
     SEMANTIC_LANGUAGE_FILTERS_ENV, SemanticLanguageClassifier, semantic_language_filters_enabled,
 };

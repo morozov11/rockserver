@@ -114,16 +114,51 @@ fn voice_stream_contract_matches_runtime_and_implemented_device_flow() {
         &json!({
             "type": "result",
             "request_id": "req_01VOICE",
+            "status": "succeeded",
+            "intent": "stop"
+        }),
+    );
+    assert_component_invalid(
+        &document,
+        "VoiceDeviceCommandResult",
+        &json!({
+            "type": "result",
+            "request_id": "req_01VOICE",
             "status": "succeeded"
         }),
+        "the device command result must echo its typed intent",
+    );
+    assert_component_invalid(
+        &document,
+        "VoiceDeviceCommandResult",
+        &json!({
+            "type": "result",
+            "request_id": "req_01VOICE",
+            "status": "succeeded",
+            "intent": "play_radio"
+        }),
+        "station requests terminate in the ranked list, not the command result",
+    );
+    let search_result = &document["components"]["schemas"]["VoiceStreamResult"];
+    assert!(
+        search_result["properties"].get("intent").is_some(),
+        "device search results must be able to carry the intent marker"
+    );
+    assert!(
+        !search_result["required"]
+            .as_array()
+            .expect("required list")
+            .iter()
+            .any(|field| field == "intent"),
+        "legacy search results stay valid without the intent marker"
     );
     assert_component_valid(
         &document,
         "VoiceStreamError",
         &json!({
             "type": "error",
-            "code": "clarification_required",
-            "message": "The voice command needs clarification.",
+            "code": "favourite_limit_exceeded",
+            "message": "The account favourites limit was reached.",
             "request_id": "req_01VOICE",
             "details": {}
         }),

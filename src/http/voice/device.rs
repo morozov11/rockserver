@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use crate::{
     device_control::{
-        CommandId, Device, DeviceCapability, DeviceId, DeviceRole, SurfaceKind, Timestamp,
+        CommandId, CommandStatus, Device, DeviceCapability, DeviceId, DeviceRole, SurfaceKind,
+        Timestamp,
     },
     device_control_auth::DeviceControlPrincipal,
     device_control_intent::{
@@ -17,8 +18,9 @@ use crate::{
         MediaIntentAction, ResolutionActor, ResolutionContext, ResolutionRequest, ResolutionResult,
         UserIntent,
     },
-    search::{SearchConstraints, normalize_query},
-    voice::{Intent as VoiceIntent, VoiceCommand},
+    personal_data::{CollectionChanges, FavouriteUpsert, PersonalDataError, SyncRequest},
+    search::{SearchAction, SearchQuery, normalize_query, taxonomy::canonical_tags},
+    voice::{Intent as VoiceIntent, RadioQuery, VoiceCommand},
 };
 
 use super::super::state::AppState;
@@ -73,11 +75,29 @@ pub(super) async fn finish_device_voice(
     principal: DeviceControlPrincipal,
     transcript: String,
 ) {
+    // Devices are addressed by a spoken wake word that the recognizer often
+    // glues to the command ("Роксерверрок"): strip it before classification
+    // and ranking so the interpreter sees only the command itself.
+    let command_text = strip_wake_word(&transcript);
+    if command_text.is_empty() {
+        // Only the wake word was captured (the user paused before the command
+        // or it stayed under the recognition threshold): ask for the command
+        // instead of failing interpretation with "intent_resolution_failed".
+        let _ = send_stream_error(
+            socket,
+            request_id,
+            VoiceStreamErrorCode::ClarificationRequired,
+            "Say the command after the wake word.",
+            json!({}),
+        )
+        .await;
+        return;
+    }
     let voice_command = match tokio::time::timeout(
         DEFAULT_STREAM_OPERATION_TIMEOUT,
         state
             .voice_command_interpreter
-            .interpret(&transcript, &start.locale),
+            .interpret(&command_text, &start.locale),
     )
     .await
     {
@@ -94,8 +114,41 @@ pub(super) async fn finish_device_voice(
             return;
         }
     };
-    let intent = match device_user_intent(state, start, principal, transcript, voice_command).await
-    {
+    // Favourites are account data, not device playback: they skip the command
+    // pipeline and use the same personal-data store as POST /api/v1/sync.
+    if voice_command.intent == VoiceIntent::AddFavorite {
+        add_favourite_voice(socket, state, request_id, &principal).await;
+        return;
+    }
+    // Search requests do not execute anything server-side: the terminal frame
+    // carries the ranked list and the device itself plays the first entry
+    // through the same station.play_station path as a catalog tap.
+    if voice_command.intent == VoiceIntent::PlayRadio {
+        let Some(filters) = voice_command.query.as_ref() else {
+            let _ = send_stream_error(
+                socket,
+                request_id,
+                VoiceStreamErrorCode::InvalidPayload,
+                "The radio search command is invalid.",
+                json!({}),
+            )
+            .await;
+            return;
+        };
+        let query = device_search_query(&command_text, &start.locale, filters);
+        super::finish_stream_search(
+            socket,
+            state,
+            request_id,
+            start,
+            transcript,
+            super::VoiceSearchFlavor::Device,
+            Some(query),
+        )
+        .await;
+        return;
+    }
+    let intent = match device_user_intent(&voice_command, principal.device_id) {
         Ok(intent) => intent,
         Err((code, message)) => {
             let _ = send_stream_error(socket, request_id, code, message, json!({})).await;
@@ -248,6 +301,7 @@ pub(super) async fn finish_device_voice(
                 &VoiceStreamServerEvent::DeviceResult {
                     request_id: request_id.to_owned(),
                     status: result.status,
+                    intent: voice_command.intent,
                 },
             )
             .await;
@@ -275,70 +329,245 @@ pub(super) async fn finish_device_voice(
     }
 }
 
-async fn device_user_intent(
+// Reuse deterministic text normalization for ranking terms while keeping the
+// already interpreted voice filters authoritative.
+fn device_search_query(transcript: &str, locale: &str, filters: &RadioQuery) -> SearchQuery {
+    let mut query = normalize_query(transcript.to_owned(), locale.to_owned());
+    query.action = SearchAction::Play;
+    // Preserve canonical provider tags and translate common Russian aliases.
+    // If neither survives, retain the transcript parser's tags.
+    let interpreted = canonical_tags(
+        filters
+            .genres
+            .iter()
+            .chain(&filters.moods)
+            .map(|value| genre_alias(value).unwrap_or(value).to_owned()),
+    );
+    if !interpreted.is_empty() {
+        query.tags = interpreted;
+    }
+    query.language = filters.language.clone();
+    query.country_code = filters.country_code.clone();
+    query
+}
+
+/// Maps base Russian genre words the voice provider commonly returns onto
+/// their canonical catalog tags. Inflected forms are handled by falling back
+/// to the transcript parser's tag extraction.
+fn genre_alias(value: &str) -> Option<&'static str> {
+    match value.trim().to_lowercase().as_str() {
+        "рок" => Some("rock"),
+        "джаз" => Some("jazz"),
+        "метал" | "металл" => Some("metal"),
+        "блюз" => Some("blues"),
+        "классика" => Some("classical"),
+        "электроника" => Some("electronic"),
+        "поп" | "попса" => Some("pop"),
+        "рэп" => Some("hip hop"),
+        "кантри" => Some("country"),
+        "фолк" => Some("folk"),
+        "фанк" => Some("funk"),
+        "регги" => Some("reggae"),
+        "панк" => Some("punk"),
+        "соул" => Some("soul"),
+        "танцевальная" => Some("dance"),
+        _ => None,
+    }
+}
+
+/// Removes the spoken device wake word from the start of a transcript,
+/// including recognizer forms where the word is glued to the command
+/// ("Роксерверрок"). Transcripts without the wake word are returned unchanged.
+fn strip_wake_word(transcript: &str) -> String {
+    let lowered = transcript.trim().to_lowercase();
+    for prefix in ["роксервер", "рок сервер", "рок-сервер"] {
+        if let Some(rest) = lowered.strip_prefix(prefix) {
+            return rest.trim_start().to_owned();
+        }
+    }
+    transcript.trim().to_owned()
+}
+
+/// Adds the device's currently reported station to the account favourites.
+///
+/// Uses the same personal-data store as `POST /api/v1/sync` (the RE-15 device star and
+/// RockMobile), so every client observes the same collection. The write is idempotent:
+/// an already-favourited station succeeds without a second record. Confirmation is sent
+/// only after the stored outcome shows the live record.
+async fn add_favourite_voice(
+    socket: &mut WebSocket,
     state: &AppState,
-    start: &ValidatedVoiceStreamStart,
-    principal: DeviceControlPrincipal,
-    transcript: String,
-    command: VoiceCommand,
+    request_id: &str,
+    principal: &DeviceControlPrincipal,
+) {
+    let Some(store) = state.personal_store.as_ref() else {
+        let _ = send_stream_error(
+            socket,
+            request_id,
+            VoiceStreamErrorCode::PersistenceUnavailable,
+            "Favourite state is temporarily unavailable.",
+            json!({}),
+        )
+        .await;
+        return;
+    };
+    let target = DeviceId(principal.device_id);
+    let Some(station_id) = current_station_id(state, principal.user_id, target) else {
+        let _ = send_stream_error(
+            socket,
+            request_id,
+            VoiceStreamErrorCode::StationNotFound,
+            "No station is currently playing.",
+            json!({}),
+        )
+        .await;
+        return;
+    };
+    let is_live = |records: &[crate::personal_data::FavouriteRecord]| {
+        records.iter().any(|record| {
+            record.deleted_at.is_none() && record.station_id.as_deref() == Some(station_id.as_str())
+        })
+    };
+    let snapshot = match store
+        .synchronize(principal.user_id, SyncRequest::default())
+        .await
+    {
+        Ok(outcome) => outcome,
+        Err(_) => {
+            send_favourite_store_failure(socket, request_id).await;
+            return;
+        }
+    };
+    if is_live(&snapshot.favourites) {
+        let _ = send_stream_event(
+            socket,
+            &VoiceStreamServerEvent::DeviceResult {
+                request_id: request_id.to_owned(),
+                status: CommandStatus::Succeeded,
+                intent: VoiceIntent::AddFavorite,
+            },
+        )
+        .await;
+        return;
+    }
+    let now_text = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .expect("RFC3339 format is valid");
+    let now = crate::personal_data::Timestamp::parse(now_text).expect("server timestamp is valid");
+    let upsert = FavouriteUpsert {
+        record_id: Uuid::new_v4(),
+        station_id: station_id.clone(),
+        added_at: now.clone(),
+        updated_at: now,
+    };
+    let request = SyncRequest {
+        since_revision: snapshot.server_revision,
+        favourites: CollectionChanges {
+            upserts: vec![upsert],
+            deletes: Vec::new(),
+        },
+        history: CollectionChanges::default(),
+    };
+    match store.synchronize(principal.user_id, request).await {
+        Ok(outcome) if is_live(&outcome.favourites) => {
+            let _ = send_stream_event(
+                socket,
+                &VoiceStreamServerEvent::DeviceResult {
+                    request_id: request_id.to_owned(),
+                    status: CommandStatus::Succeeded,
+                    intent: VoiceIntent::AddFavorite,
+                },
+            )
+            .await;
+        }
+        Ok(_) => {
+            let _ = send_stream_error(
+                socket,
+                request_id,
+                VoiceStreamErrorCode::InternalError,
+                "The favourite could not be confirmed.",
+                json!({}),
+            )
+            .await;
+        }
+        Err(PersonalDataError::FavouriteLimitExceeded) => {
+            let _ = send_stream_error(
+                socket,
+                request_id,
+                VoiceStreamErrorCode::FavouriteLimitExceeded,
+                "The account favourites limit was reached.",
+                json!({}),
+            )
+            .await;
+        }
+        Err(_) => send_favourite_store_failure(socket, request_id).await,
+    }
+}
+
+/// Reports a transient personal-data failure without echoing store internals.
+async fn send_favourite_store_failure(socket: &mut WebSocket, request_id: &str) {
+    let _ = send_stream_error(
+        socket,
+        request_id,
+        VoiceStreamErrorCode::PersistenceUnavailable,
+        "Favourite state is temporarily unavailable.",
+        json!({}),
+    )
+    .await;
+}
+
+/// Returns the station the device last reported as current, regardless of playback status:
+/// a paused station is still the user's current station and may be favourited.
+fn current_station_id(state: &AppState, user_id: Uuid, target: DeviceId) -> Option<String> {
+    state
+        .control_state_hub
+        .device_state(user_id, target)
+        .and_then(|snapshot| snapshot.state.playback)
+        .and_then(|playback| playback.station_id)
+        .filter(|station_id| !station_id.is_empty())
+}
+
+/// Maps one classified control intent onto the media command vocabulary.
+///
+/// Search (`play_radio`) and favourites (`add_favorite`) never reach this mapping:
+/// their dedicated terminal flows run earlier in `finish_device_voice`. The arms
+/// for them below are a defensive fallback that keeps the match exhaustive.
+fn device_user_intent(
+    command: &VoiceCommand,
+    device_id: Uuid,
 ) -> Result<UserIntent, (VoiceStreamErrorCode, &'static str)> {
     let target = Some(IntentTarget {
-        device_id: Some(DeviceId(principal.device_id)),
+        device_id: Some(DeviceId(device_id)),
         surface_id: None,
         area_id: None,
     });
     match command.intent {
-        VoiceIntent::PlayRadio => {
-            let query = normalize_query(transcript, start.locale.clone());
-            let constraints = SearchConstraints {
-                limit: 2,
-                offset: 0,
-                excluded_station_ids: start.exclude_station_ids.clone(),
-            };
-            let stations = match tokio::time::timeout(
-                state.voice_command_timeout,
-                state.search_service.search(&query, &constraints),
-            )
-            .await
-            {
-                Ok(Ok(stations)) => stations,
-                Ok(Err(_)) => {
-                    return Err((
-                        VoiceStreamErrorCode::SearchUnavailable,
-                        "Station search is temporarily unavailable.",
-                    ));
-                }
-                Err(_) => {
-                    return Err((
-                        VoiceStreamErrorCode::SearchTimeout,
-                        "Station search timed out.",
-                    ));
-                }
-            };
-            let Some(first) = stations.first() else {
-                return Err((
-                    VoiceStreamErrorCode::StationNotFound,
-                    "No matching station was found.",
-                ));
-            };
-            if stations
-                .get(1)
-                .is_some_and(|second| first.score == second.score)
-            {
-                return Err((
-                    VoiceStreamErrorCode::ClarificationRequired,
-                    "The station request needs clarification.",
-                ));
-            }
-            Ok(UserIntent::PlayRadio {
-                station_id: first.station.id.clone(),
-                target,
-            })
-        }
         VoiceIntent::Stop => Ok(UserIntent::Media {
             action: MediaIntentAction::Stop,
             target,
         }),
+        VoiceIntent::Resume => Ok(UserIntent::Media {
+            action: MediaIntentAction::Play,
+            target,
+        }),
+        VoiceIntent::NextStation => Ok(UserIntent::Media {
+            action: MediaIntentAction::Next,
+            target,
+        }),
+        VoiceIntent::PreviousStation => Ok(UserIntent::Media {
+            action: MediaIntentAction::Previous,
+            target,
+        }),
+        VoiceIntent::VolumeChange => match command.volume_delta {
+            Some(delta) => Ok(UserIntent::Media {
+                action: MediaIntentAction::ChangeVolume { delta },
+                target,
+            }),
+            None => Err((
+                VoiceStreamErrorCode::InvalidPayload,
+                "The volume command is invalid.",
+            )),
+        },
         VoiceIntent::SetVolume => match command.volume_level {
             Some(level) => Ok(UserIntent::Media {
                 action: MediaIntentAction::SetVolume { level },
@@ -349,10 +578,7 @@ async fn device_user_intent(
                 "The volume command is invalid.",
             )),
         },
-        VoiceIntent::NextStation
-        | VoiceIntent::PreviousStation
-        | VoiceIntent::VolumeChange
-        | VoiceIntent::Unknown => Err((
+        VoiceIntent::PlayRadio | VoiceIntent::AddFavorite | VoiceIntent::Unknown => Err((
             VoiceStreamErrorCode::UnsupportedIntent,
             "This voice intent is not supported.",
         )),
@@ -429,4 +655,46 @@ fn timestamp_now() -> Timestamp {
             .expect("RFC3339 format is valid"),
     )
     .expect("server timestamp is valid")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RadioQuery, device_search_query, strip_wake_word};
+
+    #[test]
+    fn wake_word_prefix_is_stripped_including_glued_forms() {
+        assert_eq!(strip_wake_word("Роксерверрок"), "рок");
+        assert_eq!(strip_wake_word("Роксервер стоп"), "стоп");
+        assert_eq!(strip_wake_word("рок сервер джаз"), "джаз");
+        assert_eq!(strip_wake_word("  Рок-сервер  громче  "), "громче");
+    }
+
+    #[test]
+    fn transcripts_without_the_wake_word_pass_through() {
+        assert_eq!(strip_wake_word("включи рок"), "включи рок");
+        assert_eq!(strip_wake_word("стоп"), "стоп");
+    }
+
+    #[test]
+    fn russian_provider_genres_translate_to_canonical_tags() {
+        let filters = RadioQuery {
+            genres: vec!["рок".to_owned(), "металл".to_owned()],
+            ..RadioQuery::default()
+        };
+        let query = device_search_query("включи рок", "ru-RU", &filters);
+        assert_eq!(query.tags, vec!["metal".to_owned(), "rock".to_owned()]);
+    }
+
+    #[test]
+    fn untranslatable_provider_genres_keep_the_transcript_tags() {
+        // An inflected provider genre ("классическую") survives no canonical
+        // mapping: the transcript parser's own tags must remain instead of an
+        // empty tag set that turns the search into "nothing found".
+        let filters = RadioQuery {
+            genres: vec!["классическую".to_owned()],
+            ..RadioQuery::default()
+        };
+        let query = device_search_query("включи рок", "ru-RU", &filters);
+        assert_eq!(query.tags, vec!["rock".to_owned()]);
+    }
 }

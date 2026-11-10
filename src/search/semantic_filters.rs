@@ -1,16 +1,16 @@
-//! Confidence-gated semantic language filters built on the query embedding provider.
+//! Confidence-gated semantic language diagnostics built on the query embedding provider.
 
 use std::{env, sync::Arc};
 
 use super::{Embedding, EmbeddingProvider, EmbeddingProviderError};
 
-/// Environment variable that disables semantic language filters when set to `off`.
+/// Environment variable that disables semantic language diagnostics when set to `off`.
 pub const SEMANTIC_LANGUAGE_FILTERS_ENV: &str = "ROCKSERVER_SEMANTIC_LANGUAGE_FILTERS";
 
 const MIN_LANGUAGE_SCORE: f32 = 0.72;
 const MIN_LANGUAGE_MARGIN: f32 = 0.04;
 
-/// Loads the semantic-language-filter switch without reading model paths or secrets.
+/// Loads the semantic-language diagnostic switch without reading model paths or secrets.
 pub fn semantic_language_filters_enabled() -> Result<bool, EmbeddingProviderError> {
     match env::var(SEMANTIC_LANGUAGE_FILTERS_ENV) {
         Err(env::VarError::NotPresent) => parse_enabled_value(None),
@@ -36,7 +36,7 @@ fn parse_enabled_value(value: Option<&str>) -> Result<bool, EmbeddingProviderErr
 /// A language inferred from a semantic label with its confidence diagnostics.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SemanticLanguageMatch {
-    /// ISO 639 language code used as the station hard filter.
+    /// ISO 639 language code suggested for diagnostics.
     pub code: String,
     /// Cosine similarity with the best language label.
     pub score: f32,
@@ -50,11 +50,11 @@ struct LanguagePrototype {
     embedding: Embedding,
 }
 
-/// In-memory semantic classifier for short requests that mention a broadcast language.
+/// In-memory semantic classifier for diagnostics on explicit language requests.
 ///
 /// Prototypes are embedded once during service startup with the same local model that
-/// embeds user queries. A result is returned only when both its score and its lead
-/// over the next candidate are high enough to be safe as a hard search filter.
+/// embeds user queries. Its confidence-gated suggestion is recorded for comparison;
+/// only explicit request text determines a station-language hard filter.
 #[derive(Clone, Debug)]
 pub struct SemanticLanguageClassifier {
     prototypes: Vec<LanguagePrototype>,
@@ -209,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn confident_leader_becomes_a_language_filter() {
+    fn confident_leader_produces_a_language_suggestion() {
         let classifier = SemanticLanguageClassifier::from_embeddings(vec![
             ("en", embedding(vec![1.0, 0.0])),
             ("es", embedding(vec![0.0, 1.0])),

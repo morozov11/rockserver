@@ -12,5 +12,8 @@ mod personal_sync;
 mod relay;
 #[path = "openapi_contract/surface.rs"]
 mod surface;
+
+#[path = "openapi_contract/search.rs"]
+mod search;
 #[path = "openapi_contract/voice_stream.rs"]
 mod voice_stream;

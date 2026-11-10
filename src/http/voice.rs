@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 
 use crate::{
     device_control_auth::{DeviceControlAuthenticationError, DeviceControlPrincipal},
-    search::{QueryParserInput, SearchConstraints},
+    search::{QueryParserInput, SearchConstraints, SearchOutcome, SearchQuery},
     voice::SpeechStreamConfig,
 };
 
@@ -83,7 +83,7 @@ pub(super) async fn public_voice_stream(
 ) -> Response {
     let request_id = request_id(&headers);
     if let Err(response) =
-        state.public_request_allowed("voice_stream", VOICE_UPGRADE_LIMIT, &request_id)
+        state.public_voice_request_allowed("voice_stream", VOICE_UPGRADE_LIMIT, &request_id)
     {
         return *response;
     }
@@ -331,8 +331,16 @@ async fn run_voice_stream(
                     )
                     .await;
                 } else {
-                    finish_stream_search(&mut socket, &state, &request_id, &start, transcript)
-                        .await;
+                    finish_stream_search(
+                        &mut socket,
+                        &state,
+                        &request_id,
+                        &start,
+                        transcript,
+                        VoiceSearchFlavor::Legacy,
+                        None,
+                    )
+                    .await;
                 }
                 return;
             }
@@ -397,7 +405,7 @@ pub(super) async fn public_voice_command(
 ) -> Response {
     let request_id = request_id(&headers);
     if let Err(response) =
-        state.public_request_allowed("voice_command", VOICE_COMMAND_LIMIT, &request_id)
+        state.public_voice_request_allowed("voice_command", VOICE_COMMAND_LIMIT, &request_id)
     {
         return *response;
     }
@@ -466,6 +474,11 @@ async fn voice_command_impl(
             );
         }
         Err(_) => {
+            tracing::info!(
+                event = "search_timeout",
+                endpoint = "voice_command",
+                "search timed out"
+            );
             return error_response(
                 StatusCode::GATEWAY_TIMEOUT,
                 "search_timeout",
@@ -496,18 +509,34 @@ async fn voice_command_impl(
     )
 }
 
+/// Distinguishes the two callers of the shared transcript-search finisher.
+enum VoiceSearchFlavor {
+    /// Anonymous and legacy station-search sessions: an empty result set is a
+    /// normal result frame clients render themselves.
+    Legacy,
+    /// Device voice sessions: the frame carries the interpreted intent so the
+    /// device can update its list and play the first entry, and an empty result
+    /// set becomes a terminal `station_not_found` error.
+    Device,
+}
+
+/// Resolves a final transcript into the ranked station list for one voice session.
+#[allow(clippy::too_many_arguments)]
 async fn finish_stream_search(
     socket: &mut WebSocket,
     state: &AppState,
     request_id: &str,
     start: &ValidatedVoiceStreamStart,
     transcript: String,
+    flavor: VoiceSearchFlavor,
+    prepared_query: Option<SearchQuery>,
 ) {
     tracing::info!(
         %request_id,
         locale = %start.locale,
         limit = start.limit,
         audio_search = true,
+        device = matches!(flavor, VoiceSearchFlavor::Device),
         "voice transcript search started"
     );
     let constraints = SearchConstraints {
@@ -515,32 +544,54 @@ async fn finish_stream_search(
         offset: 0,
         excluded_station_ids: start.exclude_station_ids.clone(),
     };
-    let outcome = match tokio::time::timeout(
-        state.voice_command_timeout,
-        state.search_service.interpret_and_search_private(
-            QueryParserInput {
-                query: transcript.clone(),
-                locale: start.locale.clone(),
-            },
-            &constraints,
-        ),
-    )
-    .await
-    {
+    let search = async {
+        if let Some(query) = prepared_query {
+            let stations = state.search_service.search(&query, &constraints).await?;
+            let total = stations
+                .first()
+                .and_then(|station| station.total_matches)
+                .unwrap_or(stations.len());
+            Ok(SearchOutcome {
+                query,
+                stations,
+                total,
+            })
+        } else {
+            state
+                .search_service
+                .interpret_and_search_private(
+                    QueryParserInput {
+                        query: transcript.clone(),
+                        locale: start.locale.clone(),
+                    },
+                    &constraints,
+                )
+                .await
+        }
+    };
+    let outcome = match tokio::time::timeout(state.voice_command_timeout, search).await {
         Ok(Ok(outcome)) => outcome,
         Ok(Err(_)) => {
+            let (code, message) = match flavor {
+                VoiceSearchFlavor::Legacy => (
+                    VoiceStreamErrorCode::InternalError,
+                    "An unexpected server error occurred.",
+                ),
+                VoiceSearchFlavor::Device => (
+                    VoiceStreamErrorCode::SearchUnavailable,
+                    "Station search is temporarily unavailable.",
+                ),
+            };
             tracing::error!(%request_id, "streaming voice search failed");
-            let _ = send_stream_error(
-                socket,
-                request_id,
-                VoiceStreamErrorCode::InternalError,
-                "An unexpected server error occurred.",
-                json!({}),
-            )
-            .await;
+            let _ = send_stream_error(socket, request_id, code, message, json!({})).await;
             return;
         }
         Err(_) => {
+            tracing::info!(
+                event = "search_timeout",
+                endpoint = "voice_stream",
+                "search timed out"
+            );
             let _ = send_stream_error(
                 socket,
                 request_id,
@@ -557,13 +608,29 @@ async fn finish_stream_search(
         .iter()
         .map(StationResultDto::from)
         .collect::<Vec<_>>();
-    let selected_station = stations.first().cloned();
     tracing::info!(%request_id, stations = stations.len(), "voice transcript search completed");
+    if stations.is_empty() && matches!(flavor, VoiceSearchFlavor::Device) {
+        let _ = send_stream_error(
+            socket,
+            request_id,
+            VoiceStreamErrorCode::StationNotFound,
+            "No matching station was found.",
+            json!({}),
+        )
+        .await;
+        return;
+    }
+    let selected_station = stations.first().cloned();
+    let intent = match flavor {
+        VoiceSearchFlavor::Legacy => None,
+        VoiceSearchFlavor::Device => Some(crate::voice::Intent::PlayRadio),
+    };
     let _ = send_stream_event(
         socket,
         &VoiceStreamServerEvent::Result {
             result: Box::new(VoiceStreamResultPayload {
                 request_id: request_id.to_owned(),
+                intent,
                 transcript,
                 normalized_query: NormalizedQueryDto::from(outcome.query),
                 selected_station,

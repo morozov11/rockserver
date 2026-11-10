@@ -31,6 +31,21 @@ async fn successful_search_returns_normalized_query_and_station_results() {
 }
 
 #[tokio::test]
+async fn station_language_filter_requires_an_explicit_request() {
+    let (status, unmarked) = search(json!({"query": "джаз", "locale": "fr-FR"})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(unmarked["normalized_query"]["language"], Value::Null);
+
+    let (status, explicit) = search(json!({
+        "query": "джаз на французском",
+        "locale": "en-US"
+    }))
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(explicit["normalized_query"]["language"], "fr");
+}
+
+#[tokio::test]
 async fn unmatched_query_returns_an_empty_station_list() {
     let (status, body) = search(json!({"query": "baroque opera"})).await;
 

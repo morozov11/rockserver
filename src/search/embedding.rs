@@ -146,6 +146,11 @@ impl Error for EmbeddingProviderError {}
 /// Boundary for embedding one query or one station document at a time.
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
+    /// Declares the stable model, preprocessing version, and output dimension before inference.
+    fn provenance(&self) -> Option<EmbeddingProvenance> {
+        None
+    }
+
     /// Produces a validated embedding for the supplied text.
     async fn embed(&self, text: &str) -> Result<Embedding, EmbeddingProviderError>;
 
@@ -170,6 +175,8 @@ pub struct StationEmbeddingDocument {
     pub station_id: String,
     /// Provider input assembled from this station only.
     pub text: String,
+    /// SHA-256 of the exact UTF-8 source text read from storage.
+    pub source_text_sha256: String,
 }
 
 /// Persistence failure returned by the embedding workflow.
@@ -198,9 +205,10 @@ impl Error for EmbeddingStoreError {}
 /// Storage boundary used only by the controlled embedding backfill/update workflow.
 #[async_trait]
 pub trait EmbeddingStore: Send + Sync {
-    /// Returns the next stable-ID-ordered page after the optional cursor.
+    /// Returns the next stable-ID-ordered page missing the requested provenance or source hash.
     async fn station_documents(
         &self,
+        provenance: &EmbeddingProvenance,
         after_station_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<StationEmbeddingDocument>, EmbeddingStoreError>;
@@ -211,6 +219,13 @@ pub trait EmbeddingStore: Send + Sync {
         station_id: &str,
         embedding: &Embedding,
     ) -> Result<(), EmbeddingStoreError>;
+
+    /// Persists a generated vector only while its source document is still current.
+    async fn upsert_document_embedding(
+        &self,
+        document: &StationEmbeddingDocument,
+        embedding: &Embedding,
+    ) -> Result<bool, EmbeddingStoreError>;
 }
 
 /// Counts produced by one controlled embedding backfill/update run.
@@ -243,15 +258,18 @@ where
         }
     }
 
-    /// Embeds and upserts all stations in stable ID order.
+    /// Embeds only missing or stale stations in stable ID order.
     pub async fn run(&self) -> Result<EmbeddingBackfillResult, Box<dyn Error + Send + Sync>> {
         let mut result = EmbeddingBackfillResult::default();
         let mut cursor = None::<String>;
+        let provenance = self.provider.provenance().ok_or_else(|| {
+            EmbeddingProviderError::safe("embedding provider does not declare stable provenance")
+        })?;
 
         loop {
             let documents = self
                 .store
-                .station_documents(cursor.as_deref(), self.page_size)
+                .station_documents(&provenance, cursor.as_deref(), self.page_size)
                 .await?;
             if documents.is_empty() {
                 break;
@@ -259,9 +277,20 @@ where
             let page_len = documents.len();
             for document in documents {
                 let embedding = self.provider.embed_document(&document.text).await?;
-                self.store
-                    .upsert_embedding(&document.station_id, &embedding)
+                if embedding.provenance() != &provenance {
+                    return Err(Box::new(EmbeddingStoreError::safe(
+                        "embedding provider changed provenance during backfill",
+                    )));
+                }
+                let updated = self
+                    .store
+                    .upsert_document_embedding(&document, &embedding)
                     .await?;
+                if !updated {
+                    return Err(Box::new(EmbeddingStoreError::safe(
+                        "station document changed during embedding; rerun backfill",
+                    )));
+                }
                 cursor = Some(document.station_id);
                 result.processed += 1;
                 result.updated += 1;
@@ -276,98 +305,5 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::Mutex;
-
-    use async_trait::async_trait;
-
-    use super::{
-        Embedding, EmbeddingBackfill, EmbeddingProvider, EmbeddingProviderError, EmbeddingStore,
-        EmbeddingStoreError, EmbeddingValidationError, StationEmbeddingDocument,
-    };
-
-    #[test]
-    fn validates_model_dimension_values_and_norm() {
-        assert_eq!(
-            Embedding::new("", "1", 2, vec![1.0, 0.0]).unwrap_err(),
-            EmbeddingValidationError::EmptyModel
-        );
-        assert_eq!(
-            Embedding::new("test", "1", 3, vec![1.0, 0.0]).unwrap_err(),
-            EmbeddingValidationError::DimensionMismatch {
-                declared: 3,
-                actual: 2
-            }
-        );
-        assert_eq!(
-            Embedding::new("test", "1", 2, vec![0.0, 0.0]).unwrap_err(),
-            EmbeddingValidationError::ZeroVector
-        );
-        assert_eq!(
-            Embedding::new("test", "1", 2, vec![f32::NAN, 1.0]).unwrap_err(),
-            EmbeddingValidationError::NonFiniteValue
-        );
-    }
-
-    struct FakeProvider;
-
-    #[async_trait]
-    impl EmbeddingProvider for FakeProvider {
-        async fn embed(&self, text: &str) -> Result<Embedding, EmbeddingProviderError> {
-            let first = if text.contains("one") { 1.0 } else { 0.0 };
-            Embedding::new("fake", "1", 2, vec![first, 1.0])
-                .map_err(|error| EmbeddingProviderError::safe(error.to_string()))
-        }
-    }
-
-    #[derive(Default)]
-    struct FakeStore {
-        writes: Mutex<Vec<(String, Embedding)>>,
-    }
-
-    #[async_trait]
-    impl EmbeddingStore for FakeStore {
-        async fn station_documents(
-            &self,
-            after_station_id: Option<&str>,
-            _limit: usize,
-        ) -> Result<Vec<StationEmbeddingDocument>, EmbeddingStoreError> {
-            Ok(match after_station_id {
-                None => vec![
-                    StationEmbeddingDocument {
-                        station_id: "one".to_owned(),
-                        text: "station one".to_owned(),
-                    },
-                    StationEmbeddingDocument {
-                        station_id: "two".to_owned(),
-                        text: "station two".to_owned(),
-                    },
-                ],
-                Some(_) => Vec::new(),
-            })
-        }
-
-        async fn upsert_embedding(
-            &self,
-            station_id: &str,
-            embedding: &Embedding,
-        ) -> Result<(), EmbeddingStoreError> {
-            self.writes
-                .lock()
-                .unwrap()
-                .push((station_id.to_owned(), embedding.clone()));
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn backfill_uses_deterministic_pages_and_updates_every_document() {
-        let workflow = EmbeddingBackfill::new(FakeProvider, FakeStore::default(), 2);
-
-        let result = workflow.run().await.unwrap();
-
-        assert_eq!(result.processed, 2);
-        assert_eq!(result.updated, 2);
-        assert_eq!(workflow.store.writes.lock().unwrap().len(), 2);
-    }
-}
+#[path = "embedding/tests.rs"]
+mod tests;

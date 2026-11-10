@@ -67,18 +67,19 @@
     <section id="ecosystem">
       <h2>1. Общая экосистема</h2>
       <div class="flow">
-        <article class="node future"><span class="badge future">FUTURE</span><h3>Пользователь / голос</h3><p>Голосовой ввод, production STT и ESP32-клиент.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>Пользователь / voice</h3><p>RockCast и браузер используют текущий voice/search path; ESP32 push-to-talk реализован в прошивке, сквозная проверка голосовой команды продолжается.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>RockCast Windows</h3><p>Отправляет Bearer-токен для RockServer voice WebSocket; локальный каталог остаётся fallback.</p></article>
-        <article class="node current"><span class="badge current">CURRENT</span><h3>RockServer</h3><p>Health routes и защищённые Bearer application API: поиск и voice.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>RockServer</h3><p>Search/voice APIs и paired-device control plane: native-session WebSocket, presence, manifests/state, directory, device catalog и безопасная station resolution.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>Каталог / поиск</h3><p>PostgreSQL обязателен для запущенного сервиса; in-memory repository остаётся только для deterministic tests. Проверенный full-catalog export создаёт SQLite для RockMobile.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>StationResult</h3><p>Voice result передаётся RockCast; remote text-search UI остаётся NEXT.</p></article>
         <article class="node current"><span class="badge current">CURRENT</span><h3>PlaybackController</h3><p>RockCast воспроизводит принятый voice result и сохраняет fallback кандидатов.</p></article>
       </div>
       <div class="grid" style="margin-top:.75rem">
-        <article class="node future"><h3>LocalPlayer</h3><p>Существующий путь воспроизведения RockCast.</p></article>
-        <article class="node future"><h3>CastService / StreamRelay</h3><p>Существующий клиентский путь к Chromecast/саундбару; вне этого репозитория.</p></article>
-        <article class="node future"><h3>Chromecast / саундбар</h3><p>Конечное устройство воспроизведения.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>LocalPlayer / StreamRelay</h3><p>RockCast Windows и ESP32 радио воспроизводят подтверждённые потоки; радио переключает общий source между локальным динамиком и relay.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>RockCast radio · ESP32-P4</h3><p>Pairing, authenticated catalog, touch browse/search, station playback и локальный CASTV2-клиент приняты на плате. Локальный Cast пока не управляется командами RockServer.</p></article>
+        <article class="node current"><span class="badge current">CURRENT</span><h3>Chromecast / саундбар</h3><p>Локальный ESP32 CASTV2-путь и RockCast client Cast работают; RockServer remote Cast commands и RockMobile controls остаются отдельными задачами RS-7/RM-3.</p></article>
       </div>
+      <p><strong>ESP32 follow-up:</strong> DC-017/DC-018/DC-039 приняты; физический динамик подтверждён. DC-040 ждёт полного 24-часового integration soak (RE-10). Сенсоры DC-019/DC-020 отложены до появления hardware; voice PTT проходит приёмку, wake word остаётся будущей работой.</p>
     </section>
 
     <section id="text-search">
@@ -92,7 +93,7 @@
         <article class="node current"><h3>ranking</h3><span class="badge current">CURRENT: 0.70 metadata + 0.30 semantic</span></article>
         <article class="node future"><h3>Результаты → выбор → playback</h3><span class="badge future">FUTURE</span></article>
       </div>
-      <p><strong>Сейчас:</strong> Axum обрабатывает публичные health routes, анонимные и rate-limited <code>POST /api/v1/search</code> и <code>/api/v1/voice/*</code>; legacy <code>/api/v1/*</code> voice/search routes сохраняют deployment Bearer boundary. QueryParser получает только данные запроса; optional <code>LlmQueryParser</code> использует Yandex AI Studio только при явной env-конфигурации и всегда имеет deterministic fallback. В provider передаются только command и locale, не каталог. EmbeddingProvider получает только query text. PostgreSQL применяет hard filters и exclusions до exact pgvector hybrid ranking; in-memory и provider failures используют metadata fallback.</p>
+      <p><strong>Сейчас:</strong> Axum обрабатывает публичные health routes, анонимные и rate-limited <code>POST /api/v1/search</code> и <code>/api/v1/voice/*</code>; legacy <code>/api/v1/*</code> voice/search routes сохраняют deployment Bearer boundary. QueryParser получает только данные запроса; optional <code>LlmQueryParser</code> использует Yandex AI Studio только при явной env-конфигурации и всегда имеет deterministic fallback. После трёх временных ошибок поисковый LLM breaker пропускает вызовы на 30 секунд; после паузы допускает один probe. Неуспешный поиск использует детерминированный парсер. При включённом LLM один ограниченный снимок <code>genre_hierarchy</code> из PostgreSQL задаёт prompt, JSON-схему, локальную проверку тегов и жанровый fallback; ошибка/пустой словарь включает builtin-теги. В provider передаются только command, locale и словарь тегов, не каталог станций. EmbeddingProvider получает только query text. Язык станции становится hard filter только при явном однозначном маркере в команде; locale, LLM и семантический классификатор сами фильтр не устанавливают. PostgreSQL объединяет ограниченные лексические и совместимые E5 ANN-кандидаты после hard filters и exclusions, затем считает точный cosine и гибридный балл. Для ANN transaction-local <code>ef_search=200</code> и <code>strict_order</code>; отсутствие вектора сохраняет metadata fallback. Общий порог <code>0.35</code> пока скрывает кандидата с одним векторным совпадением.</p>
     </section>
 
     <section id="inside">
@@ -102,11 +103,11 @@
         <article class="card current"><span class="badge current">CURRENT</span><h3>Device-control directory projection</h3><p>Owner-scoped <code>DeviceControlDirectory</code> через существующие REST <code>GET /api/v1/device-control/directory</code> и WSS <code>directory.snapshot</code>/<code>directory.upsert</code>. Записи содержат опциональный <code>runtime_state</code> — ревизионный <code>DeviceStateSnapshot</code> из персистентной latest-проекции, видимый только caller-ам со скоупом <code>entity.state.read</code>; target без опубликованного state оставляет поле отсутствующим (не null и не сфабрикованным). Без новых endpoints и polling.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>Personal-data sync</h3><p>Account-owned <code>POST /api/v1/sync</code> (native device-session Bearer) и <code>POST /api/v1/browser/sync</code> (browser cookie + CSRF + station enrichment): атомарный push+pull запрос. Записи сливаются last-writer-wins по <code>updated_at</code>, курсор <code>server_revision</code> — per-user/device, tombstones доносят удаления устройствам, офлайн в момент удаления. Лимиты зеркалируют локальный контракт RM-007-A (500/500 живых записей, батч ≤300, история 90 дней, metadata ≤4 KiB, тело ≤256 KiB); retention-sweep раз в час на процесс, purge личных строк удалённых аккаунтов через 30 дней. <code>station_id</code> — opaque, неразрешённые ссылки сохраняются.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>API access gate</h3><p>The deployment Bearer credential protects only legacy <code>/api/v1/*</code> compatibility routes. Account/device pairing uses passkey, browser cookie, CSRF, and a durable device secret that issues short-lived native sessions; no credential is logged. A paired browser account can link Yandex Smart Home through one-time OAuth with the read-only <code>iot:view</code> scope; the server encrypts the token at rest and returns only retrievable temperature readings.</p></article>
-        <article class="card current"><span class="badge current">CURRENT</span><h3>tracing / config</h3><p>JSON tracing, HTTP и import config, run/page/count logs, graceful shutdown.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>tracing / config</h3><p>JSON tracing, HTTP и import config, run/page/count logs, text-free aggregate search observations in stdout and rolling files, graceful shutdown.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>DTO / validation</h3><p>Transport DTO, request_id и contract-compliant ошибки.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>SearchService</h3><p>Нормализованный запрос и стабильное repository-neutral ранжирование.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>QueryParser / LlmProvider</h3><p>Yandex JSON intent при явной env-конфигурации; deterministic fallback; каталог не передаётся provider.</p></article>
-        <article class="card current"><span class="badge current">CURRENT</span><h3>EmbeddingProvider trait</h3><p>Optional query vector; deterministic-dev fixture, без production model.</p></article>
+        <article class="card current"><span class="badge current">CURRENT</span><h3>EmbeddingProvider trait</h3><p>Optional query vector; локальная E5 ONNX-модель доступна при явной конфигурации, deterministic-dev provider служит проверкам.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>StationRepository</h3><p>Запущенный сервис использует PostgreSQL + migrations/seed; in-memory repository ограничен deterministic tests.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>CatalogImporter</h3><p>Ограниченный Radio Browser client + import store; отдельный CLI, не request path и не HTTP startup.</p></article>
         <article class="card current"><span class="badge current">CURRENT</span><h3>Mobile catalog exporter</h3><p>Отдельный PostgreSQL→SQLite CLI. Выпускает только полный active/playable каталог после строгой проверки; health, embeddings и import runs не экспортирует.</p></article>
@@ -119,7 +120,7 @@
 
     <section id="catalog">
       <h2>4. Данные каталога</h2>
-      <p><strong>CURRENT:</strong> versioned migrations создают <code>stations</code>, <code>station_streams</code>, source identity, <code>import_runs</code>, provenance-aware <code>station_embeddings</code> и isolated administrator request records with 30-day retention. Pgvector column не закреплён за dev dimension; exact search сравнивает только одинаковые model/version/dimension. Radio Browser ownership не изменён. Отдельный CLI экспортирует только active/playable станции с единственным primary HTTP(S) stream в проверяемый SQLite-пакет для RockMobile; health/probes, embeddings и import runs туда не попадают. RockCast product routes remain public and pairing is its user-identity boundary.</p>
+      <p><strong>CURRENT:</strong> versioned migrations создают <code>stations</code>, <code>station_streams</code>, source identity, <code>import_runs</code>, provenance-aware <code>station_embeddings</code> с SHA-256 исходного <code>searchable_text</code> и isolated administrator request records with 30-day retention. Отдельный backfill CLI выбирает отсутствующие или устаревшие по model/version/dimension/hash векторы и возобновляется по station ID; импорт каталога запускается отдельно. Для offline-смены E5/384 старые и новые версии векторов сосуществуют, общий HNSW индекс покрывает обе, а запуск сервера проверяет полноту векторов фактически загруженного provider, индекс и отчёт о качестве новой версии. Pgvector column не закреплён за dev dimension; exact search сравнивает только одинаковые model/version/dimension. Radio Browser ownership не изменён. Отдельный CLI экспортирует только active/playable станции с единственным primary HTTP(S) stream в проверяемый SQLite-пакет для RockMobile; health/probes, embeddings и import runs туда не попадают. RockCast product routes remain public and pairing is its user-identity boundary.</p>
       <div class="flow" aria-label="RM-004 immutable offline catalog flow">
         <article class="node current"><h3>RockCatalog authoring</h3><p>Единственный authoring source curated baseline.</p></article>
         <article class="node current"><h3>Immutable 2026.08.2</h3><p>JSON + schema + manifest; SHA-256 pin.</p></article>
@@ -143,7 +144,7 @@
     </section>
 
     <section id="contract">
-      <p><strong>CURRENT:</strong> Anonymous <code>/api/v1/voice/*</code> routes are rate-limited; legacy <code>/api/v1/voice/*</code> routes retain a Bearer boundary. The WebSocket <code>GET /api/v1/voice/stream</code> adds bounded PCM16 mono chunks, partial/final transcript events, provider-neutral STT sessions, and final <code>SearchService</code> resolution. RockCast supplies its configured legacy token only for that compatibility boundary and chooses <code>buffered_v1</code> (default, recognition after commit) or <code>streaming_v3</code> (SpeechKit chunks during recording) in the start event. The process reports <code>speech_provider_unavailable</code> until a provider key is configured.</p>
+      <p><strong>CURRENT:</strong> Anonymous <code>/api/v1/voice/*</code> routes use process-wide token buckets: command 12/minute with capacity 4, stream upgrades 6/minute with capacity 2; legacy <code>/api/v1/voice/*</code> routes retain a Bearer boundary. The WebSocket <code>GET /api/v1/voice/stream</code> adds bounded PCM16 mono chunks, partial/final transcript events, provider-neutral STT sessions, and final <code>SearchService</code> resolution. RockCast supplies its configured legacy token only for that compatibility boundary and chooses <code>buffered_v1</code> (default, recognition after commit) or <code>streaming_v3</code> (SpeechKit chunks during recording) in the start event. The process reports <code>speech_provider_unavailable</code> until a provider key is configured.</p>
       <h2>5. Контракт и ошибки</h2>
       <div class="flow">
         <article class="node current"><h3>SearchRequest</h3><p><code>query</code>, <code>locale</code>, <code>limit</code>, <code>exclude_station_ids</code>.</p></article>
@@ -164,6 +165,13 @@
       <p><code>ErrorResponse</code> всегда содержит <code>code</code>, <code>message</code>, <code>request_id</code> и <code>details</code>. Search реализует 200, 400, 401, 422 и 500; 429 остаётся FUTURE. Readiness отдельно возвращает 503 + <code>{"status":"not_ready"}</code> при потере PostgreSQL.</p>
     </section>
 
+    <section id="listening-analytics-plan">
+      <h2>План: аналитика поиска и прослушиваний</h2>
+      <p><strong>PLANNED · 2026-10-16 · не реализовано.</strong> Минимум из трёх таблиц: запросы поиска, авторизованные relay-подключения пользователей к станциям и ICY-наблюдения песен в этих подключениях. Запись выполняется сервером через ограниченную очередь, без новых событий клиента; аудио её не ждёт. Потери учитываются явно.</p>
+      <p>Upstream сейчас отдельный на слушателя: история песен привязана к подключению. Явные переходы и показы не собираются; прямое/offline playback не покрывается. Identity поиска известна только при уже переданной личной авторизации. <a href="listening-search-analytics-plan.md">Таблицы, схема и описание для разработчика голосового поиска</a>.</p>
+      <p><strong>PLANNED: персонализация.</strong> Следующий поиск читает ограниченную свежую историю пользователя и учитывает предпочтения в релевантных кандидатах/порядке. Отдельные профили, суточная аналитика и переобучение не обязательны. Явные фильтры приоритетны, paging требует стабильного порядка; без identity или при сбое используется обычный поиск. Свежесть ограничена очередью и checkpoints, а не обещанным мгновенным обновлением.</p>
+    </section>
+
     <section id="delivery">
       <h2>6. Этапы поставки</h2>
       <ol class="grid">
@@ -182,6 +190,6 @@
       </ol>
     </section>
   </main>
-  <footer>Документ отражает состояние RS-8 owner-scoped runtime-state проекции directory на 2026-09-17. HTML автономен; import и embedding backfill требуют <code>DATABASE_URL</code>, запускаются отдельно и не меняют схемы HTTP API.</footer>
+  <footer>Состояние устройства и device-control синхронизировано с roadmap на 2026-10-17. ESP32 local Cast не означает поддержку remote chromecast.* commands: их серверная часть RS-7 и UI RockMobile RM-3 ещё открыты. HTML автономен; import и embedding backfill требуют <code>DATABASE_URL</code>, запускаются отдельно и не меняют схемы HTTP API.</footer>
 </body>
 </html>

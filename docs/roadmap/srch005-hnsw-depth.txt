@@ -1,0 +1,83 @@
+Synthetic 3000-vector disposable Docker database; 1500 degraded streams, 1000 fr stations, 1000 eligible en/healthy stations. Query has language=en, country=US, LIMIT 200.
+Default pgvector settings (hnsw.ef_search=40, iterative_scan=off):
+
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                      QUERY PLAN
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=478.27..2846.22 rows=200 width=21) (actual time=0.452..1.160 rows=17 loops=1)
+   Buffers: shared hit=430
+   ->  Nested Loop  (cost=478.27..24157.83 rows=2000 width=21) (actual time=0.451..1.157 rows=17 loops=1)
+         Buffers: shared hit=430
+         ->  Nested Loop  (cost=469.96..7447.83 rows=2000 width=1570) (actual time=0.345..0.684 rows=26 loops=1)
+               Buffers: shared hit=326
+               ->  Index Scan using station_embeddings_e5_small_hnsw_cosine_idx on station_embeddings station_embedding  (cost=469.68..6056.52 rows=3000 width=1557) (actual time=0.315..0.356 rows=40 loops=1)
+                     Order By: ((embedding)::vector(384) <=> ((('[1,0,'::text || array_to_string('{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}'::integer[], ','::text)) || ']'::text))::vector(384))
+                     Buffers: shared hit=178
+               ->  Index Scan using stations_pkey on stations s  (cost=0.28..0.46 rows=1 width=13) (actual time=0.008..0.008 rows=1 loops=40)
+                     Index Cond: ((id)::text = (station_embedding.station_id)::text)
+                     Filter: ((retired_at IS NULL) AND ((language)::text = 'en'::text) AND (country_code = 'US'::bpchar))
+                     Rows Removed by Filter: 0
+                     Buffers: shared hit=148
+         ->  Subquery Scan on primary_stream  (cost=8.31..8.32 rows=1 width=0) (actual time=0.009..0.009 rows=1 loops=26)
+               Filter: (primary_stream.health <> 'degraded'::text)
+               Rows Removed by Filter: 0
+               Buffers: shared hit=104
+               ->  Limit  (cost=8.31..8.31 rows=1 width=85) (actual time=0.009..0.009 rows=1 loops=26)
+                     Buffers: shared hit=104
+                     ->  Sort  (cost=8.31..8.31 rows=1 width=85) (actual time=0.009..0.009 rows=1 loops=26)
+                           Sort Key: station_streams.is_primary DESC, station_streams.id
+                           Sort Method: quicksort  Memory: 25kB
+                           Buffers: shared hit=104
+                           ->  Index Scan using station_streams_station_id_idx on station_streams  (cost=0.28..8.30 rows=1 width=85) (actual time=0.007..0.008 rows=1 loops=26)
+                                 Index Cond: ((station_id)::text = (s.id)::text)
+                                 Filter: (retired_at IS NULL)
+                                 Buffers: shared hit=96
+ Planning:
+   Buffers: shared hit=624
+ Planning Time: 1.045 ms
+ Execution Time: 1.237 ms
+(32 rows)
+
+
+Transaction-local hnsw.ef_search=200 and hnsw.iterative_scan=strict_order:
+
+LOAD
+BEGIN
+SET
+SET
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                      QUERY PLAN
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=1669.00..3917.89 rows=200 width=21) (actual time=1.081..9.679 rows=200 loops=1)
+   Buffers: shared hit=6108
+   ->  Nested Loop  (cost=1669.00..24157.83 rows=2000 width=21) (actual time=1.080..9.659 rows=200 loops=1)
+         Buffers: shared hit=6108
+         ->  Nested Loop  (cost=1660.70..7447.83 rows=2000 width=1570) (actual time=0.970..4.708 rows=414 loops=1)
+               Buffers: shared hit=4446
+               ->  Index Scan using station_embeddings_e5_small_hnsw_cosine_idx on station_embeddings station_embedding  (cost=1660.42..6056.51 rows=3000 width=1557) (actual time=0.911..2.402 rows=607 loops=1)
+                     Order By: ((embedding)::vector(384) <=> ((('[1,0,'::text || array_to_string('{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}'::integer[], ','::text)) || ']'::text))::vector(384))
+                     Buffers: shared hit=2267
+               ->  Index Scan using stations_pkey on stations s  (cost=0.28..0.46 rows=1 width=13) (actual time=0.003..0.003 rows=1 loops=607)
+                     Index Cond: ((id)::text = (station_embedding.station_id)::text)
+                     Filter: ((retired_at IS NULL) AND ((language)::text = 'en'::text) AND (country_code = 'US'::bpchar))
+                     Rows Removed by Filter: 0
+                     Buffers: shared hit=2179
+         ->  Subquery Scan on primary_stream  (cost=8.31..8.32 rows=1 width=0) (actual time=0.005..0.005 rows=0 loops=414)
+               Filter: (primary_stream.health <> 'degraded'::text)
+               Rows Removed by Filter: 1
+               Buffers: shared hit=1662
+               ->  Limit  (cost=8.31..8.31 rows=1 width=85) (actual time=0.005..0.005 rows=1 loops=414)
+                     Buffers: shared hit=1662
+                     ->  Sort  (cost=8.31..8.31 rows=1 width=85) (actual time=0.004..0.004 rows=1 loops=414)
+                           Sort Key: station_streams.is_primary DESC, station_streams.id
+                           Sort Method: quicksort  Memory: 25kB
+                           Buffers: shared hit=1662
+                           ->  Index Scan using station_streams_station_id_idx on station_streams  (cost=0.28..8.30 rows=1 width=85) (actual time=0.003..0.004 rows=1 loops=414)
+                                 Index Cond: ((station_id)::text = (s.id)::text)
+                                 Filter: (retired_at IS NULL)
+                                 Buffers: shared hit=1654
+ Planning:
+   Buffers: shared hit=620
+ Planning Time: 1.347 ms
+ Execution Time: 9.776 ms
+(32 rows)
+
+ROLLBACK

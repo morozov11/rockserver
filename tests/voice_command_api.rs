@@ -72,6 +72,43 @@ async fn anonymous_voice_command_uses_the_canonical_path() {
 }
 
 #[tokio::test]
+async fn anonymous_voice_command_rejects_after_four_immediate_requests() {
+    let app = rockserver::http::router();
+    for _ in 0..4 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post(CANONICAL_PATH)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"transcript":"jazz"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    let response = app
+        .oneshot(
+            Request::post(CANONICAL_PATH)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"transcript":"jazz"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    let retry_after: u64 = response.headers()[header::RETRY_AFTER]
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!((1..=5).contains(&retry_after));
+    let body = response_body(response).await;
+    assert_contract_error(&body, "rate_limited", "Request rate limit exceeded.");
+    assert_eq!(body["details"]["limit_scope"], "direct_peer");
+}
+
+#[tokio::test]
 async fn voice_command_validation_uses_transcript_field_and_standard_error_shape() {
     let response = rockserver::http::router()
         .oneshot(

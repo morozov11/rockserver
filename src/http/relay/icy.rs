@@ -3,23 +3,38 @@
 use axum::body::Bytes;
 use reqwest::Response;
 use std::time::Duration;
+use tokio::{io::AsyncReadExt, net::TcpStream};
 
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_ICY_BLOCK: usize = 4080;
 
 /// Small cursor that preserves chunk boundaries without buffering the whole stream.
 pub(super) struct Reader {
-    response: Response,
+    source: Source,
     chunk: Bytes,
     offset: usize,
+}
+
+enum Source {
+    Http(Response),
+    Icy(TcpStream),
 }
 
 impl Reader {
     /// Starts reading a response body with one retained transport chunk.
     pub(super) fn new(response: Response) -> Self {
         Self {
-            response,
+            source: Source::Http(response),
             chunk: Bytes::new(),
+            offset: 0,
+        }
+    }
+
+    /// Continues an ICY connection after its bounded response headers.
+    pub(super) fn from_icy(socket: TcpStream, first_body: Vec<u8>) -> Self {
+        Self {
+            source: Source::Icy(socket),
+            chunk: Bytes::from(first_body),
             offset: 0,
         }
     }
@@ -27,11 +42,22 @@ impl Reader {
     /// Returns at most `limit` bytes, preserving any remainder for the next call.
     pub(super) async fn take(&mut self, limit: usize) -> Result<Option<Bytes>, ()> {
         while self.offset == self.chunk.len() {
-            self.chunk = tokio::time::timeout(READ_TIMEOUT, self.response.chunk())
-                .await
-                .map_err(|_| ())?
-                .map_err(|_| ())?
-                .unwrap_or_default();
+            self.chunk = match &mut self.source {
+                Source::Http(response) => tokio::time::timeout(READ_TIMEOUT, response.chunk())
+                    .await
+                    .map_err(|_| ())?
+                    .map_err(|_| ())?
+                    .unwrap_or_default(),
+                Source::Icy(socket) => {
+                    let mut buffer = vec![0; 16 * 1024];
+                    let count = tokio::time::timeout(READ_TIMEOUT, socket.read(&mut buffer))
+                        .await
+                        .map_err(|_| ())?
+                        .map_err(|_| ())?;
+                    buffer.truncate(count);
+                    Bytes::from(buffer)
+                }
+            };
             self.offset = 0;
             if self.chunk.is_empty() {
                 return Ok(None);

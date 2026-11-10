@@ -222,7 +222,8 @@ paths:
         Requires an active account browser cookie through the trusted first-party proxy or an
         active native device Bearer session. Admin, legacy Bearer and device_secret are invalid.
         The station URL is selected from the server catalog; query parameters are rejected.
-        Upstream audio is passed through without transcoding. The server requests ICY upstream.
+        Upstream audio is passed through without transcoding. The server requests ICY upstream
+        and accepts a bounded legacy `ICY 200 OK` response from a validated plain-HTTP source.
         Clients sending Icy-MetaData: 1 receive interleaved ICY blocks and icy-metaint when
         upstream supplies a valid interval; other clients receive audio only. On upstream EOF,
         timeout, or error the current response ends. Clients should reconnect with bounded
@@ -1160,9 +1161,12 @@ paths:
       summary: Find and rank internet radio stations
       description: >-
         Accepts a natural-language request and returns ranked station streams anonymously.
-        Language, country, and exclusions are hard filters. Ranking is deterministic,
+        An explicitly requested station language, country, and exclusions are hard filters.
+        Locale alone does not constrain station language. Ranking is deterministic,
         with station ID ascending as the final tie-break, and optional semantic-provider
         failures degrade to metadata search.
+        Public search has a ten-second deadline; voice search keeps its separate
+        five-second deadline.
         A syntactically malformed JSON body produces 400. A well-formed JSON body
         that violates this operation's schema or semantic validation rules produces 422.
       requestBody:
@@ -1226,7 +1230,7 @@ paths:
                       locale: en-US
                       terms: [upbeat, classic rock, road trip]
                       tags: [classic rock, rock]
-                      language: en
+                      language: null
                       country_code: null
                     stations:
                       - id: station-rock-001
@@ -1289,6 +1293,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Public station search exceeded its ten-second deadline.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: search_timeout
+                message: Station search timed out.
+                request_id: req_01JAZ504
+                details:
+                  timeout_ms: 10000
   /api/v1/voice/command:
     post:
       operationId: resolveVoiceCommand
@@ -1302,6 +1318,8 @@ paths:
         ASCII letters, digits, `_`, or `-`; otherwise RockServer generates a request ID. The same
         ID is returned in the response JSON and `X-Request-Id` response header. The server limits
         the JSON body to 65,536 bytes and the interpretation/search portion to five seconds.
+        Anonymous requests share a process-wide token bucket with capacity 4 and refill rate
+        12 tokens per minute (one every 5 seconds). Each request consumes one token.
       parameters:
         - name: X-Request-Id
           in: header
@@ -1345,7 +1363,7 @@ paths:
                   locale: en-US
                   terms: [play, calm, instrumental, jazz]
                   tags: [calm, instrumental, jazz]
-                  language: en
+                  language: null
                   country_code: null
                 selected_station:
                   id: station-jazz-001
@@ -1403,6 +1421,15 @@ paths:
                 request_id: req_01JAZ422
                 details:
                   transcript: must not be empty or whitespace only
+        "429":
+          description: The anonymous voice bucket is empty; Retry-After is the rounded-up seconds until the next token.
+          headers:
+            Retry-After:
+              schema: { type: integer, minimum: 1, maximum: 5 }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: An unexpected catalog/search failure occurred.
           content:
@@ -1441,10 +1468,18 @@ paths:
         `x-voice-stream-limits`. A device voice endpoint authenticates with its RockserverBearer
         device session, announces its required `voice.main` surface in the start frame, and
         RockServer derives `source_device_id` server-side and echoes it in `ready`. Its recognized
-        radio intent is submitted through the normal device command router to that explicit
-        source device. The client may send one `VoiceStreamCancel` text frame before commit to
+        control intents (stop, resume, relative and absolute volume, station navigation,
+        favourites) are submitted through the normal device command router to that explicit
+        source device and terminate in a `VoiceDeviceCommandResult` carrying a typed intent echo;
+        a recognized station request instead terminates in the ranked station list
+        (`VoiceStreamResult` with `intent=play_radio`) so the device itself plays the first
+        entry. For device station requests, the classified genre, mood, language and country
+        filters feed ranking directly; legacy clients keep transcript-based search. The client
+        may send one `VoiceStreamCancel` text frame before commit to
         cancel a session deterministically. Anonymous and legacy sessions retain the established
-        station-search result shape.
+        station-search result shape without the intent marker. Anonymous upgrade requests share
+        a process-wide token bucket with capacity 2 and refill rate 6 tokens per minute (one
+        every 10 seconds). Each upgrade request consumes one token.
       parameters:
         - name: X-Request-Id
           in: header
@@ -1467,6 +1502,15 @@ paths:
                 type: string
         "400":
           description: The HTTP request is not a valid WebSocket upgrade request.
+        "429":
+          description: The anonymous voice bucket is empty; Retry-After is the rounded-up seconds until the next token.
+          headers:
+            Retry-After:
+              schema: { type: integer, minimum: 1, maximum: 10 }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
       x-voice-stream-limits:
         audio_format: pcm_s16le
         channels: 1
@@ -3252,13 +3296,20 @@ components:
     VoiceStreamResult:
       type: object
       additionalProperties: false
-      description: Established anonymous and legacy station-search result.
+      description: >-
+        Established station-search result. Anonymous and legacy sessions never carry the
+        intent marker; a device voice session sets intent=play_radio and the device itself
+        plays the first entry of the returned ranked list. Its normalized_query uses the
+        classified device filters, while legacy sessions interpret the transcript as before.
       required: [type, request_id, transcript, normalized_query, selected_station, stations]
       properties:
         type:
           const: result
         request_id:
           type: string
+        intent:
+          type: string
+          enum: [play_radio]
         transcript:
           type: string
         normalized_query:
@@ -3274,8 +3325,10 @@ components:
     VoiceDeviceCommandResult:
       type: object
       additionalProperties: false
-      description: Terminal lifecycle status for a device-session voice command.
-      required: [type, request_id, status]
+      description: >-
+        Terminal lifecycle status for a device-session voice command with a typed echo of
+        the intent that was executed, including on failure so clients can name what failed.
+      required: [type, request_id, status, intent]
       properties:
         type:
           const: result
@@ -3284,6 +3337,9 @@ components:
         status:
           type: string
           enum: [succeeded, failed]
+        intent:
+          type: string
+          enum: [stop, resume, next_station, previous_station, volume_change, set_volume, add_favorite]
     VoiceStreamErrorCode:
       type: string
       enum:
@@ -3305,6 +3361,7 @@ components:
         - search_unavailable
         - target_offline
         - capability_not_supported
+        - favourite_limit_exceeded
         - forbidden
         - invalid_payload
         - command_timeout
@@ -3347,7 +3404,7 @@ components:
             type: string
         language:
           type: [string, "null"]
-          description: ISO 639 language code when inferred.
+          description: ISO 639 station-language hard filter only when explicitly requested in the query; otherwise null, regardless of STT locale or provider inference.
         country_code:
           type: [string, "null"]
           pattern: "^[A-Z]{2}$"
@@ -3406,7 +3463,7 @@ components:
         score:
           type: number
           minimum: 0
-          maximum: 1
+          description: Hybrid scores with a compatible embedding are in [0, 1]; metadata-only scores retain their original scale and can exceed 1.
         reason:
           type: string
           minLength: 1

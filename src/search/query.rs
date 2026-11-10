@@ -4,7 +4,11 @@ use std::{collections::BTreeSet, error::Error, fmt};
 
 use async_trait::async_trait;
 
-use super::{SearchQuery, taxonomy::canonical_tags};
+use super::{
+    SearchQuery,
+    language::explicit_language_code,
+    taxonomy::{GenreTaxonomy, canonical_tags},
+};
 
 /// Request-only input supplied to a query parser.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -73,6 +77,15 @@ impl Error for QueryParserError {}
 pub trait QueryParser: Send + Sync {
     /// Parses one validated request into provider-neutral intent.
     async fn parse(&self, input: &QueryParserInput) -> Result<QueryIntent, QueryParserError>;
+
+    /// Parses against the controlled vocabulary selected for this request.
+    async fn parse_with_taxonomy(
+        &self,
+        input: &QueryParserInput,
+        _taxonomy: &GenreTaxonomy,
+    ) -> Result<QueryIntent, QueryParserError> {
+        self.parse(input).await
+    }
 }
 
 /// Existing deterministic metadata interpreter used by default and as the failure fallback.
@@ -134,7 +147,15 @@ pub(super) fn station_name_hint_queries(original: &str) -> Vec<String> {
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn validate_intent(intent: QueryIntent) -> Result<QueryIntent, QueryParserError> {
+    validate_intent_with_taxonomy(intent, &GenreTaxonomy::builtin())
+}
+
+pub(super) fn validate_intent_with_taxonomy(
+    intent: QueryIntent,
+    taxonomy: &GenreTaxonomy,
+) -> Result<QueryIntent, QueryParserError> {
     // LLM can return multi-word `terms` like "викер радио" or include symbols.
     // We must normalize them into atomic matchable tokens using `tokenize()`.
     let mut terms = normalize_values(intent.terms);
@@ -151,7 +172,7 @@ pub(super) fn validate_intent(intent: QueryIntent) -> Result<QueryIntent, QueryP
 
     expand_transliterations(&mut terms);
 
-    let tags = canonical_tags(intent.tags);
+    let tags = taxonomy.filter_canonical(intent.tags);
     let language = intent
         .language
         .map(|value| value.trim().to_ascii_lowercase())
@@ -190,7 +211,7 @@ pub(super) fn validate_intent(intent: QueryIntent) -> Result<QueryIntent, QueryP
 pub(super) fn deterministic_intent(original: &str, _locale: &str) -> QueryIntent {
     let mut terms = tokenize(original);
     let country_code = infer_country_code(&terms);
-    let language = infer_language(&terms);
+    let language = explicit_language_code(&terms).map(str::to_owned);
     remove_stop_words(&mut terms);
     let raw_query = terms.join(" ");
     let core_term_count = terms.len();
@@ -590,19 +611,6 @@ pub(super) fn transliterate_lat_to_ru(term: &str) -> String {
     }
 
     out
-}
-
-fn infer_language(terms: &[String]) -> Option<String> {
-    let term_set = terms.iter().map(String::as_str).collect::<BTreeSet<_>>();
-    if term_set.contains("русскоязычный") || term_set.contains("русскоязычная")
-    {
-        Some("ru".to_owned())
-    } else if term_set.contains("англоязычный") || term_set.contains("англоязычная")
-    {
-        Some("en".to_owned())
-    } else {
-        None
-    }
 }
 
 pub(super) fn infer_country_code(terms: &[String]) -> Option<String> {

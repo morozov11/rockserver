@@ -7,8 +7,8 @@ use rockserver::{
     persistence::{DATABASE_URL_ENV, PostgresEmbeddingStore},
     providers::embedding_provider_from_env,
     search::{
-        Embedding, EmbeddingBackfill, EmbeddingProvider, EmbeddingProviderError,
-        EmbeddingStoreError,
+        Embedding, EmbeddingBackfill, EmbeddingProvenance, EmbeddingProvider,
+        EmbeddingProviderError, EmbeddingStoreError,
     },
     telemetry,
 };
@@ -43,6 +43,10 @@ struct SharedEmbeddingProvider(Arc<dyn EmbeddingProvider>);
 
 #[async_trait]
 impl EmbeddingProvider for SharedEmbeddingProvider {
+    fn provenance(&self) -> Option<EmbeddingProvenance> {
+        self.0.provenance()
+    }
+
     async fn embed(&self, text: &str) -> Result<Embedding, EmbeddingProviderError> {
         self.0.embed(text).await
     }

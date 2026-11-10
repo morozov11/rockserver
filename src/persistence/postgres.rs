@@ -13,13 +13,11 @@ use super::embedding_postgres::vector_literal;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
-// Hard filters and exclusions are applied in `candidates`, before scoring and the final limit.
+// Hard filters, exclusions, and playable-stream health are applied before the bounded prefilter.
 // Metadata fallback remains exact; compatible embeddings add an exact cosine-derived score.
-/// Two-phase search: independent index-backed tag, FTS, and trigram branches
-/// first produce the candidate IDs. Full scoring (token match, substring,
-/// cosine) then runs only on the same bounded candidate set. If no branch
-/// produces candidates, the query returns quickly instead of running
-/// semantic-only fallback across the whole embedding corpus.
+/// Bounded tag, FTS, trigram, and compatible E5 ANN branches produce candidate
+/// IDs independently. Full scoring runs on their union; metadata-only searches
+/// skip the ANN branch.
 const SEARCH_SQL: &str = r#"
 WITH query_terms AS (
     SELECT
@@ -80,6 +78,10 @@ candidate_match_ids AS (
 prefiltered AS MATERIALIZED (
     SELECT
         s.id,
+        primary_stream.stream_url,
+        primary_stream.codec,
+        primary_stream.bitrate_kbps,
+        primary_stream.health,
         (
             (
                 SELECT COUNT(DISTINCT qt.tag)
@@ -92,30 +94,71 @@ prefiltered AS MATERIALIZED (
                 WHEN input.fts_query IS NULL OR NOT s.searchable_tsv @@ input.fts_query THEN 0.0
                 ELSE ts_rank_cd(s.searchable_tsv, input.fts_query)
             END
+            + COALESCE((
+                SELECT MAX(similarity(lower(s.name), qt.term))
+                FROM query_terms qt
+                WHERE length(qt.term) >= 3
+            ), 0.0) * 0.3
         ) AS prefilter_score
     FROM stations AS s
     JOIN candidate_match_ids AS match_ids ON match_ids.id = s.id
     CROSS JOIN search_input AS input
+    JOIN LATERAL (
+        SELECT stream_url, codec, bitrate_kbps, health
+        FROM station_streams
+        WHERE station_id = s.id AND retired_at IS NULL
+        ORDER BY is_primary DESC, id ASC
+        LIMIT 1
+    ) AS primary_stream ON primary_stream.health <> 'degraded'
     WHERE s.retired_at IS NULL
     ORDER BY prefilter_score DESC, s.id ASC
     LIMIT GREATEST(($6 + $17) * 20, 200)
 ),
+ann_candidate_ids AS MATERIALIZED (
+    SELECT
+        station_embedding.station_id AS id,
+        primary_stream.stream_url,
+        primary_stream.codec,
+        primary_stream.bitrate_kbps,
+        primary_stream.health
+    FROM station_embeddings AS station_embedding
+    JOIN stations AS s ON s.id = station_embedding.station_id
+    JOIN LATERAL (
+        SELECT stream_url, codec, bitrate_kbps, health
+        FROM station_streams
+        WHERE station_id = s.id AND retired_at IS NULL
+        ORDER BY is_primary DESC, id ASC
+        LIMIT 1
+    ) AS primary_stream ON primary_stream.health <> 'degraded'
+    WHERE $18::text IS NOT NULL
+      AND station_embedding.model = 'intfloat/multilingual-e5-small'
+      AND station_embedding.version = $9
+      AND station_embedding.dimension = 384
+      AND s.retired_at IS NULL
+      AND ($3::text IS NULL OR s.language = $3)
+      AND ($4::text IS NULL OR s.country_code = $4)
+      AND NOT (s.id = ANY($5::text[]))
+    ORDER BY station_embedding.embedding::vector(384) <=> ($18::text)::vector(384)
+    LIMIT GREATEST(($6 + $17) * 20, 200)
+),
 candidate_ids AS (
-    SELECT id FROM prefiltered
+    SELECT id, stream_url, codec, bitrate_kbps, health FROM prefiltered
+    UNION
+    SELECT id, stream_url, codec, bitrate_kbps, health FROM ann_candidate_ids
 ),
 candidates AS MATERIALIZED (
     SELECT
         s.id,
         s.name,
-        primary_stream.stream_url,
+        ci.stream_url,
         s.homepage_url,
         COALESCE(icon.status = 'ready', false) AS favicon_ready,
         s.tags,
         s.language,
         s.country_code,
-        primary_stream.codec,
-        primary_stream.bitrate_kbps,
-        primary_stream.health,
+        ci.codec,
+        ci.bitrate_kbps,
+        ci.health,
         station_embedding.embedding,
         (
             SELECT COUNT(DISTINCT qt.term)
@@ -168,13 +211,6 @@ candidates AS MATERIALIZED (
             WHERE token <> ''
         ) AS tokens
     ) AS name_tokens
-    JOIN LATERAL (
-        SELECT stream_url, codec, bitrate_kbps, health
-        FROM station_streams
-        WHERE station_id = s.id AND retired_at IS NULL
-        ORDER BY is_primary DESC, id ASC
-        LIMIT 1
-    ) AS primary_stream ON true
     LEFT JOIN station_icons AS icon ON icon.station_id = s.id
     LEFT JOIN station_embeddings AS station_embedding
       ON station_embedding.station_id = s.id
@@ -182,7 +218,6 @@ candidates AS MATERIALIZED (
      AND station_embedding.version = $9
      AND station_embedding.dimension = $10
      AND $7::text IS NOT NULL
-    WHERE primary_stream.health <> 'degraded'
 ), scored AS MATERIALIZED (
     SELECT
         *,
@@ -225,7 +260,8 @@ SELECT
     semantic_score,
     CASE
         WHEN semantic_score IS NULL THEN metadata_score
-        ELSE $11::float8 * metadata_score + $12::float8 * semantic_score
+        ELSE $11::float8 * LEAST(1.0, GREATEST(0.0, metadata_score))
+             + $12::float8 * semantic_score
     END AS score,
     COUNT(*) OVER() AS total_matches
 FROM scored
@@ -289,7 +325,7 @@ impl StationRepository for PostgresStationRepository {
         let parameters = PostgresSearchParameters::from_domain(query, constraints, embedding)
             .map_err(|error| RepositoryError::new("parameter conversion", error))?;
         let started_at = Instant::now();
-        let rows = sqlx::query_as::<_, StationRow>(SEARCH_SQL)
+        let search = sqlx::query_as::<_, StationRow>(SEARCH_SQL)
             .bind(&parameters.terms)
             .bind(&parameters.tags)
             .bind(&parameters.language)
@@ -307,6 +343,10 @@ impl StationRepository for PostgresStationRepository {
             .bind(parameters.prefer_station_name)
             .bind(&parameters.station_name_hint_queries)
             .bind(parameters.offset)
+            .bind(&parameters.ann_embedding);
+        // shortcut: Default HNSW depth can underfill filtered candidates; revisit after
+        // measuring production latency and recall before raising search depth again.
+        let rows = search
             .fetch_all(&self.pool)
             .await
             .map_err(|error| RepositoryError::new("search", error))?;
@@ -523,6 +563,7 @@ struct PostgresSearchParameters {
     limit: i64,
     offset: i64,
     embedding: Option<String>,
+    ann_embedding: Option<String>,
     embedding_model: Option<String>,
     embedding_version: Option<String>,
     embedding_dimension: Option<i32>,
@@ -546,6 +587,12 @@ impl PostgresSearchParameters {
             .map(|value| i32::try_from(value.provenance().dimension))
             .transpose()
             .map_err(|_| ParameterConversionError::EmbeddingDimension)?;
+        let ann_embedding = embedding
+            .filter(|value| {
+                let provenance = value.provenance();
+                provenance.model == "intfloat/multilingual-e5-small" && provenance.dimension == 384
+            })
+            .map(vector_literal);
         Ok(Self {
             terms: query.terms.clone(),
             tags: query.tags.clone(),
@@ -556,6 +603,7 @@ impl PostgresSearchParameters {
             offset: i64::try_from(constraints.offset)
                 .map_err(|_| ParameterConversionError::Offset)?,
             embedding: embedding.map(vector_literal),
+            ann_embedding,
             embedding_model: embedding.map(|value| value.provenance().model.clone()),
             embedding_version: embedding.map(|value| value.provenance().version.clone()),
             embedding_dimension,
@@ -664,6 +712,9 @@ mod tests {
             assert!(SEARCH_SQL.contains(branch), "missing {branch}");
         }
         assert!(SEARCH_SQL.contains("candidate_match_ids AS"));
+        assert!(SEARCH_SQL.contains("ann_candidate_ids AS MATERIALIZED"));
+        assert!(SEARCH_SQL.contains("station_embedding.embedding::vector(384) <=>"));
+        assert!(SEARCH_SQL.contains("FROM ann_candidate_ids"));
         assert!(SEARCH_SQL.contains("JOIN candidate_match_ids AS match_ids"));
         assert_eq!(SEARCH_SQL.matches("UNION\n    SELECT id FROM").count(), 2);
         assert!(SEARCH_SQL.contains("search_input AS MATERIALIZED"));

@@ -325,8 +325,37 @@ pub fn router_with_device_voice_services(
         Arc<dyn crate::device_control::DeviceControlStore>,
     ),
 ) -> Router {
+    router_with_device_voice_personal_services(
+        search_service,
+        speech_recognizer,
+        voice_command_interpreter,
+        voice_command_timeout,
+        session_resolver,
+        control,
+        None,
+        crate::device_control_state::StateHub::default(),
+    )
+}
+
+/// Device-voice harness extended with the account personal-data store and a
+/// pre-seeded control state hub for favourite and playback-state scenarios.
+#[allow(clippy::too_many_arguments)]
+pub fn router_with_device_voice_personal_services(
+    search_service: SearchService,
+    speech_recognizer: Arc<dyn crate::voice::StreamingSpeechRecognizer>,
+    voice_command_interpreter: Arc<dyn CommandInterpreter>,
+    voice_command_timeout: Duration,
+    session_resolver: Arc<dyn crate::auth::NativeSessionResolver>,
+    control: (
+        crate::device_control_presence::ConnectionRegistry,
+        CommandRouter,
+        Arc<dyn crate::device_control::DeviceControlStore>,
+    ),
+    personal_store: Option<Arc<dyn crate::personal_data::PersonalDataStore>>,
+    control_state_hub: crate::device_control_state::StateHub,
+) -> Router {
     let (control_registry, control_commands, control_store) = control;
-    RouterBuilder::default()
+    let builder = RouterBuilder::default()
         .with_search_service(search_service)
         .with_speech_recognizer(speech_recognizer)
         .with_voice_command_interpreter(voice_command_interpreter)
@@ -335,7 +364,12 @@ pub fn router_with_device_voice_services(
         .with_control_registry(control_registry)
         .with_control_commands(control_commands)
         .with_control_store(control_store)
-        .build()
+        .with_control_state_hub(control_state_hub);
+    let builder = match personal_store {
+        Some(store) => builder.with_personal_store(store),
+        None => builder,
+    };
+    builder.build()
 }
 
 /// Reads only an explicit HTTP loopback origin; arbitrary local-network origins stay rejected.

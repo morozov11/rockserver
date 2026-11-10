@@ -106,14 +106,18 @@ impl SpeechStreamSession for YandexSpeechKitSession {
         let payload = response.json::<RecognitionResponse>().await.map_err(|_| {
             SpeechProviderError::safe("SpeechKit returned invalid recognition JSON")
         })?;
-        let transcript = payload
-            .result
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| SpeechProviderError::safe("SpeechKit returned an empty transcript"))?;
-        Ok(vec![TranscriptUpdate {
-            transcript,
-            is_final: true,
-        }])
+        // A 200 response without a result is a successful recognition of no
+        // speech (silence, noise, or audio under the recognition threshold),
+        // not a provider failure: emit no final update so the stream ends as
+        // speech_not_recognized instead of a provider error.
+        let transcript = payload.result.filter(|value| !value.trim().is_empty());
+        Ok(match transcript {
+            Some(text) => vec![TranscriptUpdate {
+                transcript: text,
+                is_final: true,
+            }],
+            None => Vec::new(),
+        })
     }
 }
 

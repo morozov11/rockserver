@@ -35,13 +35,13 @@ The project journal records the search-latency and multi-metric Yandex Home rele
 - LLM providers translate a request into bounded structured intent; they do not scan the station catalog.
 - RockCast retains its local station catalog for offline search fallback. Client and firmware changes belong in the [RockCast](https://github.com/morozov11/rockcast), [RockMobile](https://github.com/morozov11/rockmobile), and [rock-esp32](https://github.com/morozov11/rock-esp32) repositories.
 
-A cosine HNSW index exists for the E5 embedding provenance, but current SQL still builds candidates from tags, full-text search, and station-name similarity before applying vector scores. Semantic-only candidate retrieval and related search-prefilter fixes are open work in the [voice-search roadmap](docs/roadmap/voice-search-improvements.md).
+PostgreSQL now combines lexical and E5 HNSW candidates. Playable-stream filtering, trigram prefilter ordering, and explicit station-language filtering are implemented. The service relevance threshold still hides candidates supported only by vector similarity; calibration and embedding lifecycle work remain in the [voice-search roadmap](docs/roadmap/voice-search-improvements.md).
 
 See [architecture notes](docs/architecture.md), the [source map](src/ARCHITECTURE.md), the [device-control roadmap](docs/roadmap/device-control-tasks.md), and the offline [service diagrams](docs/service-diagrams.html).
 
 ## Current priorities
 
-1. Finish the P0 search retrieval fixes: true HNSW candidate retrieval, healthy-stream and trigram-aware prefilter ordering, and an explicit-language gate for semantic language filters.
+1. Review the labelled language/catalog mismatch, then calibrate visibility of pure-vector matches with a larger reviewed set. The completed E5 format experiment did not justify changing runtime preprocessing.
 2. Complete the remaining physical acceptance matrix for authoritative RockMobile/RockCast playback state, including volume, stale/offline recovery, and voice microphone input. The UI already reads revisioned device state rather than inferring playback from command acceptance.
 3. Improve voice-path cancellation and error states, then measure search quality before further ranking changes.
 4. Continue ESP32 display/sensor and Home Assistant work when their dependencies and hardware are ready. ESP32 sensor-display end-to-end acceptance is paused pending physical sensors.
@@ -86,7 +86,7 @@ The API contract describes voice, browser, administrator, account, and device-co
 - import_shared_catalog activates the vendored RockCatalog baseline.
 - import_radio_browser performs a bounded, explicit Radio Browser import.
 - probe_streams checks catalog stream health.
-- backfill_embeddings updates embeddings for the configured provider; ONNX E5 requires the onnx-local feature and local model assets.
+- backfill_embeddings updates only missing or stale embeddings for the configured provider; run it explicitly after catalog imports when vectors are needed. ONNX E5 requires the onnx-local feature and local model assets.
 - export_mobile_catalog builds the documented RockMobile SQLite catalog artifact from PostgreSQL.
 - account_cleanup is a preview-first staging operator tool. Follow [administrator operations](docs/admin-operations-runbook.md); never use cleanup against production.
 

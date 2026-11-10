@@ -138,6 +138,12 @@ image reference с digest (`...@sha256:<64 hex>`), рендерит production C
 для несовместимой схемы сначала требуется восстановление backup по recovery procedure. Скрипт не
 принимает production env-file из репозитория и не печатает его значения. Пример безопасного dry-run:
 
+После применения миграций `0027`/`0028` предрелизный image `930d31dd` не стартует:
+старый SQLx migrator возвращает `VersionMissing(27)`, хотя сами SQL-изменения добавочные.
+Без backup нельзя восстановить старую schema; для операционного отката нужен новый
+совместимый image, содержащий эти миграции. Владелец явно отказался от backup для выпуска
+2026-11-10, поэтому прежнюю image-пару нельзя считать готовым rollback target.
+
 ```text
 powershell -ExecutionPolicy Bypass -File deploy/release.ps1 `
   -Mode preflight `
@@ -217,9 +223,10 @@ release metadata. Deploy-time `pg_dump` is disabled by operator decision
 backups remain a separate owner-managed duty. The VPS runs embedded migrations
 and then imports the bundled checksum-pinned complete SQLite catalog after
 PostgreSQL is healthy, before the service starts. The current pinned release contains 16,825 active playable stations and deployment refuses
-a release below the 16,000-station gate. The same one-shot seed job then runs the checksum-pinned
-ONNX E5 backfill for every imported station; the service starts only after both catalog and vector
-steps succeed. Repeating the importer and backfill is idempotent by stable station and stream
+a release below the 16,000-station gate. Deployment then runs the checksum-pinned
+ONNX E5 backfill as a separate job after catalog import; the service starts only after both catalog and vector
+steps succeed. The backfill infers only missing or stale model/version/text-hash rows, so repeating it
+with an unchanged catalog makes no ONNX inference. Repeating the importer and backfill is idempotent by stable station and stream
 identities and cannot substitute the 41-station development fixture. The only release
 output/record fields are commit, image ID, artifact checksum, catalog version/count and readiness;
 the release record keeps a `backup_sha256` continuity field with the value `-` while deploy-time
@@ -233,6 +240,33 @@ checks every archive/download before atomically placing the files, then starts R
 semantic search enabled. Subsequent deployments use the verified cache. No ONNX URL, hash, or
 local asset path is entered by the owner. Updating the model/runtime is a normal reviewed Git
 change to this lock file, never an unpinned automatic update.
+
+### Offline E5 version change
+
+An E5 preprocessing/version change is a maintenance-window release. Stop `caddy` and `rockserver`
+before running the new image's `embedding_backfill` job. Keep the old image/assets and its
+`station_embeddings` rows: backfill writes the new `(model, version)` beside them and does
+not delete the old version. Do not import a changed catalog during this window. The new image
+must declare its actual provider provenance and include reviewed model/tokenizer assets;
+changing a database flag alone does not switch query embeddings.
+
+Evaluate the candidate against the same pinned, labelled query set as the baseline. Review
+Recall@5/10, MRR, empty responses, ranked IDs, and representative regressions before approving.
+For a version other than `onnx-v1`, place a JSON review file inside the already mounted ONNX
+asset directory and set `ROCKSERVER_E5_QUALITY_REVIEW_PATH` to its in-container path via a
+Compose environment override. The file must contain `model`, `version`, `dimension`,
+`dataset_sha256`, `baseline` and `candidate` objects (`query_count`, `recall_at_5`,
+`recall_at_10`, `mrr`, `empty_responses`), `approved: true`, nonempty `reviewer`, and nonempty
+`rationale`. The operator decides whether the measured trade-off is acceptable; no automatic
+quality threshold is substituted for that review.
+
+Start the new service only after backfill and review. Startup fails before binding its listener
+if the actual E5 provider lacks a current vector for any active station, if the E5/384 ANN
+index is invalid, or if the new-version review is missing or mismatched. The index check matches
+the version-neutral ANN expression and predicate; migration `0028` keeps the former `onnx-v1`
+index as well. If startup or observed quality fails, stop the new service and restart the retained
+old image/assets. Its old vectors remain available and startup checks them again. A future
+version using a different model name or dimension needs a reviewed SQL/index change first.
 
 Local validation, with no VPS or credential/network use:
 

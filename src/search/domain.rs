@@ -9,8 +9,9 @@ use super::{
     query::{QueryIntent, SearchAction, station_name_hint_queries},
 };
 
-/// Results below this score can be produced by semantic similarity alone and
-/// are not reliable enough to claim that a station matches the requested genre.
+/// Minimum SQL score for service results; compatible embeddings use bounded
+/// metadata and semantic contributions while metadata-only scores keep their
+/// original scale. Pure semantic results cannot pass without calibrated evidence.
 pub const MIN_RELEVANCE_SCORE: f64 = 0.35;
 
 /// A normalized station-search query understood by the deterministic search service.
@@ -25,7 +26,7 @@ pub struct SearchQuery {
     pub terms: Vec<String>,
     /// Recognized catalog tags extracted from the request.
     pub tags: Vec<String>,
-    /// Language constraint inferred from the locale, when available.
+    /// Station-language hard filter only when the request explicitly names one language.
     pub language: Option<String>,
     /// Country constraint inferred from request terms, when available.
     pub country_code: Option<String>,

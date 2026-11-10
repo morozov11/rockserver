@@ -1,5 +1,244 @@
 # Task log
 
+## Production search hotfix deployment — 2026-11-10
+
+- Goal/scope: restore stable public station search with E5 enabled after release timeouts. Committed reviewed source/API/docs hotfix as `abdc02b934ceae42f02a8e71095eb3a9a812975a`; removed forced HNSW scan depth/strict ordering and raised only public text-search timeout to ten seconds. Voice retains five seconds; vectors/schema were not changed by this hotfix.
+- Checks/deployment: `cargo fmt --check`, strict all-target/all-feature Clippy, full `cargo test --quiet`, and `git diff --check` passed sequentially. OPS-001-D built matching RockServer/Caddy images and launched a detached remote worker. The local watcher lost SSH during banner exchange, but a read-only reconnect found the same worker running; it later reported `status=succeeded`. Both matching containers are healthy. A short HTTPS connection refusal occurred during Caddy switch, then public readiness and catalog recovered. No resubmission was made.
+- Live verification: public readiness 200/0.149 s and three-station catalog browse 200/0.722 s; ten text searches 10/10 HTTP 200 with nonempty bodies in 1.96–6.21 s. The active mode is `onnx-e5-local`, LLM timeout 500 ms, and shared Yandex key present. Active stations and current source-hash-attested E5 embeddings are 16,825 each. A unique search marker was absent from stdout and daily application logs; 11 completed observations had `vector_branch=true`. One timeout event appeared outside those successful probes in a five-minute window, none in a later two-minute window. Anonymous voice-command admission returned four 422 responses then 429 for a rapid invalid-body burst, without invoking STT. Required fmt, strict Clippy, and full tests passed again sequentially after updating deployment documentation.
+- Status/limits: **deployed and public station lists recovered in the observed probes**; longer p95/quality observation remains open. Backup was explicitly waived by the owner. Pre-release `930d31dd` rollback fails SQLx migration validation; only the current compatible image can be restarted without a database restore. Git push was rejected by automatic approval review over unverified remote ownership, so the deployed commit is not pushed.
+
+## Production search outage and temporary recovery — 2026-11-10
+
+- Goal: restore station-list availability after the owner-authorized release `f74ce1110fe5d2f917e1e51b8268f92c5a6dc867` caused public search timeouts.
+- Result: the release worker succeeded, new images were healthy, all 16,825 vectors had source hashes, and migrations reached `0028`. Public catalog browse was 200/0.213 s, while text search returned 504/5.68 s. A direct rollback to pre-release `930d31dd` could not start because old SQLx rejected migration `0027` (`VersionMissing(27)`); the new images were restored. A runtime metadata fallback with Yandex credentials present and LLM timeout 500 ms returned five of five public searches with HTTP 200 in 1.90–4.07 s. Semantic E5 ranking is temporarily unavailable; stored vectors are untouched.
+- Scope/checks: read-only release/database/health inspection, public HTTP probes with status/latency only, aggregate timing/log-event checks without request text, and controlled Compose image/config recovery. No schema downgrade or backup was made; the owner had explicitly waived backup. The hotfix was subsequently checked and deployed as recorded above.
+- Index evidence: bounded read-only live-catalog EXPLAIN probes used the E5 HNSW index for 20 neighbours (28.872 ms) and the FTS GIN index for a rare term (18.538 ms); common `rock` used a Seq Scan (69.970 ms). These are simplified queries, not the full search route plan.
+- Status at the time: **public station lists restored in metadata fallback.** The hotfix above later restored E5. The old image cannot be used for rollback against migrations `0027`/`0028`.
+
+## Direct production release preparation — 2026-11-10
+
+- Goal: prepare the owner-authorized update of the current `rockplatform.win` server after the owner withdrew the isolated-canary requirement and explicitly waived a backup for this release.
+- Scope/result so far: read-only SSH access succeeded through the permitted network path. Current RockServer/Caddy release is `930d31dd05bd69c4e652db29bdabf393c2a72a27` with readiness passed and catalog count 16,825. Applied migrations end at `0026`; the database is about 137 MiB with 16,825 stations and vectors. The on-server backup directory is empty. Pending `0027`/`0028` are additive and retain the old E5 index; the prior running image pair is retained as the application rollback target. Rollback cannot restore changed database rows or schema without a backup.
+- Resource gate: 2 GiB RAM with about 928 MiB available and 2.48 GiB free swap; about 7.8 GiB free disk. Existing HNSW index is about 31.5 MiB. The first source-hash backfill likely recomputes 16,825 vectors; it is resumable by keyset/per-row persistence, but actual VPS duration and peak memory remain unmeasured. Observe the detached worker and resources during deployment.
+- Checks/status: production inspection was read-only; no server mutation yet. Next are explicit-file release review/commit, serial checks, exact-HEAD artifact, OPS-001-D rollout, health/search/privacy/limit checks, and observed rollback readiness. Backup creation and restore rehearsal are excluded by the owner's explicit decision.
+
+## Release/canary read-only preflight — 2026-11-10
+
+- Goal: prepare a reviewable release path and assess whether the approved search stages can be deployed to an isolated canary.
+- Scope: inspected the main checkout diff, release/staging scripts and Compose topology, configured inventory presence, migration `0027`/`0028`, backup/rollback rules, and local disposable smoke path. Built uniquely tagged local Rust and Caddy/web images; ran isolated disposable Compose smoke and diagnosis projects. No commit, push, remote migration, or remote deployment.
+- Result: remote canary is blocked. OPS-001-D uses the existing singleton `rockserver` Compose project, not a separate canary; its deploy-time dump is disabled. Read-only SSH to the configured host was denied before authentication, so previous image/release record and current backup could not be confirmed. The checkout is dirty, and the launcher requires an exact clean-HEAD build. The first local project exposed an empty `ROCKSERVER_SEMANTIC_PROVIDER` startup failure. The local override now defaults to `deterministic-dev`; a fresh project with no provider override had healthy PostgreSQL, RockServer and Caddy, plus HTTP 200 readiness on loopback port 18088. OPS-001-D generates a nonempty ONNX provider setting for production from the pinned manifest; no private env value was printed. The station-icon store logged an unavailable path in the first run but was not a readiness blocker. Local smoke did not exercise ONNX/full-catalog seed or establish remote release safety and live search quality.
+- Checks: read-only Git inventory, script/Compose/SQL inspection, inventory/key presence, attempted read-only SSH connection, sequential Rust release and Caddy/web builds, local health/readiness before and after the local Compose fix, and project-scoped cleanup of all disposable projects. Final `cargo fmt --check`, strict all-target/all-feature Clippy, and full `cargo test --quiet` passed sequentially; 226 library tests and regular integration targets passed, while opt-in PostgreSQL/live-provider/asset cases stayed ignored. SSH failed before authentication; no singleton service/database was touched.
+- Status: **local disposable readiness passed; remote canary blocked** until an isolated target, access, rollback artifact/config, and restorable backup are verified.
+
+## 2026-11-10 — Correct anonymous voice request pacing
+
+- Goal/scope: make the configured 12/minute with burst 4 voice command quota and 6/minute with burst 2 WebSocket upgrade quota effective without changing search, catalog, device, or legacy authenticated voice admission.
+- Result: added separate process-wide voice token buckets, each consuming one token per admitted request and refilling gradually to its burst capacity. Empty buckets return 429 with `Retry-After` rounded up to the next token. OpenAPI now specifies the two quotas and 429 responses. Deterministic clock tests cover burst exhaustion, refill, and retry timing; an HTTP test checks the command response.
+- Checks/status: `cargo fmt --check`, strict all-target/all-feature Clippy, and full `cargo test` passed sequentially with loopback permission for existing socket tests. All 226 library tests and regular integration targets passed; existing PostgreSQL/live-provider/asset opt-in tests remained ignored. No deployment or commit.
+
+## 2026-11-10 — Verify sandbox-dependent tests and preserve classified voice genres
+
+- Goal/scope: resolve the 15 reported library test failures without disabling coverage, then run the complete Rust suite. Kept the existing local socket, HTTP mock, and filesystem tests.
+- Result: a direct socket probe reproduced Windows 10013 only on loopback connect inside the restricted sandbox; `cargo test --lib` outside it passed 224/224. The full suite found one unrelated voice integration assertion: a canonical classified `jazz` tag was dropped in favor of transcript `rock`. The device search mapper now retains canonical tags and Russian aliases, with the existing transcript fallback when neither maps.
+- Checks/status: after the code fix, `cargo fmt --check`, strict all-target/all-feature Clippy, and full `cargo test --quiet` passed sequentially outside the restricted socket sandbox. All 224 library tests and regular integration tests passed. Existing PostgreSQL/live/asset opt-in tests remained ignored; no deployment or SRCH-012 change.
+
+## 2026-11-10 — SRCH-012 search log privacy and operational observations
+
+- Goal/scope: audit text and private voice search logging; expose aggregate latency, failure/fallback, empty-result, and vector-branch observations through existing operator JSON logs. No HTTP contract, client, provider, or ranking change.
+- Result: removed raw query/derived terms and result details from SearchService events, stopped formatting opaque parser/embedding/voice fallback errors, and added bounded-label `search_observation` completion events plus route-level `search_timeout` events. Repeated-command measurement stays open pending a data policy. Same-catalog SRCH-011 and later diagnostic results are recorded in status; no new production comparison or deployment.
+- Checks/status: `cargo fmt --check` and strict all-target/all-feature Clippy passed. Full `cargo test` ran 224 library tests: 209 passed (including JSON log privacy regression), the same 15 sandbox-dependent socket/local HTTP/filesystem tests failed. No new PostgreSQL/model evaluation. Controlled rollout/rollback and limitations are in status; no production deploy. SRCH-008 cache decision remains partial.
+
+## 2026-11-10 — Fix Windows all-feature Clippy dependency link failure
+
+- Goal/scope: resolve `onig_sys` `LNK1114` while preserving the optional local E5 tokenizer and avoiding unrelated search changes.
+- Result: configured `tokenizers 0.22` with `default-features = false` and `fancy-regex`. The native `onig_sys` dependency is no longer in the all-feature graph; the pinned E5 Unigram/Metaspace tokenizer loaded and encoded German and Russian inputs through the replacement backend. No runtime search or HTTP contract changed.
+- Checks/status: `cargo fmt --check` and strict Windows all-target/all-feature Clippy passed. Focused real-asset tokenization smoke test passed and its temporary source was removed. Default `cargo test` ran 223 library tests: 208 passed, the same 15 sandbox-dependent failures as before. Full ONNX inference and token-ID equivalence with Oniguruma remain unverified. No commit; SRCH-012 not started.
+
+## 2026-11-10 — SRCH-008 search LLM breaker and fixed version
+
+- Goal/scope: bound repeated search intent LLM failures while retaining deterministic fallback; allow an optional fixed Yandex model version. Add a single-probe circuit breaker with three transient failures and a 30-second cooldown, classify transport/timeout/HTTP 429/5xx separately from permanent response errors, pass `YANDEX_LLM_MODEL_VERSION` through deployment, and add deterministic clock/fake tests. No HTTP contract or global search limit change.
+- Result: open circuit calls no provider; recovery admits one probe and resumes calls on success. A failed or cancelled probe does not leave the circuit stuck. Response validation does not trip the circuit. The cache decision remains partial: the 50-query diagnostic fixture cannot measure production repeats and no anonymized hit-rate/latency/cost sample or retention policy exists. No raw command cache was added; per-client throttling was not justified by measured load.
+- Checks/status: `cargo fmt --check` passed; strict Windows all-feature Clippy stopped in third-party `onig_sys` (`LNK1114`), while default-feature all-target strict Clippy passed. Final full `cargo test` compiled 223 library tests: 208 passed, 15 pre-existing sandbox-dependent failures. Focused `cargo test search::` and fixed-version config test passed. No PostgreSQL or live provider checks; no commit. Complete breaker/version work, cache evaluation pending aggregate measurements in SRCH-012.
+
+## 2026-11-10 — SRCH-007 live controlled genre vocabulary
+
+- Goal: use one current PostgreSQL genre taxonomy for LLM prompt, structured-output schema, and server validation, with safe deterministic behavior during taxonomy failure.
+- Scope/result: bounded request-time `genre_hierarchy` snapshot in LLM mode; same snapshot reaches prompt/schema, LLM tag rejection, final service filtering, and genre ancestry fallback. A genre added to the database is visible on the next request without binary rebuild. Empty/invalid/unavailable taxonomy uses builtin tags. Deterministic-only mode avoids the added database read. Public HTTP contract and station catalog exposure are unchanged; separate device voice-command genre aliases remain outside this radio-intent path.
+- Checks/status: `cargo fmt --check` passed; strict Windows Clippy stopped in `onig_sys` (`LNK1114`); final full `cargo test` compiled and ran 218 library tests (203 passed, the same 15 sandbox-dependent failures). Focused search tests passed 50/50 before one additional invalid-tag test, which passed in the full run. The targeted PostgreSQL INSERT/read test passed on separate disposable `rockeval_srch007_tests` through the approved Docker path. Read-only inspection `rockeval` remained at 41 active stations/41 embeddings with no SRCH-007 test tag. Production latency for the added LLM-mode taxonomy read remains unmeasured. No commit created; SRCH-008 not started.
+
+## 2026-11-10 — Review German-lyrics golden-set label
+
+- Goal: resolve the `German language rock music` label conflict with `rock-antenne-deutschrock` having unknown broadcast language.
+- Scope/result: the [official ROCK ANTENNE stream page](https://www.rockantenne.de/rockhoeren/streams/deutschrock) supports German-lyric rock songs, not a known spoken broadcast language. Kept the catalog `language: null` and its pinned checksum; changed one semantic probe to `deutschsprachige Rockmusik` and asserted that deterministic parsing sets neither language nor country hard filter. No runtime search, HTTP contract, or catalog change.
+- Checks/status: original and revised 50-query runs passed through real PostgreSQL on disposable `rockeval_language_label_20261110`. Metadata stayed Recall@5/10 `0.647/0.660`, MRR `0.647`, 12 empty; pinned E5 stayed `0.813/0.820`, MRR `0.810`, one empty. The revised station ranked first in raw E5 candidates at `0.290`, then fell below the `0.35` service gate. `cargo fmt --check` and focused fixture tests passed; strict Windows Clippy stopped in third-party `onig_sys` (`LNK1114`), while full `cargo test` passed 201 library tests and failed the same 15 sandbox-dependent tests. Inspection `rockeval` remained at 41 active stations/41 vectors; no commit created.
+
+## 2026-11-10 — SRCH-006 E5 query/document format experiment
+
+- Goal: compare raw/cleaned query embeddings and current/connected station documents on the same pinned E5 model, catalog, and labels without activating an unproven format.
+- Scope: opt-in 2×2 PostgreSQL/SearchService evaluator under `tests/search_eval/format_experiment.rs`, isolated alternate embedding provenance, 50 positive + 5 paraphrase + 20 out-of-domain cases, documentation updates. No runtime API, parser, scoring, model, or import change.
+- Result: 50-query Recall@5/10 stayed `0.813/0.820` in all cells; MRR was `0.810` for the current document and `0.807` for the connected document. On all 55 positives, Recall@5/10 stayed `0.739/0.745`, six empty; MRR `0.736` versus `0.733`. Exact/genre/spoken Recall@5 and 2/20 out-of-domain false answers were unchanged. Candidate ranks shifted without improving visible quality. Closed experiment without format/version/backfill change. The subsequent German-lyrics label review above removed unintended hard filters but found that the `0.35` service gate still hides that pure-semantic match.
+- Checks/status: offline Linux Docker E5 evaluator passed on disposable `rockeval_srch006_tests` with pinned assets; the separate query-cleaning name-preservation test passed. Default `cargo test --test search_eval` passed 2 and ignored the opt-in evaluator. `cargo fmt --check` passed. Windows strict Clippy stopped in third-party `onig_sys` (`LNK1114`). Full Windows `cargo test`: 201 passed, 15 previously observed sandbox-dependent failures. Read-only SQL showed preserved inspection `rockeval` at 41 active stations and 41 E5 vectors. No commit created; SRCH-007 has not started.
+
+## 2026-11-10 — SRCH-010 offline E5 version change preparation
+
+- Goal: permit a maintenance-window rebuild of a future E5 version, fail closed before server start on incomplete coverage/index or unreviewed quality, and retain the old version for rollback. No hot switch or new model installation.
+- Scope: version-neutral E5/384 HNSW migration `0028`, parameterized ANN version, PostgreSQL release readiness check, startup guard against actual provider provenance, operator quality-report validation, deterministic PostgreSQL and unit tests, and offline operator documentation. No public HTTP schema change.
+- Result: backfill retains old model/version rows. Readiness requires every active station's current source hash and the index used by ANN SQL. A non-`onnx-v1` provider requires an explicit accepted review report with same-dataset baseline/candidate metrics, reviewer, and rationale. A two-version fake PostgreSQL test proved partial v2 coverage 1/2 blocks readiness while v1 ranks remain, full v2 coverage 2/2 permits v2 ranking, and returning to v1 restores the prior rank. Forced EXPLAIN used the new HNSW index for v2. No real model was switched.
+- Checks/status: targeted PostgreSQL rollout (1) and all three existing v1 ANN tests passed on disposable Docker DB `rockeval_srch009_tests`; the quality-report unit test passed. `cargo fmt --check` passed; Windows strict all-feature Clippy stopped in third-party `onig_sys` (`LNK1114`). Full `cargo test` compiled and ran 216 library tests, 201 passed and the same 15 sandbox-dependent tests failed. `cargo check --all-targets --all-features` passed in the prebuilt Linux Docker image after adding read-only source/test/migration/API mounts. The first Linux attempt lacked the API mount and failed only at a test `include_str!`; the corrected run passed. The current ONNX adapter/deploy automation remain v1-pinned and need explicit review when a future v2 release is prepared. No commit created; SRCH-006 has not started.
+
+## 2026-11-10 — SRCH-009 incremental embedding backfill
+
+- Goal: make embedding generation source-hash/provenance aware, resumable after interruption, and an explicit job separate from full catalog import.
+- Scope: migration `0027`, provider/storage/backfill boundaries, PostgreSQL document selection and conditional write, import invalidation, separate Compose/deploy/local import commands, three thematic PostgreSQL integration tests, and current documentation. No search scoring, HTTP schema, model-switch mechanism, or client change.
+- Result: PostgreSQL compares SHA-256 of `searchable_text` with the vector row's stored source hash for the selected model/version/dimension. Stable ID keyset pages contain only missing/stale active documents. A source change between read and write prevents stale persistence and fails the run for safe retry. An unchanged second run performs zero inferences; a single text change performs one. Homepage-only import changes retain vectors.
+- Checks/status: `cargo test --test postgres_integration embedding_backfill -- --ignored --test-threads=1` passed three tests on disposable Docker DB `rockeval_srch009_tests` with `ROCKSERVER_SEARCH_EVAL_DISPOSABLE=1`; read-only SQL confirmed preserved inspection `rockeval` remains at 41 active stations/41 E5 vectors. Compose config and the OPS-001-D local safeguards test passed. `cargo fmt --check` passed; strict all-feature Clippy stopped in third-party Windows `onig_sys` (`LNK1114`); `cargo test` ran 214 library tests with 199 passed and the same 15 sandbox-dependent failures as before. `cargo test --test search_eval` passed 2, ignored 1. A deployment follow-up narrowed the skip count to active stations with current E5 model/version/dimension and SHA-256 equal to current `searchable_text`; other-model and stale-hash vectors cannot falsely satisfy it. Read-only SQL on the disposable DB returned `3|0`, excluding three fake-model rows. Its static OPS test, `bash -n`, and `git diff --check` passed without another Cargo run. The first run after migration recomputes legacy hashless rows once; full-catalog ONNX throughput and batching remain unmeasured. No commit created; SRCH-010 has not started.
+
+## 2026-11-10 — SRCH-004 explicit station-language filter
+
+- Goal: prevent inferred language and STT locale from silently excluding stations while preserving an explicit station-language request.
+- Scope: one 28-language explicit-marker table shared by deterministic and LLM parsing, service-level enforcement against provider guesses, semantic classifier diagnostics only on explicit requests, HTTP/OpenAPI behavior and tests, and roadmap/status/diagram/README/TODO updates. No client change.
+- Result: one unambiguous marker sets the hard filter; an absent or conflicting marker leaves it unset. On pinned E5 assets, the old 28-prototype classifier correctly identified 2/28 explicit English-language requests, missed 26, and produced 0/20 suggestions on unmarked requests. The opt-in evaluation is diagnostic, not a production traffic estimate.
+- Checks/status: `cargo fmt --check`, targeted `cargo test search::`, `cargo test --test search_api` (11 passed), and `cargo test --test openapi_contract` (13 passed) passed. The opt-in `search_language_eval` target compiled and remained ignored without E5 asset paths. Full `cargo test` built and ran: 199 library tests passed; the same 15 sandbox-dependent socket, local HTTP, and file tests failed. Strict Clippy stopped in third-party `onig_sys` (`LNK1114`). SRCH-009 awaits confirmation; no commit created.
+
+## 2026-11-09 — SRCH-005 fusion, gate audit, and HNSW depth (partial)
+
+- Goal: choose a grounded fusion and relevance gate for lexical plus ANN candidates, preserve exact names and metadata fallback, and prevent HNSW underfill after hard filters.
+- Scope: SQL hybrid metadata normalization and transaction-local ANN settings in `src/persistence/postgres.rs`; remove unused Rust `hybrid_score`; extend pinned evaluation with 5 labelled paraphrases and 20 labelled negatives; add targeted PostgreSQL score assertions; correct the public `StationResult.score` OpenAPI bound to match unchanged runtime values and test the schema; update roadmap, status, service diagram, and [full HNSW plans](roadmap/srch005-hnsw-depth.txt). No client change.
+- Fusion result: offline candidate-level rerank on the same 50-query raw rows gave Recall@5/10/MRR `0.948/0.955/0.930` for both current and capped metadata blends versus `0.923/0.965/0.897` for weighted RRF (`k=60`); RRF reduced spoken and semantic-probe quality. Selected the existing 0.70/0.30 weight with metadata capped only in the hybrid branch. Full PostgreSQL/SearchService E5 result remained `0.833/0.840`, MRR `0.820`, exact Recall@5 `0.900`, 0 empty; metadata-only remained `0.647/0.660`, MRR `0.647`, 12 empty. Offline candidate metrics are not public-response metrics.
+- Gate result: five provisionally labelled pure-semantic paraphrases remained empty. Twenty out-of-domain negatives produced two already-existing lexical false answers in E5 mode and none metadata-only. Relevant paraphrase similarity `0.880–0.893` overlaps negative top similarity up to `0.903`; no safe new pure-vector gate was justified. SRCH-002/005 remain partial; investigate query cleaning under SRCH-006 and review labels before calibration.
+- HNSW result: on separate 3000-vector synthetic Docker test data with degraded and wrong-language postfilters, default settings returned 17 eligible from 40 scanned for `LIMIT 200` (`1.237 ms`); transaction-local `ef_search=200` and `strict_order` returned 200 eligible from 607 scanned (`9.776 ms`). The partial HNSW Index Scan appeared in both plans. GUCs returned to `40/off` after COMMIT on the same session. Production-scale latency and prepared plans remain unverified.
+- Checks/status: `cargo fmt --check`, `cargo test --test search_eval` (2 passed, 1 ignored), all three targeted PostgreSQL ANN tests, metadata and E5 evaluators, `cargo test --test openapi_contract` (12 passed), and `git diff --check` passed. The new contract test validates that `StationResult` accepts `score=1.5` and rejects a negative score. The third ANN test directly queried 3000 deterministic synthetic vectors and observed 200 candidates after health/language filtering. Windows strict Clippy stopped in third-party `onig_sys` (`LNK1114`); full Windows `cargo test` passed 195 library tests and failed the same 15 sandbox-dependent tests as before. A read-only final SQL count confirmed the separate inspection DB retained 41 active stations and 41 E5 vectors. SRCH-004 has not started; no commit created.
+
+## 2026-11-09 — SRCH-002 independent E5 ANN candidates (partial)
+
+- Goal: make E5 nearest neighbours independent of lexical candidate selection while retaining provenance checks, hard filters, metadata fallback, and the current final score.
+- Scope: `src/persistence/postgres.rs`, thematic `tests/postgres_integration/search_ann.rs`, opt-in ANN diagnostics in `tests/search_eval.rs`, roadmap/status/task documentation, and the captured [EXPLAIN plan](roadmap/srch002-hnsw-plan.txt). No schema, HTTP contract, final score, or client change.
+- Result: E5/384 ANN candidates are unioned with bounded lexical candidates before final scoring. Two targeted PostgreSQL tests passed for vector-only repository retrieval, fallback and incompatible dimensions, filters, selected-stream health, and stable pagination. The full SearchService test records the remaining 0.35 gate that removes pure vector-only matches with score at most 0.30.
+- Baseline comparison: fixed 50-query metadata mode was unchanged (`Recall@5/10=0.647/0.660`, `MRR=0.647`, 12 empty, all ranked IDs identical); E5 improved from `0.713/0.720`, `MRR=0.700`, 5 empty to `0.833/0.840`, `MRR=0.820`, 0 empty. Twenty-six E5 ranked lists changed, six old labelled misses were recovered, no new labelled misses. Local p50/p95 were `4.3/6.4` ms metadata and `14.2/17.3` ms E5; these are not production latency estimates.
+- HNSW evidence: `EXPLAIN ANALYZE` on a separate 3000-row synthetic-vector test catalog used the partial HNSW index, but returned 40 ANN rows at `LIMIT 200` under default `hnsw.ef_search=40`; full plan is linked above. A larger real catalog and prepared-query plan still need checking.
+- Checks/status: `cargo fmt --check`, two targeted PostgreSQL tests, and both fixed-catalog evaluators passed. Windows strict Clippy stopped in third-party `onig_sys` (`LNK1114`); full Windows `cargo test` passed 196 library tests and failed the same 15 sandbox-dependent socket, HTTP, and file tests as before. Read-only SQL confirmed the preserved inspection database still has 41 active stations and 41 E5 vectors. Public pure-vector visibility remains partial because similarity values overlap for semantic and unrelated requests, so no speculative gate was added. SRCH-005 has not started; no commit created.
+
+## 2026-11-09 — SRCH-003 playable lexical prefilter
+
+- Goal: keep playable candidates inside the bounded PostgreSQL prefilter and rank trigram matches before truncating candidate IDs.
+- Scope: changed only the search SQL in `src/persistence/postgres.rs`, added `tests/postgres_integration/search_prefilter.rs` to the existing serialized integration target, and updated roadmap/status/task documentation. No schema, HTTP contract, score formula, or client change.
+- Result: the chosen non-retired station stream must have health other than `degraded` before the prefilter `LIMIT`; its fields are carried into final scoring. Prefilter score now includes trigram similarity. Two targeted PostgreSQL tests passed on separate disposable Docker database `rockeval_srch003_tests`, including 220-row overflow, late ID, pagination, total count, and exclusion. They truncate that test database, so the targeted command uses `--test-threads=1`.
+- Baseline comparison: the pinned 50-query, 41-station evaluator passed in metadata and E5 modes after the change; every ordered ID list matched its SRCH-011 baseline. Metadata Recall@5/10 `0.647/0.660`, MRR `0.647`, 12 empty, p50/p95 `6.0/13.7` ms. E5 `0.713/0.720`, MRR `0.700`, 5 empty, p50/p95 `12.2/16.3` ms. Earlier latency runs and model/catalog provenance are in `docs/status.md`; these local latency samples do not establish a production trend.
+- Checks: `cargo fmt --check`, two targeted PostgreSQL tests, metadata evaluator, and E5 Docker evaluator passed. Windows strict Clippy failed in third-party `onig_sys` (`LNK1114`); Windows `cargo test` failed before execution with incremental-cache hard-link warnings and `E0463`. The existing Linux image lacked Clippy, and a full Linux test container returned Docker `unexpected EOF` during compilation. After Docker restarted, the isolated database was recreated on a persistent volume; the E5 evaluator passed again and SQL confirmed 41 active stations plus 41 E5 vectors. The full suite is unverified for this change.
+- Status: SRCH-003 implementation and targeted checks complete; SRCH-002 has not started. No commit created.
+
+## 2026-11-09 — SRCH-011 quality-evaluation harness
+
+- Goal: establish a reproducible evaluation path before changing search retrieval or ranking.
+- Scope: `tests/fixtures/search_eval_golden_set.json`, `tests/search_eval.rs`, the SRCH-011 acceptance wording in `docs/roadmap/voice-search-improvements.md`, `docs/status.md`, and this log. No production search, HTTP contract, or client change.
+- Result: 50 manually selected labelled queries across exact names, genres, spoken variants, and semantic probes refer only to the checksum-pinned 41-station RockCatalog. The opt-in evaluator resets an explicitly disposable PostgreSQL database, imports the pinned snapshot, runs the actual repository SQL, and reports Recall@5/10, MRR, empty responses, and p50/p95 latency overall and by category. Optional local ONNX mode generates all vectors with the same E5 assets and prints their SHA-256 provenance; configuration and model loading are checked before database reset. The Docker-only evaluation used a unique disposable pgvector container; the final database has 41 active stations and 41 E5 vectors, is preserved for inspection as `rockserver-srch011-eval-8bdc1608` on `127.0.0.1:61252`, and did not touch the existing `.env` database.
+- Measured baseline: two metadata-only runs and two E5 runs each produced identical ranked IDs for all 50 queries and identical quality metrics within their mode. Metadata-only overall Recall@5/10 `0.647/0.660`, MRR `0.647`, 12 empty; E5 overall `0.713/0.720`, MRR `0.700`, 5 empty. Metadata latency p50/p95 was `4.3/6.6` and `4.3/6.5` ms; E5 was `12.3/18.5` and `12.1/14.3` ms. The E5 model/tokenizer and Linux ORT archive passed SHA-256 checks against `deploy/onnx-assets.lock.json`; image digest and full hashes are recorded in `docs/status.md`.
+- Checks: evaluator passed twice in each mode; optional ONNX code compiled in a Linux Docker image from the pinned Rust base. Final `cargo fmt --check` and focused fixture/metric tests passed. Strict Windows `cargo clippy --all-targets --all-features -- -D warnings` and the all-feature check stopped in third-party `onig_sys` (`LNK1114`); full Windows `cargo test` failed 15 sandbox-dependent tests among 211 library tests. The failed checks were not rerun after the documentation-only update.
+- Status: diagnostic baseline recorded; product review of labels and production-scale evaluation remain. SRCH-003 has not started. Docker inspection/removal commands are in `docs/status.md`.
+
+## 2026-11-09 — Reconcile search improvement roadmap
+
+- Goal: put the server-search improvements in an executable order and remove stale claims from the 2026-08 audit plan.
+- Scope: `docs/roadmap/voice-search-improvements.md`, `docs/status.md`, and this log only; no source, API, client, or deployment change.
+- Result: retained SRCH IDs; marked the ONNX pool complete; moved SRCH-011 quality measurement before retrieval and ranking changes; sequenced prefilter, ANN retrieval, and scoring; separated language safety, embedding lifecycle, taxonomy, LLM resilience, metrics, and RockCast audio work. Added acceptance checks and clarified existing rate limiting and concurrent parser/embedding execution.
+- Checks: sequential `cargo fmt --check` passed; strict all-target/all-feature Clippy stopped in the `onig_sys` build script with `LNK1114` (same result with one build job). `cargo test` built successfully but 15 of 211 library tests failed in this sandbox, mainly on prohibited local sockets (Windows 10013) and unavailable local HTTP/file fixtures. A targeted `cargo test search::` passed all 45 search unit tests. PostgreSQL and live-provider suites were not exercised.
+- Status: documentation updated; full verification limited by the local build and test environment.
+
+## 2026-10-25 — Prepare device voice intent release
+
+- Goal: publish the verified voice-intent changes already on `master` and refresh the locked Rust and Web dependencies.
+- Scope: `Cargo.lock` updates `rustls` to 0.23.45; the Web workspace pins `source-map-js` to 1.2.2 in its workspace and lock files. No application source or public behavior changed in this release-preparation step.
+- Checks: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed sequentially. PostgreSQL and live-provider tests remain gated.
+- Deployment: pushed `aa352f9bc70618b77fb7b3fdbcb800ff2970699d` to `origin/master`; OPS-001-D reported `status=succeeded`, `readiness=passed`. The initial Docker Hub Node image download stalled near completion; retry reused cached layers, built the Rust and Web images, and reattached to the detached worker.
+- Status: pushed, deployed, and readiness-verified. Firmware adoption remains pending in `rock-esp32`.
+
+## 2026-10-25 — Device voice intents and list-based voice search
+
+- Goal: implement items 1–2 of `rock-esp32/docs/plan-voice-control.md` — seven device voice intents executed through the command pipeline and list-based voice search on RockServer — without changing legacy voice clients.
+- Scope: `src/voice/command.rs` (interpreter schema, prompt, validation), `src/http/voice/device.rs` (intent routing, favourites), `src/http/voice.rs` (shared transcript-search finisher), `src/http/voice/protocol.rs` (result frames, error code), `src/http/endpoints.rs` + `src/http/mod.rs` (test router with personal-data store and state hub), `api/openapi.yaml`, `tests/voice_stream_api.rs`, `tests/openapi_contract/voice_stream.rs`, `docs/status.md`. No firmware, client, relay, or catalog changes; the deterministic interpreter fallback is untouched.
+- Result: the LLM schema classifies `resume` and `add_favorite` in any language (default ±5 volume step in the prompt). Device sessions route stop/resume/volume/navigation through the same command pipeline as device buttons; navigation is manifest-gated, so the current ESP32 manifest (play/pause/stop) receives `capability_not_supported` without playback changes. `add_favorite` writes the device's currently reported station into the personal-data store behind `POST /api/v1/sync` (the RE-15 star and RockMobile path) idempotently, confirmed only after the stored outcome shows the live record; new `favourite_limit_exceeded` stream error; no current station is a terminal `station_not_found`. Voice search no longer executes server-side: the terminal frame carries the ranked list with `intent=play_radio` and the device itself plays the first entry through the same `station.play_station` path as a catalog tap (RockMobile autoplay semantics); empty results stay `station_not_found`, a failed search reports `search_unavailable`, and the equal-top-score clarification is gone. Command results echo a typed `intent` on success and failure. Legacy anonymous/RockMobile/RockCast/web frames are unchanged and never carry the intent marker.
+- Checks: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` passed (204 library tests, voice stream API 19/19, OpenAPI contract 11/11; 281 total). Live-provider and PostgreSQL suites remain gated.
+- Firmware follow-ups (rock-esp32 repository, out of scope here): add `"surface_id":"voice.main"` to the voice start frame (`components/rock_platform/rock_voice.c`, start JSON near line 291); accept result frames by `status`/`intent` instead of requiring `transcript` and skip the local transcript catalog search (`rock_voice.c` `voice_ws_event`, `src/firmware/transport/session.rs` `tick_voice`); autoplay the first entry of a `play_radio` result through the existing PlayStation path; map `capability_not_supported` and `favourite_limit_exceeded` in `error_state()` (`rock_voice.c`); optional distinct «Ничего не нашлось» label for `station_not_found`; later declare `next`/`previous` playback actions in the device manifest to enable navigation intents without server changes.
+- Status: server changes deployed and readiness-verified; live command/autoplay acceptance remains pending firmware adoption in `rock-esp32`.
+
+## 2026-10-22 — Recover device voice commands when structured parsing fails
+
+- Goal: investigate the radio's repeated “Ошибка распознавания” after a spoken request.
+- Evidence: after fixing a stale device bearer, two live attempts to say “Включи блэк метал” sent 52,825 and 75,464 PCM samples; RockServer returned `intent_resolution_failed` after speech recognition both times.
+- Scope: server voice-command interpreter and deterministic fallback; public WebSocket schema unchanged. The ESP32 firmware error label is updated separately in its own repository.
+- Result: provider and malformed-output failures fall back to a local classifier; rock, jazz and metal requests retain their genre, and basic stop/volume commands remain available. No transcript or credential is logged.
+- Checks: `cargo fmt --check`, strict Clippy, full `cargo test` (202 library tests; voice stream API 10/10), and `git diff --check` passed sequentially. Live-provider and database tests remain gated. Production deployment is pending.
+
+## 2026-10-20 — Restore Web playback after relay disconnect
+
+- Goal: investigate why a playing Web station eventually stops and needs switching away and back.
+- Scope: Web player reconnect behavior and project status; server relay lifetime and production log access inspected read-only. No public API or relay behavior changed.
+- Result: identified the relay's intentional 60-minute connection lifetime and the player's missing recovery from `ended`; added bounded same-station reconnect for `ended`, `error`, and sustained buffering, with cancellation on pause or station change and the existing manual Retry after exhaustion. An initial sandbox SSH attempt lacked the trusted host key; the normal operator context verified the host and used the configured key.
+- Checks: sequential `pnpm typecheck`, Web tests (48/48), `pnpm build`, `cargo fmt --check`, strict Clippy, and `cargo test` passed. The Web tests do not exercise a real timed stream cutoff.
+- Deployment: pushed `e2fe35ac52da7ae00e3be3cc938d25486287d945` to `origin/master` and deployed it through OPS-001-D. The remote worker returned `status=succeeded`; public readiness and Web returned HTTP 200 and the page referenced `index-CtKr2FDc.js`.
+- Status: deployed; live browser playback beyond one hour remains to be checked.
+
+## 2026-10-17 — Accept legacy ICY status in authenticated relay
+
+- Goal: remove the 502 caused by `ICY 200 OK` for Radio Caprice - Black Metal while preserving the relay security policy.
+- Scope: RockServer upstream fallback and reader, deterministic local ICY tests, OpenAPI relay description, plan and status. No client or firmware changes.
+- Result: reproduced the station's legacy status line and HTTP parser rejection; implemented bounded plain-HTTP ICY header handling through the existing audio/metadata pump. Local tests cover ICY audio and metadata, clean audio, malformed source responses, disconnect, ordinary HTTP and existing URL/IP/redirect checks.
+- Checks: sequential `cargo fmt --check`, strict Clippy and `cargo test` passed; opt-in PostgreSQL and live-provider tests stayed ignored.
+- Deployment: OPS-001-D deployed `d71eec847e2be300f8efe04a614e503c05964ecc` with readiness passed. The owner confirmed both ICY and ordinary HTTP stations played through the authenticated Web player; access logs showed HTTP 200 for both stream routes. A 502 for separate T-Rock came from an unresolvable HTTPS source host. After a brief, overbroad rollback to `8c1f8189be7e30f72e26af9e1a32df2273bb1521`, owner clarification led to a successful redeploy of `d71eec847e2be300f8efe04a614e503c05964ecc`; it is the active release.
+- Status: ICY change verified locally and in production. T-Rock DNS/source availability is a separate outstanding issue.
+
+## 2026-10-17 — Sync ESP32 device-control status and service diagram
+
+- Goal: reconcile RockServer's ESP32/device-control status with current
+  firmware and board acceptance, including the standalone HTML diagram.
+- Scope: device-control roadmaps, `docs/status.md`, this log, and
+  `docs/service-diagrams.html`; documentation only.
+- Result: DC-017/DC-018/DC-039 are marked complete; DC-040 records the working
+  local player and physical speaker while retaining the outstanding RE-10
+  24-hour soak. DC-019/DC-020 remain hardware-deferred. The local ESP32 CASTV2
+  client is distinguished from the still-open RockServer RS-7 and RockMobile
+  RM-3 remote-control work. The diagram now shows the current radio and device
+  control plane and labels ESP32 voice/sensors as future work.
+- Documentation disposition: no files were deleted. Older progress documents
+  retain acceptance evidence; the older analytics designs are explicitly
+  marked superseded in `docs/status.md`.
+- Checks: cross-checked the firmware plan, hardware records, OpenAPI, fixtures
+  and server roadmap; `git diff --check` passed. No tests/builds were run.
+- Status: documentation aligned with the 2026-10-17 owner-confirmed state.
+
+## 2026-10-16 — Audit current service documentation
+
+- Goal: compare RockServer's current implementation with active documentation and correct confirmed drift.
+- Scope: `docs/architecture.md`, `docs/status.md`, and this log; no runtime, contract, migration, or client change.
+- Result: corrected obsolete SpeechKit-future wording; documented optional buffered-v1/streaming-v3 Yandex recognizers, the enforced voice WebSocket limits and device admission; corrected PostgreSQL startup and E5 partial HNSW-index descriptions. Confirmed the proposed listening/search analytics schema has no implementation and remains distinct from existing synced `history_records`.
+- Checks: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`, and `git diff --check` passed. PostgreSQL and live-provider suites remained explicitly ignored.
+- Status: documentation aligned with the inspected runtime, OpenAPI contract, and migrations.
+
+## 2026-10-16 — Simplify analytics to three server-side history tables
+
+- Goal: retain useful search/listening data and next-search personalization without reworking all clients.
+- Scope: rewrote the design document, aligned relay/voice-roadmap links and the planned service overview, updated status/log; documentation only.
+- Result: three proposed tables for searches, authenticated relay connections and song observations; explicit write timing, joins, example and minimal history-based ranking. Removed first-stage client events, exposure/transition tables, universal event journal and dedicated profile projections. MIN-001—MIN-003 supersede the earlier detailed stages.
+- Constraints: anonymous/shared-token searches cannot be attributed to a person; direct/offline playback is unseen; adjacent connections are only possible transitions. Existing client protocols remain unchanged in the proposal.
+- Checks: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` and `git diff --check` passed. Opt-in PostgreSQL/live-provider suites remained ignored; the proposed feature is not implemented or measured.
+- Status: simplified plan prepared; implementation not started. Next: review existing identity coverage with the voice-search developer.
+
+## 2026-10-16 — Add real-time personalization to the analytics plan
+
+- Goal: make current listening behavior and accumulated user preferences affect the next search, rather than only generating reports for later search improvements.
+- Scope: analytics plan, voice-search roadmap, explicitly planned service diagram overview, status and task log; documentation only.
+- Result: proposed online-profile/context tables and projection cursor, snapshot provenance per result set, user-aware candidate generation/ranking, signal/decay rules, freshness budgets, replay/deletion/fallback behavior and AN-007 acceptance criteria. Explicit query constraints retain priority; current paging stays stable.
+- Checks: sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` and `git diff --check` passed. Opt-in PostgreSQL/live-provider suites remained ignored; proposed personalization freshness/performance is not measured.
+- Status: design updated; personalization remains unimplemented. Next: agree the concrete profile contract and freshness objectives.
+
+## 2026-10-16 — Plan listening, song-transition and search analytics
+
+- Goal: preserve the discussion as a developer-readable design for improving voice search using search history and listening behavior.
+- Scope: new `docs/listening-search-analytics-plan.md`, links from the relay/voice roadmaps, explicitly planned overview in `docs/service-diagrams.html`, status and task log. No code, migrations, API or client changes.
+- Result: proposed tables with types/keys and write timing; STT/query/intent/result/exposure separation; per-upstream metadata, sessions, reconnects and explicit station transitions; derived metrics, genre evidence, synthetic export example, deletion/reliability rules and AN-001—AN-006 acceptance criteria.
+- Checks: source/migration baseline and existing service diagrams inspected; sequential `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`, and `git diff --check` passed. Opt-in PostgreSQL/live-provider tests remained ignored; no analytics implementation exists to validate yet.
+- Status: planning document prepared; implementation not started. Next: developer review of AN-001 contracts and policy choices.
+
 ## 2026-10-10 — Apache-2.0 adoption, contributors recognition, and ecosystem cross-linking
 
 - Goal: enhance GitHub repository discoverability, establish permissive Apache-2.0 licensing, formally recognize contributors, and provide interlinked ecosystem documentation across the RockCast suite.
@@ -3409,3 +3648,25 @@ Checks: cargo fmt, strict Clippy and cargo test passed sequentially; external-se
 - Root cause: `/api/v1/voice/stream` returns at most 10 candidates, and the cabinet previously treated that response as the complete list with `hasMore=false`.
 - RockCast behavior confirmed in `src/app/actions/poll/voice.rs` and `src/app/actions/catalog.rs`: show candidates, strip spoken command words from the transcript, then start normal paginated station search and continue loading by offset. The cabinet now follows that sequence using its existing 20-station paging hook and infinite-scroll footer. Text typing and genre selection leave voice results explicitly; a failed first page retains the candidate preview and offers retry.
 - Verification: sequential frontend typecheck, 48/48 frontend checks, frontend build, cargo fmt --check, strict Clippy, and cargo test passed. Real voice recognition and end-to-end scrolling remain for a manual user pass. Commit 64f7871 pushed to origin/master and deployed (status=succeeded, readiness=passed). Production serves assets/index-DLhxuI0t.js and /health/ready returns HTTP 200.
+
+## Device voice classified search filters — 2026-10-25
+
+- Goal: prevent a second interpretation from discarding filters already extracted for `play_radio`.
+- Scope: device voice search query construction and result handling, one integration test, OpenAPI description and status. Legacy voice search and the command fallback vocabulary are unchanged.
+- Result: device ranking receives classified genre, mood, language and country filters; deterministic normalization supplies text terms. The returned normalized query reports the filters used for ranking.
+- Checks: `cargo fmt --check`, strict Clippy and `cargo test` passed; PostgreSQL and live-provider tests stayed gated. Status: implemented locally, not deployed or checked with physical ESP32 audio.
+
+## Device voice interpreter rescue and wake-word stripping — 2026-10-26
+
+- Measured on the ESP32 board over serial: device voice sessions failed with `intent_resolution_failed` (LLM provider errors outside the narrow fallback whitelist) and `unsupported_intent` (provider `unknown` verdicts for valid commands, no rescue path). STT transcripts logged on-device showed the wake word glued to the command («Роксерверрок»), hiding the «рок» token from both classifier layers.
+- Server: `LlmCommandInterpreter` rescues `unknown` verdicts through the deterministic classifier when a basic-command token is present; the deterministic classifier and outage whitelist gained старт/продолжи, лайк/избранное, громче/тише; `finish_device_voice` strips the wake-word prefix (incl. glued and hyphen/spaced forms) before interpretation and ranking.
+- Checks: `cargo fmt --check`, strict Clippy, `cargo test` (287) passed sequentially; PostgreSQL and live-provider suites stayed gated.
+- Deployment: `d0b7f6e…` and `61d8dcc…` deployed through OPS-001-D with `readiness=passed` after clearing transient Docker Hub/SSH failures on retry.
+- Board verification: стоп/старт/громче execute via the command pipeline (`command.accepted`/`command.result`, device state 4); «тише» once returned a failed result with no `device.command` (open); live owner-voice pass pending.
+
+## Resultless SpeechKit responses and quiet-device audio — 2026-10-27
+
+- Measured from the RE-8 board: device voice sessions degraded to `speech_provider_error` on nearly every attempt while loud clean audio still recognized. Direct PC probes against the live endpoint isolated the cause: the Yandex short-audio REST API answers HTTP 200 with no `result` for audio it cannot transcribe (silence, noise, low-SNR speech), and the adapter surfaced that success-without-speech as a provider error instead of "no speech". Even the known-good 2026-10-25 reference capture (pure silence) reproduced the failure, exonerating the board firmware, whose wake model, mic gain and audio spectrum matched their validated references (SHA-verified model, unchanged 30 dB gain, matching speech bands).
+- Fix: a resultless 200 response now yields no final transcript update, so the stream terminates as `speech_not_recognized` instead of a provider error. Level calibration against the live endpoint showed real speech recognizes down to RMS ~215, so the companion firmware change (mic gain 30->36 dB, wake energy gate doubled to 260 milli to preserve the validated floor/speech ratios) adds margin for 1-2 m live voice without touching wake behaviour.
+- Checks: `cargo fmt --check`, strict Clippy, `cargo test` (287) passed; live verification: quiet board audio now returns `speech_not_recognized`, real-speech calibration passes at three attenuation levels.
+- Deployment: `c3d9792` via OPS-001-D, `readiness=passed`, `yandex_keys=4`. Board-side gain change flashed the same day; owner live-voice pass pending.

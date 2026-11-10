@@ -46,6 +46,49 @@ export function PlayerDeck({
   const [streamError, setStreamError] = useState("");
   // Bumped by the retry button to force a full reload of the same stream URL.
   const [retryCount, setRetryCount] = useState(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout>>();
+  const stallTimer = useRef<ReturnType<typeof setTimeout>>();
+  const retryAttempts = useRef(0);
+
+  const clearTimers = () => {
+    clearTimeout(retryTimer.current);
+    clearTimeout(stallTimer.current);
+    retryTimer.current = undefined;
+    stallTimer.current = undefined;
+  };
+
+  // A relay connection has a finite lifetime, and upstreams can end sooner.
+  const reconnect = () => {
+    if (!currentStation || !isPlaying || retryTimer.current) return;
+    clearTimeout(stallTimer.current);
+    stallTimer.current = undefined;
+    if (retryAttempts.current >= 5) {
+      setBuffering(false);
+      setStreamError("Поток временно недоступен или требуется вход");
+      onPlaybackStateChange?.(false);
+      return;
+    }
+    const delay = Math.min(1000 * 2 ** retryAttempts.current, 16000) + Math.random() * 500;
+    retryAttempts.current += 1;
+    setBuffering(true);
+    retryTimer.current = setTimeout(() => {
+      retryTimer.current = undefined;
+      setRetryCount((count) => count + 1);
+    }, delay);
+  };
+
+  useEffect(() => {
+    if (!isPlaying) {
+      clearTimers();
+      retryAttempts.current = 0;
+      setBuffering(false);
+    }
+    return clearTimers;
+  }, [currentStation?.id, isPlaying]);
+
+  useEffect(() => {
+    retryAttempts.current = 0;
+  }, [currentStation?.id]);
 
   // Sync volume to audio element
   useEffect(() => {
@@ -157,6 +200,8 @@ export function PlayerDeck({
   /** Clears the failure and asks the cabinet to resume playback, which reloads the stream. */
   const handleStreamRetry = () => {
     if (!currentStation) return;
+    clearTimers();
+    retryAttempts.current = 0;
     setStreamError("");
     // Show "connecting" immediately: the reload effect only flips buffering on the next commit.
     setBuffering(true);
@@ -216,24 +261,20 @@ export function PlayerDeck({
       <audio
         ref={audioRef}
         preload="none"
-        onPlay={() => {
-          setBuffering(false);
-          onPlaybackStateChange?.(true);
+        onWaiting={() => {
+          if (!isPlaying) return;
+          setBuffering(true);
+          clearTimeout(stallTimer.current);
+          stallTimer.current = setTimeout(reconnect, 20000);
         }}
-        onPause={() => {
-          setBuffering(false);
-          onPlaybackStateChange?.(false);
-        }}
-        onWaiting={() => setBuffering(true)}
         onPlaying={() => {
+          clearTimers();
+          retryAttempts.current = 0;
           setBuffering(false);
           setStreamError("");
         }}
-        onError={() => {
-          setBuffering(false);
-          onPlaybackStateChange?.(false);
-          setStreamError("Поток временно недоступен или требуется вход");
-        }}
+        onEnded={reconnect}
+        onError={reconnect}
       />
 
       <div class="player-deck-inner">
