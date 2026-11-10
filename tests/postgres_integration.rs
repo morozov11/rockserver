@@ -29,3 +29,18 @@ mod shared_catalog;
 
 #[path = "postgres_integration/personal_data.rs"]
 mod personal_data;
+
+#[path = "postgres_integration/search_prefilter.rs"]
+mod search_prefilter;
+
+#[path = "postgres_integration/search_ann.rs"]
+mod search_ann;
+
+#[path = "postgres_integration/search_taxonomy.rs"]
+mod search_taxonomy;
+
+#[path = "postgres_integration/embedding_backfill.rs"]
+mod embedding_backfill;
+
+#[path = "postgres_integration/embedding_rollout.rs"]
+mod embedding_rollout;

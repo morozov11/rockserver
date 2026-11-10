@@ -279,6 +279,11 @@ pub(super) async fn search(
             );
         }
         Err(_) => {
+            tracing::info!(
+                event = "search_timeout",
+                endpoint = "device_catalog_search",
+                "search timed out"
+            );
             return error_response(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "service_unavailable",

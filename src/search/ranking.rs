@@ -41,15 +41,6 @@ pub(super) fn rank_stations(
         .collect()
 }
 
-/// Combines normalized metadata and cosine-derived semantic scores.
-///
-/// A missing compatible station embedding preserves the complete metadata score.
-pub fn hybrid_score(metadata_score: f64, semantic_score: Option<f64>) -> f64 {
-    semantic_score.map_or(metadata_score, |semantic| {
-        (METADATA_WEIGHT * metadata_score + SEMANTIC_WEIGHT * semantic).clamp(0.0, 1.0)
-    })
-}
-
 fn language_matches(station: &Station, query: &SearchQuery) -> bool {
     query
         .language
@@ -113,15 +104,4 @@ fn station_searchable_terms(station: &Station) -> HashSet<String> {
         .into_iter()
         .chain(station.tags.iter().flat_map(|tag| tokenize(tag)))
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::hybrid_score;
-
-    #[test]
-    fn hybrid_score_uses_fixed_weights_and_metadata_when_embedding_is_absent() {
-        assert_eq!(hybrid_score(0.8, None), 0.8);
-        assert!((hybrid_score(0.8, Some(0.5)) - 0.71).abs() < f64::EPSILON);
-    }
 }

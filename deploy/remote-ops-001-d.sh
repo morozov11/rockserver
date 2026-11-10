@@ -75,7 +75,7 @@ install_owner_files() {
   for file in compose.yaml compose.production.yaml Caddyfile.production.template owner.env onnx-assets.json; do
     [ -f "$stage/$file" ] && [ ! -L "$stage/$file" ] || fail "deployment bundle is missing $file"
   done
-  if grep -Ev '^(ROCKSERVER_DOMAIN|OPS001D_CATALOG_VERSION|OPS001D_CATALOG_COUNT|OPS001D_CATALOG_SHA256|ROCKSERVER_SEMANTIC_PROVIDER|ROCKSERVER_ONNX_ASSET_DIR|ROCKSERVER_ONNX_MODEL_PATH|ROCKSERVER_ONNX_TOKENIZER_PATH|ORT_DYLIB_PATH|YANDEX_AI_API_KEY|YANDEX_FOLDER_ID|YANDEX_LLM_MODEL|YANDEX_LLM_TIMEOUT_MS|YANDEX_SPEECHKIT_API_KEY|YANDEX_SPEECHKIT_FOLDER_ID|YANDEX_HOME_CLIENTID|YANDEX_HOME_SECRET)=[^[:cntrl:]]*$' "$stage/owner.env" | grep -q .; then
+  if grep -Ev '^(ROCKSERVER_DOMAIN|OPS001D_CATALOG_VERSION|OPS001D_CATALOG_COUNT|OPS001D_CATALOG_SHA256|ROCKSERVER_SEMANTIC_PROVIDER|ROCKSERVER_ONNX_ASSET_DIR|ROCKSERVER_ONNX_MODEL_PATH|ROCKSERVER_ONNX_TOKENIZER_PATH|ORT_DYLIB_PATH|YANDEX_AI_API_KEY|YANDEX_FOLDER_ID|YANDEX_LLM_MODEL|YANDEX_LLM_MODEL_VERSION|YANDEX_LLM_TIMEOUT_MS|YANDEX_SPEECHKIT_API_KEY|YANDEX_SPEECHKIT_FOLDER_ID|YANDEX_HOME_CLIENTID|YANDEX_HOME_SECRET)=[^[:cntrl:]]*$' "$stage/owner.env" | grep -q .; then
     fail 'owner.env contains a non-allowlisted or malformed entry'
   fi
   [ "$(wc -l < "$stage/owner.env")" -ge 3 ] || fail 'owner.env entries are not newline-separated'
@@ -85,7 +85,7 @@ install_owner_files() {
   install -m 0600 "$stage/onnx-assets.json" "$release_root/onnx-assets.json"
   touch "$env_file"; chmod 0600 "$env_file"
   clean="$(mktemp "$release_root/.release.env.XXXXXX")"
-  awk -F= '!/^(ROCKSERVER_DOMAIN|OPS001D_CATALOG_VERSION|OPS001D_CATALOG_COUNT|OPS001D_CATALOG_SHA256|ROCKSERVER_SEMANTIC_PROVIDER|ROCKSERVER_ONNX_ASSET_DIR|ROCKSERVER_ONNX_MODEL_PATH|ROCKSERVER_ONNX_TOKENIZER_PATH|ORT_DYLIB_PATH|YANDEX_AI_API_KEY|YANDEX_FOLDER_ID|YANDEX_LLM_MODEL|YANDEX_LLM_TIMEOUT_MS|YANDEX_SPEECHKIT_API_KEY|YANDEX_SPEECHKIT_FOLDER_ID|YANDEX_HOME_CLIENTID|YANDEX_HOME_SECRET)=/' "$env_file" > "$clean"
+  awk -F= '!/^(ROCKSERVER_DOMAIN|OPS001D_CATALOG_VERSION|OPS001D_CATALOG_COUNT|OPS001D_CATALOG_SHA256|ROCKSERVER_SEMANTIC_PROVIDER|ROCKSERVER_ONNX_ASSET_DIR|ROCKSERVER_ONNX_MODEL_PATH|ROCKSERVER_ONNX_TOKENIZER_PATH|ORT_DYLIB_PATH|YANDEX_AI_API_KEY|YANDEX_FOLDER_ID|YANDEX_LLM_MODEL|YANDEX_LLM_MODEL_VERSION|YANDEX_LLM_TIMEOUT_MS|YANDEX_SPEECHKIT_API_KEY|YANDEX_SPEECHKIT_FOLDER_ID|YANDEX_HOME_CLIENTID|YANDEX_HOME_SECRET)=/' "$env_file" > "$clean"
   cat "$stage/owner.env" >> "$clean"
   chmod 0600 "$clean"; mv "$clean" "$env_file"
 }
@@ -243,7 +243,18 @@ catalog_seed_is_current() {
   grep -Fx "catalog_version=$version" "$marker" >/dev/null || return 1
   grep -Fx "catalog_count=$count" "$marker" >/dev/null || return 1
   grep -Fx "catalog_sha256=$checksum" "$marker" >/dev/null || return 1
-  actual_counts="$(ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose exec -T postgres sh -c 'psql -Atq -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT (SELECT count(*) FROM stations), (SELECT count(*) FROM station_embeddings);"')"
+  actual_counts="$(ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose exec -T postgres sh -c 'psql -Atq -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null <<'SQL'
+SELECT (SELECT count(*) FROM stations WHERE retired_at IS NULL),
+       (SELECT count(*)
+        FROM station_embeddings AS e
+        JOIN stations AS s ON s.id = e.station_id
+        WHERE s.retired_at IS NULL
+          AND e.model = 'intfloat/multilingual-e5-small'
+          AND e.version = 'onnx-v1'
+          AND e.dimension = 384
+          AND e.source_text_sha256 = encode(sha256(convert_to(s.searchable_text, 'UTF8')), 'hex'));
+SQL
+)"
   [ "$actual_counts" = "$count|$count" ]
 }
 write_catalog_marker() {
@@ -275,14 +286,14 @@ deploy_internal() {
   # afford a full dump on every release, and backups are a separate owner-
   # managed duty. The summary keeps the field only for format continuity.
   backup_hash='-'
-  # A full release replacement deletes/rebuilds derived vectors.  Skip that
-  # costly operation only when the exact pinned release was already completed
-  # and PostgreSQL still contains every station and every embedding.
+  # Skip completed pinned releases; new releases run import and incremental
+  # backfill as separate fail-closed jobs before readiness is checked.
   if catalog_seed_is_current "$compose" "$image" "$caddy_image"; then
     printf '%s\n' 'catalog seed skipped: exact pinned catalog and embeddings are already ready'
   else
     # The pinned importer first applies embedded migrations, then transactionally activates the full catalog.
     ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose run --rm catalog_seed >/dev/null
+    ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose run --rm embedding_backfill >/dev/null
     write_catalog_marker
   fi
   ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose up --detach --no-build --wait rockserver caddy

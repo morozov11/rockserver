@@ -16,7 +16,7 @@ use ort::{session::Session, value::TensorRef};
 use tokenizers::Tokenizer;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-use crate::search::{Embedding, EmbeddingProvider, EmbeddingProviderError};
+use crate::search::{Embedding, EmbeddingProvenance, EmbeddingProvider, EmbeddingProviderError};
 
 /// Stable provenance for the selected compact multilingual embedding model.
 pub const MODEL: &str = "intfloat/multilingual-e5-small";
@@ -420,6 +420,14 @@ impl OnnxE5EmbeddingProvider {
 
 #[async_trait]
 impl EmbeddingProvider for OnnxE5EmbeddingProvider {
+    fn provenance(&self) -> Option<EmbeddingProvenance> {
+        Some(EmbeddingProvenance {
+            model: MODEL.to_owned(),
+            version: VERSION.to_owned(),
+            dimension: DIMENSION,
+        })
+    }
+
     async fn embed(&self, text: &str) -> Result<Embedding, EmbeddingProviderError> {
         self.infer("query", text).await
     }

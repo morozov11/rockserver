@@ -334,18 +334,14 @@ pub(super) async fn finish_device_voice(
 fn device_search_query(transcript: &str, locale: &str, filters: &RadioQuery) -> SearchQuery {
     let mut query = normalize_query(transcript.to_owned(), locale.to_owned());
     query.action = SearchAction::Play;
-    // The structured provider answers with genre names in the transcript's
-    // language ("рок"), which the canonical-only filter drops: translate the
-    // base Russian genre words first, and if nothing canonical survives,
-    // keep the transcript parser's own transliteration-aware tags instead
-    // of wiping them (a tag-less Play search can return nothing, which the
-    // device reports as "command not supported").
+    // Preserve canonical provider tags and translate common Russian aliases.
+    // If neither survives, retain the transcript parser's tags.
     let interpreted = canonical_tags(
         filters
             .genres
             .iter()
             .chain(&filters.moods)
-            .filter_map(|value| genre_alias(value).map(str::to_owned)),
+            .map(|value| genre_alias(value).unwrap_or(value).to_owned()),
     );
     if !interpreted.is_empty() {
         query.tags = interpreted;

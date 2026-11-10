@@ -301,7 +301,7 @@ impl CommandInterpreter for LlmCommandInterpreter {
                 if !play_metal && !basic_command_candidate(&tokens) {
                     return Err(error);
                 }
-                tracing::warn!(reason = %error, "voice command interpreter failed; using local fallback");
+                tracing::warn!("voice command interpreter failed; using local fallback");
                 DeterministicCommandInterpreter
                     .interpret(transcript, locale)
                     .await

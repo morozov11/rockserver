@@ -1161,7 +1161,8 @@ paths:
       summary: Find and rank internet radio stations
       description: >-
         Accepts a natural-language request and returns ranked station streams anonymously.
-        Language, country, and exclusions are hard filters. Ranking is deterministic,
+        An explicitly requested station language, country, and exclusions are hard filters.
+        Locale alone does not constrain station language. Ranking is deterministic,
         with station ID ascending as the final tie-break, and optional semantic-provider
         failures degrade to metadata search.
         A syntactically malformed JSON body produces 400. A well-formed JSON body
@@ -1227,7 +1228,7 @@ paths:
                       locale: en-US
                       terms: [upbeat, classic rock, road trip]
                       tags: [classic rock, rock]
-                      language: en
+                      language: null
                       country_code: null
                     stations:
                       - id: station-rock-001
@@ -1303,6 +1304,8 @@ paths:
         ASCII letters, digits, `_`, or `-`; otherwise RockServer generates a request ID. The same
         ID is returned in the response JSON and `X-Request-Id` response header. The server limits
         the JSON body to 65,536 bytes and the interpretation/search portion to five seconds.
+        Anonymous requests share a process-wide token bucket with capacity 4 and refill rate
+        12 tokens per minute (one every 5 seconds). Each request consumes one token.
       parameters:
         - name: X-Request-Id
           in: header
@@ -1346,7 +1349,7 @@ paths:
                   locale: en-US
                   terms: [play, calm, instrumental, jazz]
                   tags: [calm, instrumental, jazz]
-                  language: en
+                  language: null
                   country_code: null
                 selected_station:
                   id: station-jazz-001
@@ -1404,6 +1407,15 @@ paths:
                 request_id: req_01JAZ422
                 details:
                   transcript: must not be empty or whitespace only
+        "429":
+          description: The anonymous voice bucket is empty; Retry-After is the rounded-up seconds until the next token.
+          headers:
+            Retry-After:
+              schema: { type: integer, minimum: 1, maximum: 5 }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: An unexpected catalog/search failure occurred.
           content:
@@ -1451,7 +1463,9 @@ paths:
         filters feed ranking directly; legacy clients keep transcript-based search. The client
         may send one `VoiceStreamCancel` text frame before commit to
         cancel a session deterministically. Anonymous and legacy sessions retain the established
-        station-search result shape without the intent marker.
+        station-search result shape without the intent marker. Anonymous upgrade requests share
+        a process-wide token bucket with capacity 2 and refill rate 6 tokens per minute (one
+        every 10 seconds). Each upgrade request consumes one token.
       parameters:
         - name: X-Request-Id
           in: header
@@ -1474,6 +1488,15 @@ paths:
                 type: string
         "400":
           description: The HTTP request is not a valid WebSocket upgrade request.
+        "429":
+          description: The anonymous voice bucket is empty; Retry-After is the rounded-up seconds until the next token.
+          headers:
+            Retry-After:
+              schema: { type: integer, minimum: 1, maximum: 10 }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
       x-voice-stream-limits:
         audio_format: pcm_s16le
         channels: 1
@@ -3367,7 +3390,7 @@ components:
             type: string
         language:
           type: [string, "null"]
-          description: ISO 639 language code when inferred.
+          description: ISO 639 station-language hard filter only when explicitly requested in the query; otherwise null, regardless of STT locale or provider inference.
         country_code:
           type: [string, "null"]
           pattern: "^[A-Z]{2}$"
@@ -3426,7 +3449,7 @@ components:
         score:
           type: number
           minimum: 0
-          maximum: 1
+          description: Hybrid scores with a compatible embedding are in [0, 1]; metadata-only scores retain their original scale and can exceed 1.
         reason:
           type: string
           minLength: 1

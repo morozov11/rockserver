@@ -3,7 +3,7 @@
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use axum::{
@@ -95,12 +95,70 @@ pub(crate) struct AppState {
 /// Process-local buckets used by anonymous and per-device HTTP admission control.
 pub(crate) struct PublicLimitState {
     pub(crate) requests: HashMap<&'static str, Vec<std::time::Instant>>,
+    voice_requests: HashMap<&'static str, VoiceRateBucket>,
     /// Per-device buckets for authenticated device-facing endpoints, keyed `endpoint:device_id`.
     pub(crate) device_requests: HashMap<String, Vec<std::time::Instant>>,
     pub(crate) active_voice: usize,
 }
 
+/// A process-wide voice token bucket: `burst` is capacity and `requests` is the refill rate per minute.
+struct VoiceRateBucket {
+    tokens: f64,
+    updated_at: Instant,
+}
+
+impl VoiceRateBucket {
+    fn consume(&mut self, limit: PublicLimit, now: Instant) -> Result<(), u64> {
+        let tokens_per_second = limit.requests as f64 / RATE_WINDOW.as_secs_f64();
+        self.tokens = (self.tokens
+            + now.duration_since(self.updated_at).as_secs_f64() * tokens_per_second)
+            .min(limit.burst as f64);
+        self.updated_at = now;
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+            Ok(())
+        } else {
+            Err(((1.0 - self.tokens) / tokens_per_second).ceil() as u64)
+        }
+    }
+}
+
 impl AppState {
+    /// Applies a process-wide anonymous voice quota with burst capacity and gradual refill.
+    pub(super) fn public_voice_request_allowed(
+        &self,
+        endpoint: &'static str,
+        limit: PublicLimit,
+        request_id: &str,
+    ) -> Result<(), Box<Response>> {
+        let mut state = self
+            .public_limits
+            .lock()
+            .expect("public limiter mutex is not poisoned");
+        let now = Instant::now();
+        let bucket = state
+            .voice_requests
+            .entry(endpoint)
+            .or_insert(VoiceRateBucket {
+                tokens: limit.burst as f64,
+                updated_at: now,
+            });
+        if let Err(wait_seconds) = bucket.consume(limit, now) {
+            tracing::warn!(%request_id, endpoint, limit_scope = "direct_peer", requests_per_minute = limit.requests, "public voice rate limit rejected");
+            return Err(Box::new(retry_after(
+                error_response(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "rate_limited",
+                    "Request rate limit exceeded.",
+                    request_id,
+                    json!({"limit_scope":"direct_peer"}),
+                ),
+                wait_seconds.max(1),
+            )));
+        }
+        Ok(())
+    }
+
     /// Applies the fail-closed direct-peer anonymous quota.
     pub(super) fn public_request_allowed(
         &self,
@@ -209,3 +267,7 @@ impl AppState {
         constant_time_eq(token.as_bytes(), self.api_bearer_token.as_bytes())
     }
 }
+
+#[cfg(test)]
+#[path = "state/tests.rs"]
+mod tests;

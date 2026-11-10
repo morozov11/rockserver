@@ -83,7 +83,7 @@ pub(super) async fn public_voice_stream(
 ) -> Response {
     let request_id = request_id(&headers);
     if let Err(response) =
-        state.public_request_allowed("voice_stream", VOICE_UPGRADE_LIMIT, &request_id)
+        state.public_voice_request_allowed("voice_stream", VOICE_UPGRADE_LIMIT, &request_id)
     {
         return *response;
     }
@@ -405,7 +405,7 @@ pub(super) async fn public_voice_command(
 ) -> Response {
     let request_id = request_id(&headers);
     if let Err(response) =
-        state.public_request_allowed("voice_command", VOICE_COMMAND_LIMIT, &request_id)
+        state.public_voice_request_allowed("voice_command", VOICE_COMMAND_LIMIT, &request_id)
     {
         return *response;
     }
@@ -474,6 +474,11 @@ async fn voice_command_impl(
             );
         }
         Err(_) => {
+            tracing::info!(
+                event = "search_timeout",
+                endpoint = "voice_command",
+                "search timed out"
+            );
             return error_response(
                 StatusCode::GATEWAY_TIMEOUT,
                 "search_timeout",
@@ -582,6 +587,11 @@ async fn finish_stream_search(
             return;
         }
         Err(_) => {
+            tracing::info!(
+                event = "search_timeout",
+                endpoint = "voice_stream",
+                "search timed out"
+            );
             let _ = send_stream_error(
                 socket,
                 request_id,

@@ -1,0 +1,44 @@
+NOTICE:  truncate cascades to table "station_streams"
+NOTICE:  truncate cascades to table "station_embeddings"
+NOTICE:  truncate cascades to table "station_icons"
+NOTICE:  truncate cascades to table "station_icon_job_items"
+TRUNCATE TABLE
+INSERT 0 3000
+INSERT 0 3000
+INSERT 0 3000
+ANALYZE
+ANALYZE
+ANALYZE
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                      QUERY PLAN
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=478.27..2606.44 rows=200 width=21) (actual time=0.187..1.112 rows=40 loops=1)
+   Buffers: shared hit=411
+   ->  Nested Loop  (cost=478.27..32400.87 rows=3000 width=21) (actual time=0.187..1.108 rows=40 loops=1)
+         Buffers: shared hit=411
+         ->  Nested Loop  (cost=469.96..7335.87 rows=3000 width=1570) (actual time=0.153..0.333 rows=40 loops=1)
+               Buffers: shared hit=291
+               ->  Index Scan using station_embeddings_e5_small_hnsw_cosine_idx on station_embeddings station_embedding  (cost=469.68..6056.52 rows=3000 width=1557) (actual time=0.144..0.175 rows=40 loops=1)
+                     Order By: ((embedding)::vector(384) <=> ((('[1,0,'::text || array_to_string('{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}'::integer[], ','::text)) || ']'::text))::vector(384))
+                     Buffers: shared hit=171
+               ->  Index Scan using stations_pkey on stations s  (cost=0.28..0.43 rows=1 width=13) (actual time=0.004..0.004 rows=1 loops=40)
+                     Index Cond: ((id)::text = (station_embedding.station_id)::text)
+                     Filter: ((retired_at IS NULL) AND ((language)::text = 'en'::text) AND (country_code = 'US'::bpchar))
+                     Buffers: shared hit=120
+         ->  Subquery Scan on primary_stream  (cost=8.31..8.32 rows=1 width=0) (actual time=0.005..0.005 rows=1 loops=40)
+               Filter: (primary_stream.health <> 'degraded'::text)
+               Buffers: shared hit=120
+               ->  Limit  (cost=8.31..8.31 rows=1 width=85) (actual time=0.005..0.005 rows=1 loops=40)
+                     Buffers: shared hit=120
+                     ->  Sort  (cost=8.31..8.31 rows=1 width=85) (actual time=0.004..0.004 rows=1 loops=40)
+                           Sort Key: station_streams.is_primary DESC, station_streams.id
+                           Sort Method: quicksort  Memory: 25kB
+                           Buffers: shared hit=120
+                           ->  Index Scan using station_streams_station_id_idx on station_streams  (cost=0.28..8.30 rows=1 width=85) (actual time=0.004..0.004 rows=1 loops=40)
+                                 Index Cond: ((station_id)::text = (s.id)::text)
+                                 Filter: (retired_at IS NULL)
+                                 Buffers: shared hit=120
+ Planning:
+   Buffers: shared hit=287
+ Planning Time: 0.748 ms
+ Execution Time: 1.160 ms
+(30 rows)

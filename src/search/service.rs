@@ -8,12 +8,13 @@ use super::{
         SearchQuery, Station, StationRepository,
     },
     embedding::{Embedding, EmbeddingProvider},
+    language::explicit_language_code,
     query::{
-        DeterministicQueryParser, QueryParser, QueryParserInput, has_explicit_country_request,
-        tokenize, validate_intent,
+        DeterministicQueryParser, QueryParser, QueryParserInput, tokenize,
+        validate_intent_with_taxonomy,
     },
     semantic_filters::SemanticLanguageClassifier,
-    taxonomy::{genre_ancestors, station_matches_requested_genre},
+    taxonomy::{GenreTaxonomy, GenreTaxonomySource},
 };
 
 /// Search orchestration with deterministic parser and metadata fallbacks.
@@ -23,6 +24,7 @@ pub struct SearchService {
     query_parser: Arc<dyn QueryParser>,
     embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
     language_classifier: Option<Arc<SemanticLanguageClassifier>>,
+    taxonomy_source: Option<Arc<dyn GenreTaxonomySource>>,
 }
 
 impl SearchService {
@@ -33,6 +35,7 @@ impl SearchService {
             query_parser: Arc::new(DeterministicQueryParser),
             embedding_provider: None,
             language_classifier: None,
+            taxonomy_source: None,
         }
     }
 
@@ -52,10 +55,10 @@ impl SearchService {
         )
     }
 
-    /// Creates search with an optional confidence-gated semantic language classifier.
+    /// Creates search with an optional semantic language diagnostic.
     ///
-    /// The classifier is deliberately separate from the station ranking embedding so a
-    /// deployment can disable hard language filters without disabling semantic ranking.
+    /// The classifier is separate from the station ranking embedding; its suggestion
+    /// cannot become a hard filter without an explicit language request.
     pub fn with_providers_and_language_classifier(
         repository: Arc<dyn StationRepository + Send + Sync>,
         query_parser: Arc<dyn QueryParser>,
@@ -67,6 +70,30 @@ impl SearchService {
             query_parser,
             embedding_provider,
             language_classifier,
+            taxonomy_source: None,
+        }
+    }
+
+    /// Uses a live controlled genre vocabulary for parsing, validation, and fallback.
+    pub fn with_taxonomy_source(mut self, source: Arc<dyn GenreTaxonomySource>) -> Self {
+        self.taxonomy_source = Some(source);
+        self
+    }
+
+    async fn taxonomy(&self) -> GenreTaxonomy {
+        match &self.taxonomy_source {
+            Some(source) => match source.load().await {
+                Ok(taxonomy) if taxonomy.is_usable() => taxonomy,
+                Ok(_) => {
+                    tracing::warn!("genre taxonomy is unusable; using builtin fallback");
+                    GenreTaxonomy::builtin()
+                }
+                Err(_) => {
+                    tracing::warn!("genre taxonomy unavailable; using builtin fallback");
+                    GenreTaxonomy::builtin()
+                }
+            },
+            None => GenreTaxonomy::builtin(),
         }
     }
 
@@ -106,14 +133,15 @@ impl SearchService {
         query: &SearchQuery,
         constraints: &SearchConstraints,
     ) -> Result<Vec<RankedStation>, RepositoryError> {
+        let taxonomy = self.taxonomy().await;
         let embedding_started_at = Instant::now();
-        let embedding = self.query_embedding(&query.original).await;
+        let (embedding, _) = self.query_embedding(&query.original).await;
         self.search_with_embedding(
             query,
             constraints,
             embedding.as_ref(),
             embedding_started_at.elapsed().as_millis(),
-            true,
+            &taxonomy,
         )
         .await
     }
@@ -125,7 +153,7 @@ impl SearchService {
         constraints: &SearchConstraints,
         embedding: Option<&Embedding>,
         embedding_elapsed_ms: u128,
-        log_input: bool,
+        taxonomy: &GenreTaxonomy,
     ) -> Result<Vec<RankedStation>, RepositoryError> {
         let repository_started_at = Instant::now();
         let mut stations = self
@@ -142,7 +170,7 @@ impl SearchService {
 
         let with_genre: Vec<_> = stations
             .iter()
-            .filter(|s| station_matches_requested_genre(&query.tags, &s.station.tags))
+            .filter(|s| taxonomy.station_matches_requested_genre(&query.tags, &s.station.tags))
             .cloned()
             .collect();
         if !with_genre.is_empty() {
@@ -150,43 +178,29 @@ impl SearchService {
         }
 
         // Progressively broaden by walking up the genre hierarchy.
-        let parent_tags = broaden_tags(&query.tags);
+        let parent_tags = broaden_tags(&query.tags, taxonomy);
         if !parent_tags.is_empty() {
             let with_parents: Vec<_> = stations
                 .iter()
-                .filter(|s| station_matches_requested_genre(&parent_tags, &s.station.tags))
+                .filter(|s| taxonomy.station_matches_requested_genre(&parent_tags, &s.station.tags))
                 .cloned()
                 .collect();
             if !with_parents.is_empty() {
-                if log_input {
-                    tracing::info!(
-                        original_tags = ?query.tags,
-                        broadened_tags = ?parent_tags,
-                        "genre fallback: broadened to parent tags"
-                    );
-                }
                 return Ok(with_parents);
             }
         }
 
         // Last resort: drop genre filter, keep only MIN_RELEVANCE_SCORE gate.
-        if !stations.is_empty() && log_input {
-            tracing::info!(
-                original_tags = ?query.tags,
-                "genre fallback: dropped genre filter entirely"
-            );
-        }
         Ok(stations)
     }
 
-    /// Interprets request-only input and searches without exposing catalog data to providers.
+    /// Interprets request-only input and searches without logging its text or derived terms.
     pub async fn interpret_and_search(
         &self,
         input: QueryParserInput,
         constraints: &SearchConstraints,
     ) -> Result<SearchOutcome, RepositoryError> {
-        self.interpret_and_search_with_input_logs(input, constraints, true)
-            .await
+        self.interpret_and_search_observed(input, constraints).await
     }
 
     /// Interprets and searches without recording user-supplied text or derived terms.
@@ -195,32 +209,38 @@ impl SearchService {
         input: QueryParserInput,
         constraints: &SearchConstraints,
     ) -> Result<SearchOutcome, RepositoryError> {
-        self.interpret_and_search_with_input_logs(input, constraints, false)
-            .await
+        self.interpret_and_search_observed(input, constraints).await
     }
 
-    async fn interpret_and_search_with_input_logs(
+    async fn interpret_and_search_observed(
         &self,
         input: QueryParserInput,
         constraints: &SearchConstraints,
-        log_input: bool,
     ) -> Result<SearchOutcome, RepositoryError> {
+        let started_at = Instant::now();
+        let taxonomy = self.taxonomy().await;
         let parser_started_at = Instant::now();
         // Query parsing (which may call external LLM) and local text embedding generation
         // are independent: the embedding only needs the raw query text. Run them concurrently
         // via `tokio::join!` so local embedding generation finishes during the network round-trip.
-        let (parse_result, (embedding, embedding_elapsed_ms)) =
-            tokio::join!(self.query_parser.parse(&input), async {
+        let (parse_result, ((embedding, embedding_failed), embedding_elapsed_ms)) = tokio::join!(
+            self.query_parser.parse_with_taxonomy(&input, &taxonomy),
+            async {
                 let start = Instant::now();
                 let embedding = self.query_embedding(&input.query).await;
                 (embedding, start.elapsed().as_millis())
-            },);
+            },
+        );
         let parser_elapsed_ms = parser_started_at.elapsed().as_millis();
 
-        let intent = match parse_result.and_then(validate_intent) {
+        let mut parser_fallback = "none";
+        let intent = match parse_result
+            .and_then(|intent| validate_intent_with_taxonomy(intent, &taxonomy))
+        {
             Ok(intent) => intent,
-            Err(error) => {
-                tracing::warn!(%error, "query parser failed; using deterministic metadata fallback");
+            Err(_) => {
+                parser_fallback = "error";
+                tracing::warn!("query parser failed; using deterministic metadata fallback");
                 DeterministicQueryParser
                     .parse(&input)
                     .await
@@ -238,12 +258,15 @@ impl SearchService {
                 .parse(&input)
                 .await
                 .expect("deterministic query parser cannot fail");
-            let deterministic = validate_intent(deterministic.clone()).unwrap_or(deterministic);
+            let deterministic = validate_intent_with_taxonomy(deterministic.clone(), &taxonomy)
+                .unwrap_or(deterministic);
 
             if intent.tags.is_empty() {
+                parser_fallback = "empty_intent";
                 // Full fallback: provider returned nothing actionable.
                 intent = deterministic;
             } else {
+                parser_fallback = "missing_terms";
                 // Partial fallback: keep provider's hard genre tags, but use deterministic
                 // `terms` for token/sub-token and trigram name matching.
                 intent.terms = deterministic.terms;
@@ -253,61 +276,48 @@ impl SearchService {
         }
 
         let request_terms = tokenize(&input.query);
-        if intent.language.is_none()
-            && !has_explicit_country_request(&request_terms)
-            && let (Some(classifier), Some(embedding)) = (&self.language_classifier, &embedding)
+        let explicit_language = explicit_language_code(&request_terms).map(str::to_owned);
+        if let (Some(requested), Some(classifier), Some(embedding)) =
+            (&explicit_language, &self.language_classifier, &embedding)
         {
-            if let Some(language) = classifier.classify(embedding) {
-                tracing::debug!(
-                    language = %language.code,
-                    score = language.score,
-                    margin = language.margin,
-                    "semantic language filter accepted"
-                );
-                intent.language = Some(language.code);
-            } else {
-                tracing::debug!("semantic language filter rejected as low confidence");
-            }
+            let suggestion = classifier.classify(embedding);
+            tracing::debug!(requested_language = %requested, suggestion = ?suggestion,
+                "explicit language classifier diagnostic");
         }
+        intent.language = explicit_language;
 
         let query = SearchQuery::from_intent(input.query, input.locale, intent);
-        if log_input {
-            tracing::debug!(
-                parser_elapsed_ms,
-                original = %query.original,
-                terms = ?query.terms,
-                tags = ?query.tags,
-                core_term_count = query.core_term_count,
-                language = ?query.language,
-                country_code = ?query.country_code,
-                "search query parsed"
-            );
-        }
+        let vector_branch = embedding.as_ref().is_some_and(|value| {
+            let provenance = value.provenance();
+            provenance.model == "intfloat/multilingual-e5-small" && provenance.dimension == 384
+        });
         let stations = self
             .search_with_embedding(
                 &query,
                 constraints,
                 embedding.as_ref(),
                 embedding_elapsed_ms,
-                log_input,
+                &taxonomy,
             )
-            .await?;
-        if stations.is_empty() {
-            if log_input {
-                tracing::debug!(original = %query.original, "search returned zero results");
-            }
-        } else if log_input {
-            for (i, s) in stations.iter().take(5).enumerate() {
-                tracing::debug!(
-                    rank = i + 1,
-                    id = %s.station.id,
-                    name = %s.station.name,
-                    score = s.score,
-                    reason = %s.reason,
-                    "search result"
-                );
-            }
-        }
+            .await;
+        tracing::info!(
+            event = "search_observation",
+            outcome = if stations.is_ok() {
+                "ok"
+            } else {
+                "repository_error"
+            },
+            elapsed_ms = started_at.elapsed().as_millis(),
+            parser_elapsed_ms,
+            embedding_elapsed_ms,
+            parser_fallback,
+            embedding_failed,
+            vector_branch,
+            empty = stations.as_ref().is_ok_and(Vec::is_empty),
+            result_count = stations.as_ref().map_or(0, Vec::len),
+            "search observation"
+        );
+        let stations = stations?;
         let total = stations
             .first()
             .and_then(|s| s.total_matches)
@@ -324,13 +334,15 @@ impl SearchService {
         self.repository.check_readiness().await
     }
 
-    async fn query_embedding(&self, text: &str) -> Option<Embedding> {
-        let provider = self.embedding_provider.as_ref()?;
+    async fn query_embedding(&self, text: &str) -> (Option<Embedding>, bool) {
+        let Some(provider) = self.embedding_provider.as_ref() else {
+            return (None, false);
+        };
         match provider.embed(text).await {
-            Ok(embedding) => Some(embedding),
-            Err(error) => {
-                tracing::warn!(%error, "embedding provider failed; using metadata fallback");
-                None
+            Ok(embedding) => (Some(embedding), false),
+            Err(_) => {
+                tracing::warn!("embedding provider failed; using metadata fallback");
+                (None, true)
             }
         }
     }
@@ -340,10 +352,10 @@ impl SearchService {
 ///
 /// Mood tags pass through unchanged. Tags without a parent are dropped
 /// because broadening is only meaningful for hierarchical genres.
-fn broaden_tags(tags: &[String]) -> Vec<String> {
+fn broaden_tags(tags: &[String], taxonomy: &GenreTaxonomy) -> Vec<String> {
     let mut broadened = std::collections::BTreeSet::new();
     for tag in tags {
-        for ancestor in genre_ancestors(tag) {
+        for ancestor in taxonomy.ancestors(tag) {
             broadened.insert(ancestor.to_owned());
         }
     }

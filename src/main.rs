@@ -1,10 +1,11 @@
-use std::{env, error::Error, sync::Arc};
+use std::{env, error::Error, fs, sync::Arc};
 
 use rockserver::{
     config::Config,
     http::TRUSTED_PROXY_TOKEN_ENV,
     persistence::{
-        DATABASE_URL_ENV, PostgresAccountStore, PostgresAdminStore, repository_from_env,
+        DATABASE_URL_ENV, PostgresAccountStore, PostgresAdminStore, PostgresEmbeddingStore,
+        PostgresGenreTaxonomySource, repository_from_env,
     },
     providers::embedding_provider_from_env,
     providers::yandex_home::YandexHomeClient,
@@ -12,8 +13,9 @@ use rockserver::{
     providers::yandex_speechkit::YandexSpeechKitRecognizer,
     providers::yandex_speechkit_streaming::YandexSpeechKitStreamingRecognizer,
     search::{
-        DeterministicQueryParser, LlmProvider, LlmQueryParser, QueryParser, SearchService,
-        SemanticLanguageClassifier, semantic_language_filters_enabled,
+        DeterministicQueryParser, EmbeddingProviderError, EmbeddingQualityReview, LlmProvider,
+        LlmQueryParser, QueryParser, SearchService, SemanticLanguageClassifier,
+        semantic_language_filters_enabled,
     },
     serve, shutdown_signal, telemetry,
     voice::{CommandInterpreter, DeterministicCommandInterpreter, LlmCommandInterpreter},
@@ -34,31 +36,56 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     rockserver::http::recover_station_icon_imports(&account_store).await;
     let admin_store = PostgresAdminStore::connect(&database_url).await?;
     let embedding_provider = embedding_provider_from_env()?;
+    if let Some(provenance) = embedding_provider
+        .as_ref()
+        .and_then(|provider| provider.provenance())
+        && provenance.model == "intfloat/multilingual-e5-small"
+    {
+        let store = PostgresEmbeddingStore::connect(&database_url).await?;
+        let readiness = store.e5_release_readiness(&provenance).await;
+        store.close().await;
+        if !readiness?.is_ready() {
+            return Err(EmbeddingProviderError::safe(
+                "E5 release is incomplete or its ANN index is unavailable",
+            )
+            .into());
+        }
+        if provenance.version != "onnx-v1" {
+            let review_path = env::var("ROCKSERVER_E5_QUALITY_REVIEW_PATH").map_err(|_| {
+                EmbeddingProviderError::safe("E5 quality review path is required for a new version")
+            })?;
+            let review = fs::read(review_path).map_err(|_| {
+                EmbeddingProviderError::safe("E5 quality review file is unreadable")
+            })?;
+            EmbeddingQualityReview::validate_json(&review, &provenance)?;
+        }
+    }
     let language_classifier = match (&embedding_provider, semantic_language_filters_enabled()?) {
         (Some(provider), true) if provider.supports_semantic_intent_filters() => {
             match SemanticLanguageClassifier::load(provider.clone()).await {
                 Ok(classifier) => {
-                    tracing::info!("semantic language filters enabled");
+                    tracing::info!("semantic language diagnostics enabled");
                     Some(Arc::new(classifier))
                 }
                 Err(error) => {
-                    tracing::warn!(%error, "semantic language filters unavailable; continuing without them");
+                    tracing::warn!(%error, "semantic language diagnostics unavailable; continuing without them");
                     None
                 }
             }
         }
         (_, false) => {
-            tracing::info!("semantic language filters disabled by configuration");
+            tracing::info!("semantic language diagnostics disabled by configuration");
             None
         }
         (Some(_), true) => {
-            tracing::info!("semantic language filters require a semantic embedding provider");
+            tracing::info!("semantic language diagnostics require a semantic embedding provider");
             None
         }
         (None, true) => None,
     };
     let structured_provider = YandexLlmProvider::optional_from_env()?
         .map(|provider| Arc::new(provider) as Arc<dyn LlmProvider>);
+    let has_structured_provider = structured_provider.is_some();
     let query_parser: Arc<dyn QueryParser> = match &structured_provider {
         Some(provider) => Arc::new(LlmQueryParser::new(Arc::clone(provider))),
         None => Arc::new(DeterministicQueryParser),
@@ -67,12 +94,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Some(provider) => Arc::new(LlmCommandInterpreter::new(provider)),
         None => Arc::new(DeterministicCommandInterpreter),
     };
-    let search_service = SearchService::with_providers_and_language_classifier(
+    let mut search_service = SearchService::with_providers_and_language_classifier(
         repository,
         query_parser,
         embedding_provider,
         language_classifier,
     );
+    if has_structured_provider {
+        let taxonomy_pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect_lazy(&database_url)?;
+        search_service = search_service.with_taxonomy_source(Arc::new(
+            PostgresGenreTaxonomySource::from_pool(taxonomy_pool),
+        ));
+    }
     let listener = TcpListener::bind(config.bind_addr).await?;
     tracing::info!(address = %config.bind_addr, "RockServer listening");
 

@@ -50,12 +50,4 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
-Write-Host "=== Backfilling station embeddings ===" -ForegroundColor Cyan
-cargo run --features onnx-local --bin backfill_embeddings
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Backfill failed with exit code $LASTEXITCODE"
-    exit $LASTEXITCODE
-}
-
-Write-Host ""
-Write-Host "=== Done ===" -ForegroundColor Green
+Write-Host "=== Import and probing done. Run cargo run --features onnx-local --bin backfill_embeddings separately when vectors are needed. ===" -ForegroundColor Green

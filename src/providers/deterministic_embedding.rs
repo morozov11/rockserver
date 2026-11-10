@@ -5,7 +5,8 @@ use std::{env, error::Error, fmt};
 use async_trait::async_trait;
 
 use crate::search::{
-    Embedding, EmbeddingProvider, EmbeddingProviderError, MAX_EMBEDDING_DIMENSION,
+    Embedding, EmbeddingProvenance, EmbeddingProvider, EmbeddingProviderError,
+    MAX_EMBEDDING_DIMENSION,
 };
 
 /// Environment variable selecting the optional request-path embedding provider.
@@ -72,6 +73,14 @@ impl DeterministicEmbeddingProvider {
 
 #[async_trait]
 impl EmbeddingProvider for DeterministicEmbeddingProvider {
+    fn provenance(&self) -> Option<EmbeddingProvenance> {
+        Some(EmbeddingProvenance {
+            model: DETERMINISTIC_MODEL.to_owned(),
+            version: DETERMINISTIC_VERSION.to_owned(),
+            dimension: self.dimension,
+        })
+    }
+
     async fn embed(&self, text: &str) -> Result<Embedding, EmbeddingProviderError> {
         let mut values = vec![0.0_f32; self.dimension];
         for token in text

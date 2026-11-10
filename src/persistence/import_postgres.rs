@@ -285,11 +285,11 @@ async fn upsert_stations(
                 "Catalog station ID collides with another provider",
             ));
         }
-        let metadata_changed = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM stations WHERE source = $1 AND source_station_id = $2 AND (name IS DISTINCT FROM $3 OR homepage_url IS DISTINCT FROM $4 OR tags IS DISTINCT FROM $5 OR language IS DISTINCT FROM $6 OR country_code IS DISTINCT FROM $7))",
+        let document_text = searchable_text(station);
+        let document_changed = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM stations WHERE source = $1 AND source_station_id = $2 AND searchable_text IS DISTINCT FROM $3)",
         )
-        .bind(source).bind(&station.source_station_id).bind(&station.name).bind(&station.homepage_url)
-        .bind(&station.tags).bind(&station.language).bind(&station.country_code)
+        .bind(source).bind(&station.source_station_id).bind(&document_text)
         .fetch_one(&mut **transaction).await
         .map_err(|_| CatalogImportError::safe("PostgreSQL station metadata check failed"))?;
         sqlx::query(
@@ -305,7 +305,7 @@ ON CONFLICT (source, source_station_id) DO UPDATE SET
         )
         .bind(&station.id).bind(source).bind(&station.source_station_id).bind(&station.name)
         .bind(&station.homepage_url).bind(&station.tags).bind(&station.language).bind(&station.country_code)
-        .bind(searchable_text(station)).bind(run_id).execute(&mut **transaction).await
+        .bind(&document_text).bind(run_id).execute(&mut **transaction).await
         .map_err(|_| CatalogImportError::safe("PostgreSQL station upsert failed"))?;
         sqlx::query(
             "INSERT INTO station_icons (station_id, source_url, source_priority, status) VALUES ($1, $2, $3, CASE WHEN $2::text IS NULL THEN 'missing' ELSE 'pending' END) ON CONFLICT (station_id) DO UPDATE SET source_url = CASE WHEN station_icons.manual_override THEN station_icons.source_url ELSE EXCLUDED.source_url END, source_priority = CASE WHEN station_icons.manual_override THEN station_icons.source_priority ELSE EXCLUDED.source_priority END, refresh_needed = CASE WHEN station_icons.manual_override THEN station_icons.refresh_needed ELSE station_icons.source_url IS DISTINCT FROM EXCLUDED.source_url END, status = CASE WHEN station_icons.manual_override THEN station_icons.status WHEN station_icons.status = 'ready' THEN 'ready' ELSE EXCLUDED.status END, updated_at = now()",
@@ -316,7 +316,7 @@ ON CONFLICT (source, source_station_id) DO UPDATE SET
         .execute(&mut **transaction)
         .await
         .map_err(|_| CatalogImportError::safe("PostgreSQL station icon source upsert failed"))?;
-        if metadata_changed {
+        if document_changed {
             sqlx::query("DELETE FROM station_embeddings WHERE station_id = $1")
                 .bind(&station.id)
                 .execute(&mut **transaction)

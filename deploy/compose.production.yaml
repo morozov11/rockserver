@@ -9,6 +9,10 @@ services:
     volumes:
       - /home/rockserver/logs:/var/log/rockserver
 
+  embedding_backfill:
+    volumes:
+      - /home/rockserver/logs:/var/log/rockserver
+
   caddy:
     image: ${ROCKSERVER_CADDY_IMAGE:?ROCKSERVER_CADDY_IMAGE must point to the approved immutable UI image}
     environment:

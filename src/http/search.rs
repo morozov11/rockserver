@@ -214,6 +214,11 @@ async fn search_impl(
             );
         }
         Err(_) => {
+            tracing::info!(
+                event = "search_timeout",
+                endpoint = "search",
+                "search timed out"
+            );
             return error_response(
                 StatusCode::GATEWAY_TIMEOUT,
                 "search_timeout",

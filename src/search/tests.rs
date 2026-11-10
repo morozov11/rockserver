@@ -2,7 +2,7 @@
 
 use std::{
     collections::BTreeSet,
-    io,
+    io::{self, Write},
     sync::{Arc, Mutex},
 };
 
@@ -14,6 +14,69 @@ use super::{
     RankedStation, RepositoryError, SearchAction, SearchConstraints, SearchQuery, SearchService,
     SemanticLanguageClassifier, StationRepository, UnavailableStationRepository, normalize_query,
 };
+
+#[path = "tests/taxonomy.rs"]
+mod taxonomy;
+
+struct CapturedLog(Arc<Mutex<Vec<u8>>>);
+
+impl Write for CapturedLog {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn text_and_private_search_logs_exclude_command_content() {
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::fmt()
+        .json()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_writer({
+            let captured = captured.clone();
+            move || CapturedLog(captured.clone())
+        })
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let service = SearchService::new(Arc::new(
+            InMemoryStationRepository::with_legacy_fixture_catalog(),
+        ));
+        let constraints = SearchConstraints {
+            limit: 10,
+            offset: 0,
+            excluded_station_ids: BTreeSet::new(),
+        };
+        for private in [false, true] {
+            let input = QueryParserInput {
+                query: "unique-private-command-67193".to_owned(),
+                locale: "en-US".to_owned(),
+            };
+            if private {
+                service
+                    .interpret_and_search_private(input, &constraints)
+                    .await
+                    .unwrap();
+            } else {
+                service
+                    .interpret_and_search(input, &constraints)
+                    .await
+                    .unwrap();
+            }
+        }
+    });
+    let logs = String::from_utf8(captured.lock().unwrap().clone()).unwrap();
+    assert!(logs.matches("search_observation").count() >= 2, "{logs}");
+    assert!(!logs.contains("unique-private-command-67193"));
+}
 
 #[tokio::test]
 async fn equal_scores_are_ordered_by_station_id() {
@@ -150,7 +213,11 @@ async fn query_parser_receives_only_request_input_and_returns_structured_intent(
     assert_eq!(*input_seen.lock().unwrap(), Some(input));
     assert!(outcome.query.terms.contains(&"rock".to_owned()));
     assert!(outcome.query.terms.contains(&"рок".to_owned()));
-    assert_eq!(outcome.stations.len(), 2);
+    assert_eq!(
+        outcome.query.language, None,
+        "parser language needs an explicit request"
+    );
+    assert_eq!(outcome.stations.len(), 3);
 }
 
 struct FailingEmbeddingProvider;
@@ -277,43 +344,6 @@ impl StationRepository for RecordingRepository {
 }
 
 #[tokio::test]
-async fn heavy_metal_query_finds_rock_stations_via_genre_hierarchy() {
-    let service = SearchService::new(Arc::new(
-        InMemoryStationRepository::with_legacy_fixture_catalog(),
-    ));
-    let query = SearchQuery {
-        action: SearchAction::Play,
-        original: "heavy metal".to_owned(),
-        locale: "en-US".to_owned(),
-        terms: vec!["heavy".to_owned(), "metal".to_owned()],
-        tags: vec!["heavy metal".to_owned()],
-        language: None,
-        country_code: None,
-        core_term_count: 2,
-        raw_query: "heavy metal".to_owned(),
-        prefer_station_name: false,
-        station_name_hint_queries: Vec::new(),
-    };
-    let constraints = SearchConstraints {
-        limit: 10,
-        offset: 0,
-        excluded_station_ids: BTreeSet::new(),
-    };
-
-    let ids: Vec<_> = service
-        .search(&query, &constraints)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|s| s.station.id)
-        .collect();
-
-    // metal-001 matches exactly; rock stations match via hierarchy fallback.
-    assert!(ids.contains(&"station-metal-001".to_owned()));
-    assert!(!ids.is_empty());
-}
-
-#[tokio::test]
 async fn english_heavy_query_prefers_english_stations() {
     let service = SearchService::new(Arc::new(
         InMemoryStationRepository::with_legacy_fixture_catalog(),
@@ -346,38 +376,6 @@ async fn english_heavy_query_prefers_english_stations() {
     }
     // The exact heavy-metal station must appear.
     assert!(results.iter().any(|s| s.station.id == "station-metal-001"));
-}
-
-#[tokio::test]
-async fn genre_fallback_drops_filter_when_no_hierarchy_match() {
-    let service = SearchService::new(Arc::new(
-        InMemoryStationRepository::with_builtin_catalog().unwrap(),
-    ));
-    let query = SearchQuery {
-        action: SearchAction::Play,
-        original: "reggae".to_owned(),
-        locale: "en-US".to_owned(),
-        terms: vec!["reggae".to_owned()],
-        tags: vec!["reggae".to_owned()],
-        language: None,
-        country_code: None,
-        core_term_count: 1,
-        raw_query: "reggae".to_owned(),
-        prefer_station_name: false,
-        station_name_hint_queries: Vec::new(),
-    };
-    let constraints = SearchConstraints {
-        limit: 10,
-        offset: 0,
-        excluded_station_ids: BTreeSet::new(),
-    };
-
-    let results = service.search(&query, &constraints).await.unwrap();
-
-    // No reggae station in catalog, but MIN_RELEVANCE_SCORE gate still
-    // prevents random stations from leaking through. The builtin catalog
-    // has no term "reggae" anywhere, so the result should be empty.
-    assert!(results.is_empty());
 }
 
 #[tokio::test]
@@ -415,7 +413,7 @@ async fn deterministic_fake_embedding_crosses_only_the_repository_boundary() {
 }
 
 #[tokio::test]
-async fn confident_semantic_language_filter_is_applied_before_search() {
+async fn explicit_language_request_overrides_classifier_suggestion() {
     let classifier = SemanticLanguageClassifier::from_embeddings(vec![
         (
             "en",
@@ -436,7 +434,7 @@ async fn confident_semantic_language_filter_is_applied_before_search() {
     let outcome = service
         .interpret_and_search(
             QueryParserInput {
-                query: "Включи английский рок".to_owned(),
+                query: "Включи рок на английском".to_owned(),
                 locale: "ru-RU".to_owned(),
             },
             &SearchConstraints {
@@ -455,4 +453,54 @@ async fn confident_semantic_language_filter_is_applied_before_search() {
             .iter()
             .all(|station| station.station.language.as_deref() == Some("en"))
     );
+
+    let unmarked = service
+        .interpret_and_search(
+            QueryParserInput {
+                query: "Включи английский рок".to_owned(),
+                locale: "ru-RU".to_owned(),
+            },
+            &SearchConstraints {
+                limit: 10,
+                offset: 0,
+                excluded_station_ids: BTreeSet::new(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(unmarked.query.language, None);
+}
+
+#[tokio::test]
+async fn explicit_language_is_kept_when_classifier_is_absent() {
+    let service = SearchService::new(Arc::new(
+        InMemoryStationRepository::with_legacy_fixture_catalog(),
+    ));
+    let constraints = SearchConstraints {
+        limit: 10,
+        offset: 0,
+        excluded_station_ids: BTreeSet::new(),
+    };
+    let explicit = service
+        .interpret_and_search(
+            QueryParserInput {
+                query: "джаз на французском".to_owned(),
+                locale: "ru-RU".to_owned(),
+            },
+            &constraints,
+        )
+        .await
+        .unwrap();
+    assert_eq!(explicit.query.language.as_deref(), Some("fr"));
+    let unmarked = service
+        .interpret_and_search(
+            QueryParserInput {
+                query: "включи джаз".to_owned(),
+                locale: "fr-FR".to_owned(),
+            },
+            &constraints,
+        )
+        .await
+        .unwrap();
+    assert_eq!(unmarked.query.language, None);
 }

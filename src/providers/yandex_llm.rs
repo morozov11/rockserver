@@ -15,6 +15,8 @@ pub const API_KEY_ENV: &str = "YANDEX_AI_API_KEY";
 pub const FOLDER_ID_ENV: &str = "YANDEX_FOLDER_ID";
 /// Optional Yandex model identifier, without folder or version.
 pub const MODEL_ENV: &str = "YANDEX_LLM_MODEL";
+/// Optional fixed Yandex model version; defaults to `latest`.
+pub const MODEL_VERSION_ENV: &str = "YANDEX_LLM_MODEL_VERSION";
 /// Optional whole-request timeout in milliseconds.
 pub const TIMEOUT_MS_ENV: &str = "YANDEX_LLM_TIMEOUT_MS";
 
@@ -37,6 +39,7 @@ pub struct YandexLlmConfig {
     api_key: String,
     folder_id: String,
     model: String,
+    model_version: String,
     timeout: Duration,
     endpoint: Url,
 }
@@ -48,6 +51,7 @@ impl fmt::Debug for YandexLlmConfig {
             .field("api_key", &"[REDACTED]")
             .field("folder_id", &"[REDACTED]")
             .field("model", &self.model)
+            .field("model_version", &self.model_version)
             .field("timeout", &self.timeout)
             .field("endpoint", &self.endpoint)
             .finish()
@@ -63,11 +67,13 @@ impl YandexLlmConfig {
         let api_key = read_env(API_KEY_ENV, YandexLlmConfigError::InvalidApiKey)?;
         let folder_id = read_env(FOLDER_ID_ENV, YandexLlmConfigError::InvalidFolderId)?;
         let model = read_env(MODEL_ENV, YandexLlmConfigError::InvalidModel)?;
+        let model_version = read_env(MODEL_VERSION_ENV, YandexLlmConfigError::InvalidModelVersion)?;
         let timeout = read_env(TIMEOUT_MS_ENV, YandexLlmConfigError::InvalidTimeout)?;
         Self::from_lookup(|name| match name {
             API_KEY_ENV => api_key.clone(),
             FOLDER_ID_ENV => folder_id.clone(),
             MODEL_ENV => model.clone(),
+            MODEL_VERSION_ENV => model_version.clone(),
             TIMEOUT_MS_ENV => timeout.clone(),
             _ => None,
         })
@@ -96,19 +102,29 @@ impl YandexLlmConfig {
         if !is_identifier(&model) {
             return Err(YandexLlmConfigError::InvalidModel);
         }
+        let model_version = lookup(MODEL_VERSION_ENV)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "latest".to_owned());
+        if !is_identifier(&model_version) {
+            return Err(YandexLlmConfigError::InvalidModelVersion);
+        }
         let timeout_ms = parse_timeout(lookup(TIMEOUT_MS_ENV))?;
         let endpoint = Url::parse(DEFAULT_ENDPOINT).expect("official Yandex endpoint is valid");
         Ok(Some(Self {
             api_key,
             folder_id,
             model,
+            model_version,
             timeout: Duration::from_millis(timeout_ms),
             endpoint,
         }))
     }
 
     fn model_uri(&self) -> String {
-        format!("gpt://{}/{}/latest", self.folder_id, self.model)
+        format!(
+            "gpt://{}/{}/{}",
+            self.folder_id, self.model, self.model_version
+        )
     }
 }
 
@@ -155,6 +171,8 @@ pub enum YandexLlmConfigError {
     InvalidFolderId,
     /// The optional model identifier does not have the supported form.
     InvalidModel,
+    /// The optional version identifier does not have the supported form.
+    InvalidModelVersion,
     /// The optional timeout is outside the allowed range or not an integer.
     InvalidTimeout,
 }
@@ -174,6 +192,10 @@ impl fmt::Display for YandexLlmConfigError {
                 write!(formatter, "{FOLDER_ID_ENV} must be a valid identifier")
             }
             Self::InvalidModel => write!(formatter, "{MODEL_ENV} must be a valid model identifier"),
+            Self::InvalidModelVersion => write!(
+                formatter,
+                "{MODEL_VERSION_ENV} must be a valid model version"
+            ),
             Self::InvalidTimeout => write!(
                 formatter,
                 "{TIMEOUT_MS_ENV} must be an integer from {MIN_TIMEOUT_MS} to {MAX_TIMEOUT_MS}"
@@ -222,7 +244,10 @@ impl YandexLlmProvider {
 
     fn request_body(&self, request: &LlmRequest, redact_folder: bool) -> Value {
         let model_uri = if redact_folder {
-            format!("gpt://[REDACTED]/{}/latest", self.config.model)
+            format!(
+                "gpt://[REDACTED]/{}/{}",
+                self.config.model, self.config.model_version
+            )
         } else {
             self.config.model_uri()
         };
@@ -260,19 +285,23 @@ impl LlmProvider for YandexLlmProvider {
             .await
             .map_err(|error| {
                 if error.is_timeout() {
-                    LlmProviderError::safe("structured intent request timed out")
+                    LlmProviderError::transient("structured intent request timed out")
                 } else {
-                    LlmProviderError::safe("structured intent request failed")
+                    LlmProviderError::transient("structured intent request failed")
                 }
             })?;
         let status = response.status();
         if !status.is_success() {
-            let _bytes = read_bounded(response).await?;
             tracing::debug!(status = status.as_u16(), "structured intent request failed");
-            return Err(LlmProviderError::safe(format!(
+            let error = format!(
                 "structured intent service returned HTTP {}",
                 status.as_u16()
-            )));
+            );
+            return Err(if status.as_u16() == 429 || status.is_server_error() {
+                LlmProviderError::transient(error)
+            } else {
+                LlmProviderError::safe(error)
+            });
         }
         let bytes = read_bounded(response).await?;
         tracing::debug!(
@@ -311,11 +340,9 @@ async fn read_bounded(mut response: reqwest::Response) -> Result<Vec<u8>, LlmPro
         ));
     }
     let mut body = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|_| LlmProviderError::safe("structured intent service response read failed"))?
-    {
+    while let Some(chunk) = response.chunk().await.map_err(|_| {
+        LlmProviderError::transient("structured intent service response read failed")
+    })? {
         if body.len().saturating_add(chunk.len()) > MAX_PROVIDER_RESPONSE_BYTES {
             return Err(LlmProviderError::safe(
                 "structured intent service returned an oversized response",
@@ -347,250 +374,5 @@ struct CompletionMessage {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::{
-        sync::{Arc, Mutex},
-        time::Duration,
-    };
-
-    use axum::{
-        Router,
-        extract::State,
-        http::{HeaderMap, StatusCode},
-        response::IntoResponse,
-        routing::post,
-    };
-    use serde_json::{Value, json};
-
-    use super::{
-        API_KEY_ENV, DEFAULT_MODEL, DEFAULT_TIMEOUT_MS, FOLDER_ID_ENV, LlmProvider, LlmRequest,
-        MODEL_ENV, TIMEOUT_MS_ENV, YandexLlmConfig, YandexLlmConfigError, YandexLlmProvider,
-    };
-    use crate::search::{MAX_LLM_INTENT_JSON_BYTES, QueryParserInput};
-
-    #[test]
-    fn configuration_is_optional_strict_and_secret_safe() {
-        assert!(YandexLlmConfig::from_lookup(|_| None).unwrap().is_none());
-        assert_eq!(
-            YandexLlmConfig::from_lookup(
-                |name| (name == API_KEY_ENV).then(|| "secret-key".to_owned())
-            )
-            .unwrap_err(),
-            YandexLlmConfigError::PartialConfiguration
-        );
-        let config = YandexLlmConfig::from_lookup(|name| match name {
-            API_KEY_ENV => Some("secret-key".to_owned()),
-            FOLDER_ID_ENV => Some("folder_123".to_owned()),
-            _ => None,
-        })
-        .unwrap()
-        .unwrap();
-        assert!(format!("{config:?}").contains("[REDACTED]"));
-        assert!(!format!("{config:?}").contains("secret-key"));
-        assert_eq!(config.model, DEFAULT_MODEL);
-        assert_eq!(config.timeout, Duration::from_millis(DEFAULT_TIMEOUT_MS));
-
-        let empty_override = YandexLlmConfig::from_lookup(|name| match name {
-            API_KEY_ENV => Some("secret-key".to_owned()),
-            FOLDER_ID_ENV => Some("folder_123".to_owned()),
-            MODEL_ENV => Some("   ".to_owned()),
-            TIMEOUT_MS_ENV => Some("".to_owned()),
-            _ => None,
-        })
-        .unwrap()
-        .unwrap();
-        assert_eq!(empty_override.model, DEFAULT_MODEL);
-        assert_eq!(
-            empty_override.timeout,
-            Duration::from_millis(DEFAULT_TIMEOUT_MS)
-        );
-
-        let error = YandexLlmConfig::from_lookup(|name| match name {
-            API_KEY_ENV => Some("secret-key".to_owned()),
-            FOLDER_ID_ENV => Some("folder_123".to_owned()),
-            TIMEOUT_MS_ENV => Some("1".to_owned()),
-            _ => None,
-        })
-        .unwrap_err();
-        assert!(!error.to_string().contains("secret-key"));
-    }
-
-    #[tokio::test]
-    async fn provider_sends_documented_auth_model_and_catalog_free_request() {
-        let seen = Arc::new(Mutex::new(None));
-        let (endpoint, server) = start_mock(
-            StatusCode::OK,
-            completion("{\"terms\":[\"jazz\"],\"tags\":[]}"),
-            seen.clone(),
-            None,
-        )
-        .await;
-        let provider = provider(endpoint, 1_000);
-        let output = provider
-            .generate_json(&LlmRequest::radio_intent(&input()))
-            .await
-            .unwrap();
-        server.abort();
-        assert!(output.contains("jazz"));
-        let request = seen.lock().unwrap().clone().unwrap();
-        assert_eq!(
-            request.authorization.as_deref(),
-            Some("Api-Key test-api-key")
-        );
-        assert_eq!(
-            request.body["modelUri"],
-            "gpt://folder_123/yandexgpt-lite/latest"
-        );
-        assert_eq!(request.body["completionOptions"]["stream"], false);
-        assert_eq!(
-            request.body["jsonSchema"]["schema"]["additionalProperties"],
-            false
-        );
-        assert_eq!(request.body["messages"].as_array().unwrap().len(), 2);
-        assert_eq!(request.body["messages"][1]["role"], "user");
-        assert_eq!(
-            request.body["messages"][1]["text"],
-            json!({"command":"calm jazz","locale":"en-US"}).to_string()
-        );
-        assert!(!request.body.to_string().contains("station-"));
-    }
-
-    #[tokio::test]
-    async fn provider_sanitizes_http_timeout_malformed_and_oversized_failures() {
-        let seen = Arc::new(Mutex::new(None));
-        let (endpoint, server) = start_mock(
-            StatusCode::BAD_GATEWAY,
-            "upstream secret".to_owned(),
-            seen.clone(),
-            None,
-        )
-        .await;
-        let error = provider(endpoint, 1_000)
-            .generate_json(&LlmRequest::radio_intent(&input()))
-            .await
-            .unwrap_err();
-        server.abort();
-        assert_eq!(
-            error.to_string(),
-            "structured intent service returned HTTP 502"
-        );
-        assert!(!error.to_string().contains("secret"));
-
-        let (endpoint, server) =
-            start_mock(StatusCode::OK, "not JSON".to_owned(), seen.clone(), None).await;
-        let error = provider(endpoint, 1_000)
-            .generate_json(&LlmRequest::radio_intent(&input()))
-            .await
-            .unwrap_err();
-        server.abort();
-        assert_eq!(
-            error.to_string(),
-            "structured intent service returned a malformed response"
-        );
-
-        let oversized = completion(&format!(
-            "{{\"terms\":[\"{}\"],\"tags\":[]}}",
-            "x".repeat(MAX_LLM_INTENT_JSON_BYTES + 1)
-        ));
-        let (endpoint, server) = start_mock(StatusCode::OK, oversized, seen.clone(), None).await;
-        let error = provider(endpoint, 1_000)
-            .generate_json(&LlmRequest::radio_intent(&input()))
-            .await
-            .unwrap_err();
-        server.abort();
-        assert!(error.to_string().contains("oversized"));
-
-        let (endpoint, server) = start_mock(
-            StatusCode::OK,
-            completion("{\"terms\":[],\"tags\":[]}"),
-            seen,
-            Some(Duration::from_millis(100)),
-        )
-        .await;
-        let error = provider(endpoint, 100)
-            .generate_json(&LlmRequest::radio_intent(&input()))
-            .await
-            .unwrap_err();
-        server.abort();
-        assert_eq!(error.to_string(), "structured intent request timed out");
-    }
-
-    fn input() -> QueryParserInput {
-        QueryParserInput {
-            query: "calm jazz".to_owned(),
-            locale: "en-US".to_owned(),
-        }
-    }
-
-    fn provider(endpoint: String, timeout_ms: u64) -> YandexLlmProvider {
-        let mut config = YandexLlmConfig::from_lookup(|name| match name {
-            API_KEY_ENV => Some("test-api-key".to_owned()),
-            FOLDER_ID_ENV => Some("folder_123".to_owned()),
-            MODEL_ENV => Some(DEFAULT_MODEL.to_owned()),
-            TIMEOUT_MS_ENV => Some(timeout_ms.to_string()),
-            _ => None,
-        })
-        .unwrap()
-        .unwrap();
-        config.endpoint = endpoint.parse().unwrap();
-        YandexLlmProvider::new(config).unwrap()
-    }
-
-    fn completion(text: &str) -> String {
-        json!({"result":{"alternatives":[{"message":{"text":text}}]}}).to_string()
-    }
-
-    #[derive(Clone)]
-    struct MockState {
-        status: StatusCode,
-        body: String,
-        seen: Arc<Mutex<Option<RecordedRequest>>>,
-        delay: Option<Duration>,
-    }
-
-    #[derive(Clone, Debug)]
-    struct RecordedRequest {
-        authorization: Option<String>,
-        body: Value,
-    }
-
-    async fn start_mock(
-        status: StatusCode,
-        body: String,
-        seen: Arc<Mutex<Option<RecordedRequest>>>,
-        delay: Option<Duration>,
-    ) -> (String, tokio::task::JoinHandle<()>) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let app = Router::new()
-            .route("/", post(mock_handler))
-            .with_state(MockState {
-                status,
-                body,
-                seen,
-                delay,
-            });
-        let server = tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-        (format!("http://{address}/"), server)
-    }
-
-    async fn mock_handler(
-        State(state): State<MockState>,
-        headers: HeaderMap,
-        body: String,
-    ) -> impl IntoResponse {
-        *state.seen.lock().unwrap() = Some(RecordedRequest {
-            authorization: headers
-                .get("authorization")
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_owned),
-            body: serde_json::from_str(&body).unwrap(),
-        });
-        if let Some(delay) = state.delay {
-            tokio::time::sleep(delay).await;
-        }
-        (state.status, state.body)
-    }
-}
+#[path = "yandex_llm/tests.rs"]
+mod tests;
