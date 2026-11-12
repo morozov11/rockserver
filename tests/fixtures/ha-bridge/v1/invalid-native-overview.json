@@ -1,0 +1,16 @@
+{
+  "connected": true,
+  "online": true,
+  "sensors": [{
+    "entity_id": "sensor.room_temperature",
+    "display_name": "Room temperature",
+    "value": 21.5,
+    "unit": "°C",
+    "device_class": "temperature",
+    "quality": "ok",
+    "observed_at": "2026-11-12T12:00:00Z",
+    "received_at": "2026-11-12T12:00:01Z",
+    "status": "fresh"
+  }],
+  "weather": null
+}

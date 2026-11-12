@@ -36,6 +36,8 @@ mod builder;
 mod device_catalog;
 #[path = "directory.rs"]
 mod directory;
+#[path = "ha_bridge.rs"]
+mod ha_bridge;
 #[path = "health.rs"]
 mod health;
 #[path = "pairing.rs"]

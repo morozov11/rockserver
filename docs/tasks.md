@@ -1,5 +1,26 @@
 # Task log
 
+## Home Assistant account card and server release — 2026-11-12
+
+- Goal: show the owner's approved HA sensors, current weather and short forecast in the personal cabinet; commit and deploy RockServer.
+- Scope/result so far: added owner-only overview endpoint and public sensor projection, HA sensor names in the bridge contract, account card with freshness/connection labels, contract fixtures, an offline sensor freshness test, and a disposable PostgreSQL owner/revocation test. The existing outbound HA custom integration and operator guide are included in this release.
+- Release correction: the first Docker build was interrupted before upload after finding that `ha_bridge_admin` was absent from the runtime image. Added the binary and a production Compose invocation to the operator guide; no remote change occurred during that attempt.
+- Checks: final sequential `cargo fmt --check`, strict Clippy, full `cargo test` with local loopback/file access (231 library tests), TypeScript, 48 web tests, Vite build, two fake HA/RockServer tests, and disposable PostgreSQL migration/projection test passed. Deployment status will be recorded after release.
+- Status: implementation verified locally; production release and live HA pilot pending.
+
+## Home Assistant custom integration bridge — 2026-11-12
+
+- Goal: deliver the roadmap's read-only local HA sensor and weather bridge using an owner-approved custom integration inside HA instead of a separate agent process.
+- Scope so far: OpenAPI integration WSS and browser weather contracts with positive/negative fixtures; migration 0029 and owner-bound PostgreSQL state; operator provision/rotate/revoke binary; bounded server ingestion and freshness; outbound HA custom integration, local configuration guide and handoff ledger. No client, ESP32, voice, TTS, actuator or deployment changes.
+- Result at that stage: local read-only implementation and operator run guide complete. Required checks passed sequentially (230 library tests and OpenAPI fixtures); two offline Python fake tests passed. The restricted-sandbox attempt had 15 known socket/HTTP/filesystem failures; the local rerun passed. No real HA connection was claimed.
+- Status: implemented locally; live HA pilot and disposable PostgreSQL integration verification pending. See `docs/ha-bridge-handoff.md` for exact continuation state and `docs/home-assistant-bridge.md` for owner setup.
+
+## Local Home Assistant bridge architecture — 2026-11-12
+
+- Goal/scope: plan integration of a Home Assistant reachable only inside the owner's home network with RockServer, without ESP32 or other client work.
+- Result: added `docs/roadmap/home-assistant-local-bridge.md` with outbound WSS local agent, separate integration credential and endpoint, explicit allowlists, sensor/current-weather/forecast ingestion, freshness, failure handling, implementation stages and acceptance criteria. No runtime or public API changed.
+- Checks/status: documentation and existing contracts inspected; `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test --quiet` passed sequentially; no live HA check. Plan only; implementation awaits host, entity selection and credential provisioning.
+
 ## Production search hotfix deployment — 2026-11-10
 
 - Goal/scope: restore stable public station search with E5 enabled after release timeouts. Committed reviewed source/API/docs hotfix as `abdc02b934ceae42f02a8e71095eb3a9a812975a`; removed forced HNSW scan depth/strict ordering and raised only public text-search timeout to ten seconds. Voice retains five seconds; vectors/schema were not changed by this hotfix.

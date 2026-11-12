@@ -19,6 +19,7 @@ use crate::{
     device_control_command::CommandRouter,
     device_control_presence::ConnectionRegistry,
     device_control_state::StateHub,
+    ha_bridge::BridgeStore,
     persistence::PostgresAccountStore,
     personal_data::PersonalDataStore,
     providers::yandex_home::YandexHomeClient,
@@ -87,6 +88,8 @@ pub(crate) struct AppState {
     pub(crate) icon_import: Option<Arc<IconImportCoordinator>>,
     /// Optional read-only Yandex Smart Home client configured for browser accounts.
     pub(crate) yandex_home: Option<Arc<YandexHomeClient>>,
+    /// Owner-bound Home Assistant integration ingress and weather read store.
+    pub(crate) ha_bridge: Option<Arc<dyn BridgeStore>>,
     pub(crate) control_timing: ControlTiming,
     pub(crate) relay: super::relay::RelayState,
 }

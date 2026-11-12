@@ -805,6 +805,80 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /api/v1/integrations/home-assistant/connect:
+    get:
+      operationId: connectHomeAssistantBridge
+      summary: Accept one owner's read-only Home Assistant bridge over WSS
+      x-rockserver-status: implemented
+      description: >-
+        Requires a separate operator-provisioned HomeAssistantBridgeBearer in the Authorization
+        header before WebSocket upgrade. Native paired-device sessions, browser cookies and admin
+        tokens are rejected. The credential identifies one active owner and one integration; no
+        client user_id or integration_id is accepted. The first frame is integration.hello with
+        protocol_version 1, then a complete integration.snapshot at revision 1. Each later state
+        or weather frame advances the revision by one. Reconnect starts a server-owned epoch and
+        requires a new snapshot; an old connection cannot write. A duplicate identical revision
+        is acknowledged, a reordered or conflicting revision closes with resync_required.
+        Text JSON frames are limited to 65,536 bytes and 60 frames per rolling minute per integration
+        within one server process, including reconnects;
+        at most 128 explicitly approved sensors and seven daily forecast periods are accepted.
+        Server computes received_at and freshness. No commands or HA credentials are accepted.
+      security: [{ HomeAssistantBridgeBearer: [] }]
+      x-websocket-client-messages:
+        oneOf:
+          - { $ref: "#/components/schemas/HaBridgeHello" }
+          - { $ref: "#/components/schemas/HaBridgeSensorSnapshot" }
+          - { $ref: "#/components/schemas/HaBridgeSensorState" }
+          - { $ref: "#/components/schemas/HaBridgeWeather" }
+          - { $ref: "#/components/schemas/HaBridgeHeartbeat" }
+      x-websocket-server-messages:
+        oneOf:
+          - { $ref: "#/components/schemas/HaBridgeWelcome" }
+          - { $ref: "#/components/schemas/HaBridgeAck" }
+      responses:
+        "101": { description: Authenticated WebSocket upgrade. }
+        "401": { $ref: "#/components/responses/AuthenticationRequired" }
+        "503": { description: Integration storage is unavailable. }
+  /api/v1/browser/home-assistant:
+    get:
+      operationId: getHomeAssistantOverview
+      summary: Read the signed-in owner's HA sensors, weather and connection state
+      x-rockserver-status: implemented
+      description: >-
+        Requires the trusted first-party proxy and an active browser cookie. Returns an empty
+        disconnected view when this owner has no active integration. Sensors are limited to the
+        approved allowlist, have stable integration-scoped public IDs instead of HA native IDs,
+        and include server-computed fresh/stale/unavailable status. No other owner's values are
+        returned. Connection is online only when accepted bridge traffic arrived within 60 seconds.
+      security: [{ RockserverBrowserCookie: [] }]
+      responses:
+        "200":
+          description: Owner-visible read-only HA overview; no-store.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HaBridgeOverview" }
+        "401": { description: Browser session is missing or invalid. }
+        "403": { description: Trusted proxy proof is missing. }
+        "503": { description: Integration or account persistence is unavailable. }
+  /api/v1/browser/home-assistant/weather:
+    get:
+      operationId: getHomeAssistantWeather
+      summary: Read the signed-in owner's current HA weather and daily forecast
+      x-rockserver-status: implemented
+      description: >-
+        Requires the trusted first-party proxy and an active browser cookie. Current status and
+        forecast_status are computed independently; stale data remains labeled stale and may not
+        be presented as current. No values from other owners or external providers are substituted.
+      security: [{ RockserverBrowserCookie: [] }]
+      responses:
+        "200":
+          description: Last normalized observation with explicit current and forecast freshness.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HaBridgeWeatherRead" }
+        "401": { description: Browser session is missing or invalid. }
+        "403": { description: Trusted proxy proof is missing. }
+        "503": { description: No active integration observation or storage unavailable. }
   /api/v1/devices/connect:
     get:
       operationId: connectDeviceControl
@@ -1569,6 +1643,13 @@ components:
         It is the sole identity accepted by planned device-control operations and is also accepted
         by current native account and voice routes. Roles/capabilities are not token scopes;
         device-control policy is computed and enforced server-side.
+    HomeAssistantBridgeBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: >-
+        Operator-provisioned, owner-bound, revocable HA bridge credential shown once. It is
+        accepted only on the Home Assistant integration ingress, never on paired-device routes.
     AdminBearer:
       type: http
       scheme: bearer
@@ -1592,6 +1673,158 @@ components:
             request_id: req_01AUTH401
             details: {}
   schemas:
+    HaBridgeHello:
+      type: object
+      additionalProperties: false
+      required: [type, protocol_version]
+      properties:
+        type: { const: integration.hello }
+        protocol_version: { const: 1 }
+    HaBridgeSensorReading:
+      type: object
+      additionalProperties: false
+      required: [entity_id, display_name, value, unit, device_class, quality, observed_at]
+      properties:
+        entity_id: { type: string, pattern: "^sensor\\.[a-z0-9_]+$", maxLength: 128 }
+        display_name: { type: string, minLength: 1, maxLength: 128 }
+        value: { type: [number, "null"] }
+        unit: { type: [string, "null"], maxLength: 16 }
+        device_class: { type: [string, "null"], maxLength: 64 }
+        quality: { type: string, enum: [ok, unknown, unavailable] }
+        observed_at: { type: string, format: date-time }
+    HaBridgeSensorSnapshot:
+      type: object
+      additionalProperties: false
+      required: [type, revision, sensors]
+      properties:
+        type: { const: integration.snapshot }
+        revision: { const: 1 }
+        sensors:
+          type: array
+          maxItems: 128
+          items: { $ref: "#/components/schemas/HaBridgeSensorReading" }
+    HaBridgeSensorState:
+      type: object
+      additionalProperties: false
+      required: [type, revision, sensors]
+      properties:
+        type: { const: integration.state }
+        revision: { type: integer, minimum: 2 }
+        sensors:
+          type: array
+          maxItems: 128
+          items: { $ref: "#/components/schemas/HaBridgeSensorReading" }
+    HaBridgeForecastDay:
+      type: object
+      additionalProperties: false
+      required: [datetime, condition, temperature, templow, precipitation]
+      properties:
+        datetime: { type: string, format: date-time }
+        condition: { type: [string, "null"], maxLength: 64 }
+        temperature: { type: [number, "null"] }
+        templow: { type: [number, "null"] }
+        precipitation: { type: [number, "null"] }
+    HaBridgeWeatherReading:
+      type: object
+      additionalProperties: false
+      required: [entity_id, condition, temperature, temperature_unit, humidity, wind_speed, wind_speed_unit, quality, observed_at, forecast_observed_at, forecast]
+      properties:
+        entity_id: { type: string, pattern: "^weather\\.[a-z0-9_]+$", maxLength: 128 }
+        condition: { type: [string, "null"], maxLength: 64 }
+        temperature: { type: [number, "null"] }
+        temperature_unit: { type: [string, "null"], enum: ["°C", "°F", null] }
+        humidity: { type: [number, "null"], minimum: 0, maximum: 100 }
+        wind_speed: { type: [number, "null"], minimum: 0 }
+        wind_speed_unit: { type: [string, "null"], enum: ["km/h", "m/s", "mph", null] }
+        quality: { type: string, enum: [ok, unknown, unavailable] }
+        observed_at: { type: string, format: date-time }
+        forecast_observed_at: { type: [string, "null"], format: date-time }
+        forecast:
+          type: array
+          maxItems: 7
+          items: { $ref: "#/components/schemas/HaBridgeForecastDay" }
+    HaBridgeWeather:
+      type: object
+      additionalProperties: false
+      required: [type, revision, weather]
+      properties:
+        type: { const: integration.weather }
+        revision: { type: integer, minimum: 2 }
+        weather: { $ref: "#/components/schemas/HaBridgeWeatherReading" }
+    HaBridgeHeartbeat:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: { const: integration.heartbeat }
+    HaBridgeWelcome:
+      type: object
+      additionalProperties: false
+      required: [type, protocol_version, integration_id, epoch, allowed_sensors, weather_entity, max_frame_bytes, heartbeat_seconds]
+      properties:
+        type: { const: integration.welcome }
+        protocol_version: { const: 1 }
+        integration_id: { type: string, format: uuid }
+        epoch: { type: string, format: uuid }
+        allowed_sensors: { type: array, maxItems: 128, items: { type: string } }
+        weather_entity: { type: string }
+        max_frame_bytes: { const: 65536 }
+        heartbeat_seconds: { const: 30 }
+    HaBridgeAck:
+      type: object
+      additionalProperties: false
+      required: [type, revision]
+      properties:
+        type: { const: integration.ack }
+        revision: { type: integer, minimum: 1 }
+    HaBridgeWeatherRead:
+      type: object
+      required: [entity_id, condition, temperature, temperature_unit, humidity, wind_speed, wind_speed_unit, quality, observed_at, forecast_observed_at, forecast, received_at, status, forecast_status, online]
+      properties:
+        entity_id: { type: string, pattern: "^home_assistant\\.[0-9a-f]{32}\\.weather$" }
+        condition: { type: [string, "null"] }
+        temperature: { type: [number, "null"] }
+        temperature_unit: { type: [string, "null"] }
+        humidity: { type: [number, "null"] }
+        wind_speed: { type: [number, "null"] }
+        wind_speed_unit: { type: [string, "null"] }
+        quality: { type: string, enum: [ok, unknown, unavailable] }
+        observed_at: { type: string, format: date-time }
+        forecast_observed_at: { type: [string, "null"], format: date-time }
+        forecast: { type: array, maxItems: 7, items: { $ref: "#/components/schemas/HaBridgeForecastDay" } }
+        received_at: { type: string, format: date-time }
+        status: { type: string, enum: [fresh, stale, unavailable] }
+        forecast_status: { type: string, enum: [fresh, stale, unavailable] }
+        online: { type: boolean }
+    HaBridgeVisibleSensor:
+      type: object
+      additionalProperties: false
+      required: [entity_id, display_name, value, unit, device_class, quality, observed_at, received_at, status]
+      properties:
+        entity_id: { type: string, pattern: "^home_assistant\\.[0-9a-f]{32}\\.[0-9a-f]{16}$", maxLength: 128 }
+        display_name: { type: string, minLength: 1, maxLength: 128 }
+        value: { type: [number, "null"] }
+        unit: { type: [string, "null"], maxLength: 16 }
+        device_class: { type: [string, "null"], maxLength: 64 }
+        quality: { type: string, enum: [ok, unknown, unavailable] }
+        observed_at: { type: string, format: date-time }
+        received_at: { type: string, format: date-time }
+        status: { type: string, enum: [fresh, stale, unavailable] }
+    HaBridgeOverview:
+      type: object
+      additionalProperties: false
+      required: [connected, online, sensors, weather]
+      properties:
+        connected: { type: boolean }
+        online: { type: boolean }
+        sensors:
+          type: array
+          maxItems: 128
+          items: { $ref: "#/components/schemas/HaBridgeVisibleSensor" }
+        weather:
+          oneOf:
+            - { type: "null" }
+            - { $ref: "#/components/schemas/HaBridgeWeatherRead" }
     StationNowPlaying:
       type: object
       additionalProperties: false

@@ -6,8 +6,8 @@ use tracing::Level;
 
 use super::{
     account, admin_auth, admin_console, auth, browser_sync, catalog, control, device_catalog,
-    directory, health, pairing, relay, search, state::AppState, station_icons, sync, voice,
-    yandex_home,
+    directory, ha_bridge, health, pairing, relay, search, state::AppState, station_icons, sync,
+    voice, yandex_home,
 };
 
 /// Assembles the complete Axum router tree with public and administrative routes,
@@ -96,6 +96,18 @@ pub(super) fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/devices/connect",
             axum::routing::get(control::connect),
+        )
+        .route(
+            "/api/v1/integrations/home-assistant/connect",
+            axum::routing::get(ha_bridge::connect),
+        )
+        .route(
+            "/api/v1/browser/home-assistant/weather",
+            axum::routing::get(ha_bridge::weather),
+        )
+        .route(
+            "/api/v1/browser/home-assistant",
+            axum::routing::get(ha_bridge::overview),
         )
         .route(
             "/api/v1/device-control/directory",

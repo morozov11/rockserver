@@ -1,0 +1,9 @@
+{
+  "domain": "rockserver_bridge",
+  "name": "RockServer Bridge",
+  "version": "0.1.0",
+  "documentation": "https://rockplatform.win",
+  "requirements": [],
+  "codeowners": [],
+  "iot_class": "cloud_push"
+}

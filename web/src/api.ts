@@ -9,6 +9,10 @@ export type YandexHomeProperty = { property_type: string; instance: string; name
 export type YandexHomeDevice = { id: string; name: string; device_type?: string; room_name?: string; properties: YandexHomeProperty[] };
 export type YandexHomeSensor = { device_name: string; room_name?: string; property: string; name: string; value: unknown; unit?: string; formatted_value: string; temperature?: number; updated_at?: string };
 export type YandexHomeSensorsResponse = { devices: YandexHomeDevice[]; sensors: YandexHomeSensor[] };
+export type HaSensor = { entity_id: string; display_name: string; value: number | null; unit: string | null; device_class: string | null; quality: "ok" | "unknown" | "unavailable"; observed_at: string; received_at: string; status: "fresh" | "stale" | "unavailable" };
+export type HaForecastDay = { datetime: string; condition: string | null; temperature: number | null; templow: number | null; precipitation: number | null };
+export type HaWeather = { entity_id: string; condition: string | null; temperature: number | null; temperature_unit: string | null; humidity: number | null; wind_speed: number | null; wind_speed_unit: string | null; quality: "ok" | "unknown" | "unavailable"; observed_at: string; forecast_observed_at: string | null; forecast: HaForecastDay[]; received_at: string; status: "fresh" | "stale" | "unavailable"; forecast_status: "fresh" | "stale" | "unavailable"; online: boolean };
+export type HaOverview = { connected: boolean; online: boolean; sensors: HaSensor[]; weather: HaWeather | null };
 export type AdminPage<T> = { items: T[]; limit: number; offset: number; has_more: boolean };
 export type AdminDevice = { product: "RockCast" | "RockMobile"; device_type: string; display_name: string; status: string; created_at: string; last_seen_at?: string };
 export type AdminAuditEntry = { occurred_at: string; action: string; outcome: string };
@@ -39,6 +43,7 @@ export const api = {
   browserAccount() { return request<BrowserAccount>("/api/v1/browser/account"); },
   yandexHomeAuthorization(csrfToken: string) { return request<{ authorization_url: string }>("/api/v1/browser/yandex-home/authorize", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: "{}" }); },
   yandexHomeSensors() { return request<YandexHomeSensorsResponse>("/api/v1/browser/yandex-home/sensors"); },
+  homeAssistant() { return request<HaOverview>("/api/v1/browser/home-assistant"); },
   disconnectYandexHome(csrfToken: string) { return request<void>("/api/v1/browser/yandex-home", { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } }); },
   renameDevice(deviceId: string, device_display_name: string, csrfToken: string) { return request<void>(`/api/v1/browser/devices/${encodeURIComponent(deviceId)}`, { method: "PATCH", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ device_display_name }) }); },
   revokeDevice(deviceId: string, csrfToken: string) { return request<void>(`/api/v1/browser/devices/${encodeURIComponent(deviceId)}`, { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } }); },

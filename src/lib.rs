@@ -26,6 +26,8 @@ pub mod device_control_intent;
 pub mod device_control_presence;
 /// Bounded owner-scoped latest-state cache and internal event fan-out.
 pub mod device_control_state;
+/// Read-only Home Assistant bridge domain and owner-bound storage contract.
+pub mod ha_bridge;
 /// HTTP routes and transport types.
 pub mod http;
 /// Deterministic prebuilt SQLite export for RockMobile's extended offline catalog.

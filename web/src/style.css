@@ -539,6 +539,12 @@ dd { margin: .15rem 0 0; font-weight: 700; overflow-wrap: anywhere; }
    ========================================================================== */
 
 .hardware-deck, .guide-deck, .yandex-home-deck { padding: 1rem; }
+.ha-weather { margin-top: 1rem; }
+.ha-weather h3 { font-size: .9rem; margin: 1rem 0 .5rem; }
+.ha-weather h3 small { font-size: .65rem; color: var(--text-muted); margin-left: .5rem; }
+.ha-weather .sensor-properties > small { color: var(--text-muted); }
+.ha-forecast { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
+.ha-forecast li { display: flex; justify-content: space-between; gap: .5rem; flex-wrap: wrap; font-size: .78rem; }
 .hardware-hud { display: grid; gap: 1.25rem; min-width: 0; }
 /* Section banner mirrors the tuner banner so "Устройства" reads as a first-class section. */
 .devices-banner { padding: 1.25rem 1.5rem; position: relative; overflow: hidden; }

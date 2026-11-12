@@ -1,0 +1,11 @@
+{
+  "type": "integration.weather",
+  "revision": 2,
+  "weather": {
+    "entity_id":"weather.home", "condition":"cloudy", "temperature":9.0,
+    "temperature_unit":"°C", "humidity":76.0, "wind_speed":4.0,
+    "wind_speed_unit":"m/s", "quality":"ok", "observed_at":"2026-11-12T12:00:00Z",
+    "forecast_observed_at":"2026-11-12T12:00:00Z",
+    "forecast":[{"datetime":"2026-11-13T00:00:00Z","condition":"rainy","temperature":10.0,"templow":5.0,"precipitation":3.0}]
+  }
+}

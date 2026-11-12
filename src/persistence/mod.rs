@@ -4,6 +4,7 @@ mod account_postgres;
 mod admin_postgres;
 mod device_control_postgres;
 mod embedding_postgres;
+mod ha_bridge_postgres;
 mod import_postgres;
 mod personal_data_postgres;
 mod postgres;
@@ -18,6 +19,7 @@ pub use account_postgres::{AdminDeviceReadModel, EncryptedYandexHomeToken, Postg
 pub use admin_postgres::PostgresAdminStore;
 pub use device_control_postgres::PostgresDeviceControlStore;
 pub use embedding_postgres::{EmbeddingReleaseReadiness, PostgresEmbeddingStore};
+pub use ha_bridge_postgres::PostgresHaBridgeStore;
 pub use import_postgres::{OwnedCatalogReplacement, PostgresImportStore};
 pub use personal_data_postgres::PostgresPersonalDataStore;
 pub use postgres::PostgresStationRepository;

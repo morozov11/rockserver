@@ -1,6 +1,21 @@
 # Project status
 
-Last updated: 2026-11-10
+Last updated: 2026-11-12
+
+## Home Assistant custom integration bridge — 2026-11-12
+
+- The account's Devices section now includes a Home Assistant card showing approved sensors, current weather and a short daily forecast. It labels fresh, stale and unavailable readings, shows connection state, and offers manual refresh. `GET /api/v1/browser/home-assistant` uses the existing browser cookie and trusted proxy boundary; native HA entity IDs are replaced by stable integration-scoped public IDs. An unconfigured owner receives an empty disconnected overview.
+- Migration 0029 and the owner-only sensor projection passed an opt-in test on a disposable PostgreSQL 17/pgvector container, including owner isolation and revocation. The container was removed. The local TypeScript check, 48 web tests, Vite production build, and two offline Python fake tests passed.
+- The production Docker image includes the `ha_bridge_admin` operator binary so credentials can be provisioned from the protected Compose environment on the VPS. The first release build was stopped before upload when this omission was found; no production change was made by that attempt.
+- Final sequential `cargo fmt --check`, strict Clippy, and full `cargo test` passed with local loopback/file access (231 library tests). A restricted-sandbox run had the same 15 known local socket/HTTP/filesystem failures. No external provider test was run.
+- Implemented locally: separate owner-bound WSS integration ingress, operator-issued and revocable credential, explicit sensor/weather allowlist, PostgreSQL latest observations, and browser weather read with independent current/forecast freshness and 60-second connection presence. The Home Assistant custom integration lives under `home_assistant/` and makes only outbound WSS connections; no HA API token, inbound port or paired-device session is used. It has not been installed on live HA.
+- An operator run guide is in `docs/home-assistant-bridge.md`; a resumable work ledger is in `docs/ha-bridge-handoff.md`. The original roadmap now points to the owner-approved custom integration topology.
+- Current limits: no live HA/WSS pilot yet. Next step: deploy the owner-authorized server update, verify its public readiness, then identify the real HA entities, provision a credential and install the custom integration on `alex-center`.
+
+## Local Home Assistant bridge plan — 2026-11-12
+
+- Documented an outbound-only home-network bridge in `docs/roadmap/home-assistant-local-bridge.md` for read-only HA sensors and weather. The plan adds a separate integration identity/endpoint, explicit allowlists, full resync and stale handling; existing native-device auth cannot be reused. This is documentation only: no endpoint, agent, weather runtime, client or ESP32 change is implemented.
+- Checks: `cargo fmt --check`, strict all-target/all-feature Clippy, and `cargo test --quiet` passed sequentially; no live HA validation. Next step: agree on the always-on host, selected HA entities/weather source and credential provisioning, then implement contract and identity before the local agent.
 
 ## Production search hotfix deployed — 2026-11-10
 

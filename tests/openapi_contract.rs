@@ -6,6 +6,8 @@ mod common;
 mod device_catalog;
 #[path = "openapi_contract/device_control.rs"]
 mod device_control;
+#[path = "openapi_contract/ha_bridge.rs"]
+mod ha_bridge;
 #[path = "openapi_contract/personal_sync.rs"]
 mod personal_sync;
 #[path = "openapi_contract/relay.rs"]

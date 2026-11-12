@@ -86,7 +86,7 @@ test("stage 5 pairing screen renders explicit loading, cancelled, unavailable, a
   assert.match(harness, /stage5-approve-fail/);
 });
 
-test("stage 6 renders honest device cards, QR empty state, and every Yandex Home state", async () => {
+test("stage 6 renders honest device cards, QR empty state, and integration panels", async () => {
   const hud = await readFile(new URL("../src/components/HardwareHud.tsx", import.meta.url), "utf8");
   const yandex = await readFile(new URL("../src/components/YandexHomeCard.tsx", import.meta.url), "utf8");
   const centre = await readFile(new URL("../src/components/AccountCentre.tsx", import.meta.url), "utf8");
@@ -137,7 +137,8 @@ test("stage 6 renders honest device cards, QR empty state, and every Yandex Home
   assert.match(centre, /deck-panel devices-banner/);
   assert.match(centre, /Аккаунт и подключения/);
   assert.match(centre, /devices-title">Устройства</);
-  assert.match(centre, /RockCast, RockMobile и Яндекс Дом/);
+  assert.match(centre, /RockCast, RockMobile, Яндекс Дом и Home Assistant/);
+  assert.match(centre, /<HomeAssistantCard\s*\/>/);
   // Account gate screens keep the four states and their texts in cabinet styling.
   assert.match(centre, /Загружаем аккаунт…/);
   assert.match(centre, /Сервис временно недоступен/);

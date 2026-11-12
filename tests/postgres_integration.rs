@@ -21,6 +21,9 @@ mod account_cleanup;
 #[path = "postgres_integration/yandex_home.rs"]
 mod yandex_home;
 
+#[path = "postgres_integration/ha_bridge.rs"]
+mod ha_bridge;
+
 #[path = "postgres_integration/migrations.rs"]
 mod migrations;
 

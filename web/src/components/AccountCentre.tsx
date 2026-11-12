@@ -11,6 +11,7 @@ import type { ListPaging } from "./ListFooter";
 import { VoiceSearchPanel } from "./VoiceSearchPanel";
 import { HardwareHud, type JustConnected } from "./HardwareHud";
 import { YandexHomeCard } from "./YandexHomeCard";
+import { HomeAssistantCard } from "./HomeAssistantCard";
 import { PlayerDeck } from "./PlayerDeck";
 
 const GENRE_PRESETS = ["all", "rock", "electronic", "synthwave", "jazz", "classical", "ambient"];
@@ -434,7 +435,7 @@ export function AccountCentre({
                 <div class="tuner-banner-glow" aria-hidden="true" />
                 <p class="eyebrow">Аккаунт и подключения</p>
                 <h1 class="devices-title">Устройства</h1>
-                <p class="tuner-subtitle">RockCast, RockMobile и Яндекс Дом</p>
+                <p class="tuner-subtitle">RockCast, RockMobile, Яндекс Дом и Home Assistant</p>
               </div>
               <HardwareHud
                 account={account}
@@ -449,6 +450,7 @@ export function AccountCentre({
                 onChanged={onRetry}
                 initialStatus={yandexHomeStatus}
               />
+              <HomeAssistantCard />
             </div>
           ) : (
             <>

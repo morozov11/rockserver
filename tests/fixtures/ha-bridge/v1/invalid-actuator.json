@@ -1,0 +1,1 @@
+{"type":"integration.state","revision":2,"sensors":[{"entity_id":"switch.lamp","display_name":"Lamp","value":1,"unit":null,"device_class":null,"quality":"ok","observed_at":"2026-11-12T12:00:00Z"}]}

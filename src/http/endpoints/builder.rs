@@ -14,9 +14,10 @@ use crate::{
     device_control_command::CommandRouter,
     device_control_presence::ConnectionRegistry,
     device_control_state::StateHub,
+    ha_bridge::BridgeStore,
     persistence::{
         PostgresAccountStore, PostgresAdminStore, PostgresDeviceControlStore,
-        PostgresPersonalDataStore,
+        PostgresHaBridgeStore, PostgresPersonalDataStore,
     },
     personal_data::PersonalDataStore,
     providers::yandex_home::YandexHomeClient,
@@ -60,6 +61,7 @@ pub struct RouterBuilder {
     personal_store: Option<Arc<dyn PersonalDataStore>>,
     icon_import: Option<Arc<IconImportCoordinator>>,
     yandex_home: Option<Arc<YandexHomeClient>>,
+    ha_bridge: Option<Arc<dyn BridgeStore>>,
     control_timing: ControlTiming,
     relay: super::relay::RelayState,
 }
@@ -85,6 +87,7 @@ impl Default for RouterBuilder {
             personal_store: None,
             icon_import: None,
             yandex_home: None,
+            ha_bridge: None,
             control_timing: ControlTiming::default(),
             relay: super::relay::RelayState::default(),
         }
@@ -161,6 +164,9 @@ impl RouterBuilder {
         )));
         self.personal_store = Some(Arc::new(PostgresPersonalDataStore::from_pool(pool.clone())));
         self.icon_import = station_icon_import_from_env(pool);
+        self.ha_bridge = Some(Arc::new(PostgresHaBridgeStore::from_pool(
+            account_store.pool(),
+        )));
         self.account_store = Some(account_store);
         self
     }
@@ -240,6 +246,12 @@ impl RouterBuilder {
         self
     }
 
+    /// Sets the account-owned HA bridge store, primarily for deterministic tests.
+    pub fn with_ha_bridge(mut self, store: Arc<dyn BridgeStore>) -> Self {
+        self.ha_bridge = Some(store);
+        self
+    }
+
     /// Sets server-owned timing policies for device-control connections.
     #[cfg(test)]
     pub(crate) fn with_control_timing(mut self, timing: ControlTiming) -> Self {
@@ -289,6 +301,7 @@ impl RouterBuilder {
             personal_store: self.personal_store,
             icon_import: self.icon_import,
             yandex_home: self.yandex_home,
+            ha_bridge: self.ha_bridge,
             control_timing: self.control_timing,
             relay: self.relay,
         }
