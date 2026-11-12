@@ -29,8 +29,10 @@ RockServer. No inbound port on the home network, no paired-device identity, no o
   freshness, OpenAPI fixtures, and UI tests. Required Rust checks passed before the final
   PostgreSQL test addition (231 library tests). TypeScript, 48 web tests, Vite build, two Python
   fake tests, and one disposable PostgreSQL migration/owner/revocation test passed. The test
-  container was removed. Final sequential Rust checks passed again. Commit and production
-  deployment are still in progress.
+  container was removed. Final sequential Rust checks passed again. Commit
+  `1d6eaa630d5acd59bb499b66981f59ed5a4dd5ee` was deployed by OPS-001-D; worker succeeded,
+  public readiness and web bundle returned 200, anonymous overview returned 401, and production
+  migration 29/admin binary were confirmed. No production backup was present before migration.
 - Read repository instructions, roadmap, device-control and Yandex examples.
 - Confirmed HA supports separate `weather.get_forecasts` daily forecasts.
 - Added `src/ha_bridge.rs` domain/store trait, PostgreSQL migration 0029 and store, operator
@@ -64,5 +66,6 @@ RockServer. No inbound port on the home network, no paired-device identity, no o
    on the live HA and server. The disposable PostgreSQL test covered owner isolation and revoke,
    but did not exercise every operator CLI lifecycle branch.
 
-The owner authorized a RockServer commit and deployment in the follow-up request. Live HA
-installation has not yet been performed.
+The owner authorized and received the RockServer commit/deployment. Live HA installation has not
+yet been performed. `alex-center` runs `python3 -P -m homeassistant --config /config`; its host
+mount path remains unknown because noninteractive Docker inspection is unavailable to the SSH user.

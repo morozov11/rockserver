@@ -5,8 +5,8 @@
 - Goal: show the owner's approved HA sensors, current weather and short forecast in the personal cabinet; commit and deploy RockServer.
 - Scope/result so far: added owner-only overview endpoint and public sensor projection, HA sensor names in the bridge contract, account card with freshness/connection labels, contract fixtures, an offline sensor freshness test, and a disposable PostgreSQL owner/revocation test. The existing outbound HA custom integration and operator guide are included in this release.
 - Release correction: the first Docker build was interrupted before upload after finding that `ha_bridge_admin` was absent from the runtime image. Added the binary and a production Compose invocation to the operator guide; no remote change occurred during that attempt.
-- Checks: final sequential `cargo fmt --check`, strict Clippy, full `cargo test` with local loopback/file access (231 library tests), TypeScript, 48 web tests, Vite build, two fake HA/RockServer tests, and disposable PostgreSQL migration/projection test passed. Deployment status will be recorded after release.
-- Status: implementation verified locally; production release and live HA pilot pending.
+- Checks: final sequential `cargo fmt --check`, strict Clippy, full `cargo test` with local loopback/file access (231 library tests), TypeScript, 48 web tests, Vite build, two fake HA/RockServer tests, and disposable PostgreSQL migration/projection test passed. OPS-001-D remote worker succeeded for `1d6eaa630d5acd59bb499b66981f59ed5a4dd5ee`; public readiness/page/bundle returned 200, anonymous HA overview returned 401, production migration 29 and admin binary presence were confirmed.
+- Status: server and cabinet deployed; live HA component installation and authenticated owner read remain to be checked. No production backup was present before migration 29. The previous image is incompatible with the new migration.
 
 ## Home Assistant custom integration bridge — 2026-11-12
 
