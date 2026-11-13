@@ -15,7 +15,9 @@ services:
       retries: 12
       start_period: 10s
     volumes:
-      - rockserver-postgres-data:/var/lib/postgresql/data
+      # PostgreSQL 18+ stores data in a major-version subdirectory; mount the
+      # parent so future pg_upgrade workflows keep the volume layout valid.
+      - rockserver-postgres-data:/var/lib/postgresql
     networks:
       - database
 
