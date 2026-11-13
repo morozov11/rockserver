@@ -1,6 +1,13 @@
 # Project status
 
-Last updated: 2026-11-12
+Last updated: 2026-11-13
+
+## Home Assistant browser self-service — 2026-11-13
+
+- In the main checkout, the Devices → Home Assistant card now accepts owner-chosen `sensor.*` and `weather.*` IDs, issues a one-time visible `ha1.` credential, replaces the credential/policy, and revokes the connection. Mutations derive the owner from browser cookie plus CSRF and trusted proxy proof. The new credential's hash alone is stored; old observations are cleared on replacement and hidden on revocation. The overview now returns the owner's configured IDs for editing while readings keep public hashed IDs.
+- The HA custom component now has a config flow and password field in its UI; a key entered there starts the existing outbound WSS bridge. HA options can replace the key and reload the entry. Legacy YAML setup remains supported. No real HA instance has loaded this revised component yet.
+- Local checks: final sequential `cargo fmt --check`, strict Clippy and full `cargo test` passed. TypeScript, 48 web tests, Vite build, three offline HA fake tests, and two disposable PostgreSQL tests for owner/provision/replace/revoke plus browser cookie/CSRF passed. The disposable database was removed. Commit and production rollout remain pending.
+- Previous deployed server remains `1d6eaa630d5acd59bb499b66981f59ed5a4dd5ee`; this self-service change is not yet deployed. Next: final checks, review, commit and deploy, then one-time installation of the revised HA component on `alex-center` and live WSS/account pilot.
 
 ## Home Assistant custom integration bridge — 2026-11-12
 

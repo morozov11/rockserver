@@ -1,0 +1,11 @@
+{
+  "config": {
+    "step": {"user": {"title": "RockServer", "description": "Paste the key issued in your RockServer account.", "data": {"server_url": "RockServer WSS address", "credential": "Access key"}}},
+    "error": {"invalid_credentials": "Use the WSS bridge address and the key issued in RockServer."},
+    "abort": {"already_configured": "RockServer is already configured."}
+  },
+  "options": {
+    "step": {"init": {"title": "Replace RockServer key", "data": {"server_url": "RockServer WSS address", "credential": "New access key"}}},
+    "error": {"invalid_credentials": "Use the WSS bridge address and the new key issued in RockServer."}
+  }
+}

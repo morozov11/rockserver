@@ -849,7 +849,8 @@ paths:
         disconnected view when this owner has no active integration. Sensors are limited to the
         approved allowlist, have stable integration-scoped public IDs instead of HA native IDs,
         and include server-computed fresh/stale/unavailable status. No other owner's values are
-        returned. Connection is online only when accepted bridge traffic arrived within 60 seconds.
+        returned. The owner also receives their configured native entity IDs for editing the
+        publication policy. Connection is online only when accepted bridge traffic arrived within 60 seconds.
       security: [{ RockserverBrowserCookie: [] }]
       responses:
         "200":
@@ -860,6 +861,51 @@ paths:
         "401": { description: Browser session is missing or invalid. }
         "403": { description: Trusted proxy proof is missing. }
         "503": { description: Integration or account persistence is unavailable. }
+    delete:
+      operationId: revokeHomeAssistantBridge
+      summary: Revoke the signed-in owner's HA bridge credential
+      x-rockserver-status: implemented
+      security: [{ RockserverBrowserCookie: [] }]
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "204": { description: Credential revoked; observations hidden. }
+        "401": { description: Browser session is missing or invalid. }
+        "403": { description: Trusted browser/CSRF proof is missing. }
+        "503": { description: Integration storage is unavailable. }
+  /api/v1/browser/home-assistant/credential:
+    post:
+      operationId: issueHomeAssistantBridgeCredential
+      summary: Issue or replace the signed-in owner's HA bridge credential and allowlist
+      x-rockserver-status: implemented
+      description: >-
+        Replaces the prior credential and clears previous observations. The new secret is returned
+        once with no-store; only its hash is persisted. This is separate from pairing and device
+        sessions. The browser owner is derived from the session cookie, never from the request.
+      security: [{ RockserverBrowserCookie: [] }]
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HaBridgeProvisionRequest" }
+      responses:
+        "200":
+          description: New credential shown once; no-store.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HaBridgeCredential" }
+        "400": { description: Invalid sensor/weather selection or JSON. }
+        "401": { description: Browser session is missing or invalid. }
+        "403": { description: Trusted browser/CSRF proof is missing. }
+        "503": { description: Integration storage is unavailable. }
   /api/v1/browser/home-assistant/weather:
     get:
       operationId: getHomeAssistantWeather
@@ -1813,10 +1859,16 @@ components:
     HaBridgeOverview:
       type: object
       additionalProperties: false
-      required: [connected, online, sensors, weather]
+      required: [connected, online, allowed_sensors, weather_entity, sensors, weather]
       properties:
         connected: { type: boolean }
         online: { type: boolean }
+        allowed_sensors:
+          type: array
+          maxItems: 128
+          uniqueItems: true
+          items: { type: string, pattern: "^sensor\\.[a-z0-9_]+$", maxLength: 128 }
+        weather_entity: { type: [string, "null"], pattern: "^weather\\.[a-z0-9_]+$", maxLength: 128 }
         sensors:
           type: array
           maxItems: 128
@@ -1825,6 +1877,23 @@ components:
           oneOf:
             - { type: "null" }
             - { $ref: "#/components/schemas/HaBridgeWeatherRead" }
+    HaBridgeProvisionRequest:
+      type: object
+      additionalProperties: false
+      required: [sensors, weather_entity]
+      properties:
+        sensors:
+          type: array
+          maxItems: 128
+          uniqueItems: true
+          items: { type: string, pattern: "^sensor\\.[a-z0-9_]+$", maxLength: 128 }
+        weather_entity: { type: string, pattern: "^weather\\.[a-z0-9_]+$", maxLength: 128 }
+    HaBridgeCredential:
+      type: object
+      additionalProperties: false
+      required: [credential]
+      properties:
+        credential: { type: string, pattern: "^ha1\\.[0-9a-f]{64}$" }
     StationNowPlaying:
       type: object
       additionalProperties: false

@@ -543,6 +543,12 @@ dd { margin: .15rem 0 0; font-weight: 700; overflow-wrap: anywhere; }
 .ha-weather h3 { font-size: .9rem; margin: 1rem 0 .5rem; }
 .ha-weather h3 small { font-size: .65rem; color: var(--text-muted); margin-left: .5rem; }
 .ha-weather .sensor-properties > small { color: var(--text-muted); }
+.ha-settings { margin-top: 1rem; display: grid; gap: .6rem; }
+.ha-settings label { display: grid; gap: .35rem; font-size: .78rem; color: var(--text-muted); }
+.ha-settings input, .ha-settings textarea { width: 100%; min-width: 0; padding: .6rem; border: 1px solid var(--border-deck-active); border-radius: 8px; color: var(--text-primary); background: var(--bg-deck-sub); font: inherit; }
+.ha-settings textarea:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+.ha-settings code { overflow-wrap: anywhere; }
+.ha-credential { display: grid; gap: .5rem; padding: .75rem; border: 1px solid var(--border-deck-active); border-radius: 8px; }
 .ha-forecast { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
 .ha-forecast li { display: flex; justify-content: space-between; gap: .5rem; flex-wrap: wrap; font-size: .78rem; }
 .hardware-hud { display: grid; gap: 1.25rem; min-width: 0; }

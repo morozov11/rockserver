@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 vol = types.ModuleType("voluptuous")
 vol.ALLOW_EXTRA = object()
 vol.Schema = lambda value, **_: value
-vol.Required = lambda value: value
+vol.Required = lambda value, **_: value
 vol.All = lambda *values: values
 vol.Length = lambda **values: values
 sys.modules["voluptuous"] = vol
@@ -33,14 +33,35 @@ ha_aio = types.ModuleType("homeassistant.helpers.aiohttp_client")
 ha_aio.async_get_clientsession = lambda _: None
 ha_const = types.ModuleType("homeassistant.const")
 ha_const.EVENT_HOMEASSISTANT_STOP = "stop"
+ha_entries = types.ModuleType("homeassistant.config_entries")
+class FakeConfigFlow:
+    def __init_subclass__(cls, **kwargs):
+        pass
+    async def async_set_unique_id(self, value):
+        self.unique_id = value
+    def _abort_if_unique_id_configured(self):
+        pass
+    def async_create_entry(self, **kwargs):
+        return {"type": "create_entry", **kwargs}
+    def async_show_form(self, **kwargs):
+        return {"type": "form", **kwargs}
+ha_entries.ConfigFlow = FakeConfigFlow
+ha_entries.OptionsFlow = FakeConfigFlow
+ha_selector = types.ModuleType("homeassistant.helpers.selector")
+ha_selector.TextSelector = lambda config: config
+ha_selector.TextSelectorConfig = lambda **kwargs: kwargs
+ha_selector.TextSelectorType = types.SimpleNamespace(PASSWORD="password")
 sys.modules.update({"homeassistant": ha, "homeassistant.core": ha_core,
                     "homeassistant.helpers": ha_helpers,
                     "homeassistant.helpers.config_validation": ha_cv,
                     "homeassistant.helpers.aiohttp_client": ha_aio,
-                    "homeassistant.const": ha_const})
+                    "homeassistant.const": ha_const,
+                    "homeassistant.config_entries": ha_entries,
+                    "homeassistant.helpers.selector": ha_selector})
 
 bridge = importlib.import_module("custom_components.rockserver_bridge")
 normalize = importlib.import_module("custom_components.rockserver_bridge.normalization")
+config_flow = importlib.import_module("custom_components.rockserver_bridge.config_flow")
 
 
 class State:
@@ -97,12 +118,12 @@ class FakeRockServer:
 class BridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_fake_ha_resyncs_to_fake_server_after_reconnect(self):
         ha = FakeHA()
-        for _ in range(2):
+        for local_sensors, local_weather in (({"sensor.room_temperature"}, "weather.home"), (None, None)):
             server = FakeRockServer()
             with self.assertRaises(EndSession):
                 await asyncio.wait_for(
                     bridge._connected(ha, server, {}, asyncio.Event(),
-                                      {"sensor.room_temperature"}, "weather.home"), 5)
+                                      local_sensors, local_weather), 5)
             self.assertEqual([message["type"] for message in server.sent],
                              ["integration.hello", "integration.snapshot", "integration.weather"])
             self.assertAlmostEqual(server.sent[1]["sensors"][0]["value"], 20)
@@ -113,6 +134,15 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(normalize.sensor_reading("sensor.x", State("unknown"))["value"])
         unsupported = State("12", {"device_class": "pressure", "unit_of_measurement": "psi"})
         self.assertEqual(normalize.sensor_reading("sensor.x", unsupported)["quality"], "unknown")
+
+    async def test_visual_config_flow_accepts_only_wss_and_bridge_key(self):
+        flow = config_flow.RockServerConfigFlow()
+        invalid = await flow.async_step_user({"server_url": "http://homeassist/api", "credential": "ha1.invalid"})
+        self.assertEqual(invalid["errors"]["base"], "invalid_credentials")
+        malformed = await flow.async_step_user({"server_url": "wss://[broken", "credential": "ha1." + "a" * 64})
+        self.assertEqual(malformed["errors"]["base"], "invalid_credentials")
+        valid = await flow.async_step_user({"server_url": config_flow.DEFAULT_URL, "credential": "ha1." + "a" * 64})
+        self.assertEqual(valid["type"], "create_entry")
 
 
 if __name__ == "__main__":

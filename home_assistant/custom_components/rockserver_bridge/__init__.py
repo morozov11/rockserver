@@ -52,6 +52,31 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
+async def async_setup_entry(hass, entry) -> bool:
+    """Start an outbound bridge configured entirely through the HA integration UI."""
+    options = {**entry.data, **entry.options}
+    task = hass.async_create_background_task(
+        _run(hass, options["server_url"], options["credential"], None, None),
+        "RockServer Home Assistant bridge",
+    )
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = task
+    entry.async_on_unload(entry.add_update_listener(_reload_entry))
+    return True
+
+
+async def _reload_entry(hass, entry):
+    """Apply a visually entered replacement key without restarting HA."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_unload_entry(hass, entry) -> bool:
+    """Stop this entry's outbound connection and its event subscription."""
+    task = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    if task is not None:
+        task.cancel()
+    return True
+
+
 async def _run(hass, server_url, credential, local_sensors, local_weather):
     """Reconnect with bounded jitter and resync from HA state on every connection."""
     pending = {}
@@ -60,7 +85,9 @@ async def _run(hass, server_url, credential, local_sensors, local_weather):
     @callback
     def state_changed(event: Event):
         entity_id = event.data.get("entity_id")
-        if entity_id in local_sensors or entity_id == local_weather:
+        relevant = (entity_id in local_sensors or entity_id == local_weather) if local_sensors is not None else (
+            isinstance(entity_id, str) and (entity_id.startswith("sensor.") or entity_id.startswith("weather.")))
+        if relevant:
             pending[entity_id] = event.data.get("new_state")
             changed.set()
 
@@ -101,8 +128,8 @@ async def _exchange(ws, payload, expected):
 async def _connected(hass, ws, pending, changed, local_sensors, local_weather):
     """Send a full snapshot, then coalesced changes, weather and heartbeat."""
     welcome = await _exchange(ws, {"type": "integration.hello", "protocol_version": 1}, "integration.welcome")
-    sensors = local_sensors.intersection(welcome["allowed_sensors"])
-    weather_entity = local_weather if welcome["weather_entity"] == local_weather else None
+    sensors = set(welcome["allowed_sensors"]) if local_sensors is None else local_sensors.intersection(welcome["allowed_sensors"])
+    weather_entity = welcome["weather_entity"] if local_weather is None else (local_weather if welcome["weather_entity"] == local_weather else None)
     revision = 1
     pending.clear()
     changed.clear()

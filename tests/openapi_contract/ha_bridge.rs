@@ -52,4 +52,15 @@ fn separate_ha_contract_accepts_readings_and_rejects_identity_or_commands() {
         &fixture("invalid-native-overview.json"),
         "native HA identifiers are private",
     );
+    assert_component_valid(
+        &document,
+        "HaBridgeProvisionRequest",
+        &serde_json::json!({"sensors": ["sensor.room_temperature"], "weather_entity": "weather.home"}),
+    );
+    assert_component_invalid(
+        &document,
+        "HaBridgeProvisionRequest",
+        &serde_json::json!({"sensors": ["switch.kitchen"], "weather_entity": "weather.home"}),
+        "only sensor readings may be published",
+    );
 }

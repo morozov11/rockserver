@@ -1,6 +1,6 @@
 # Home Assistant bridge: work handoff
 
-Updated: 2026-11-12. Work in progress in the main `C:\repos\rockserver` checkout.
+Updated: 2026-11-13. Work in progress in the main `C:\repos\rockserver` checkout.
 
 ## Requested result
 
@@ -17,13 +17,20 @@ RockServer. No inbound port on the home network, no paired-device identity, no o
 - Device-control directory currently loads only paired devices. HA needs a separate owner-bound
   projection and read endpoint. Existing `Entity`/`EntityState`, quality and freshness rules can
   guide the new normalized model, but weather has no existing runtime model.
-- Yandex Home uses account-bound persistence and revocation; its OAuth/browser flow is distinct
-  from this integration's operator-provisioned credential.
+- Yandex Home uses account-bound persistence and revocation. HA now also has browser account
+  management, but its local installation and outbound bearer differ from Yandex OAuth.
 - At task start `docs/status.md` and `docs/tasks.md` were already modified, and the roadmap file
   was untracked. Preserve those changes.
 
 ## Progress
 
+- New owner request: all connection management should happen in the RockServer cabinet like
+  Yandex Home. The owner accepted one-time local HA component installation. Added browser
+  provision/revoke with cookie, CSRF and trusted proxy checks; owner-chosen allowlist; one-time
+  key display in the card; HA visual config/options flow with password field. Strict Clippy,
+  TypeScript, 48 web tests, Vite build, three Python fake tests and a disposable PostgreSQL
+  lifecycle and browser HTTP/CSRF tests passed. Final sequential Rust checks passed. No commit or
+  deployment of this follow-up yet; live HA remains untouched.
 - Follow-up account work added `GET /api/v1/browser/home-assistant`, a Devices tab card for
   approved sensors/current weather/forecast, public hashed sensor IDs, display names, explicit
   freshness, OpenAPI fixtures, and UI tests. Required Rust checks passed before the final
@@ -62,9 +69,10 @@ RockServer. No inbound port on the home network, no paired-device identity, no o
 
 1. Confirm the actual HA config mount and HA version on `alex-center`; select real sensor/weather
    IDs and confirm the weather entity supports daily forecasts.
-2. Provision a credential and install the custom integration, then test reconnect/stale/revocation
-   on the live HA and server. The disposable PostgreSQL test covered owner isolation and revoke,
-   but did not exercise every operator CLI lifecycle branch.
+2. Install the revised custom integration once, issue a key in the RockServer cabinet, and paste
+   it into HA's visual config flow. Then test reconnect/stale/revocation on the live HA and server.
+   The disposable PostgreSQL and HTTP tests covered browser CSRF, owner isolation, replacement
+   and revoke; they did not exercise every legacy operator CLI branch.
 
 The owner authorized and received the RockServer commit/deployment. Live HA installation has not
 yet been performed. `alex-center` runs `python3 -P -m homeassistant --config /config`; its host

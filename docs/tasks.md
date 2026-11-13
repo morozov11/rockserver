@@ -1,5 +1,12 @@
 # Task log
 
+## Home Assistant self-service account connection — 2026-11-13
+
+- Goal: let a signed-in RockServer owner select HA sensors/weather and issue/revoke the bridge key in the personal cabinet, then enter that key visually in HA after one local component installation.
+- Scope/result so far: browser CSRF-protected provision/revoke endpoints and OpenAPI schema, owner-bound PostgreSQL credential lifecycle, cabinet form with one-time key display, HA config/options flow with password input, and updated setup guide. The existing outbound WSS protocol and read-only data path remain in use.
+- Checks: final sequential `cargo fmt --check`, strict Clippy and full `cargo test` passed. TypeScript, 48 web tests, Vite build, three offline fake HA tests, and two disposable PostgreSQL tests for owner/provision/replace/revoke and HTTP cookie/CSRF passed. Commit and production deployment pending. No live HA installation or connection test yet.
+- Status: local implementation in progress; see `docs/ha-bridge-handoff.md` for continuation details.
+
 ## Home Assistant account card and server release — 2026-11-12
 
 - Goal: show the owner's approved HA sensors, current weather and short forecast in the personal cabinet; commit and deploy RockServer.

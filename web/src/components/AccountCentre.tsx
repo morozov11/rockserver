@@ -450,7 +450,7 @@ export function AccountCentre({
                 onChanged={onRetry}
                 initialStatus={yandexHomeStatus}
               />
-              <HomeAssistantCard />
+              <HomeAssistantCard csrf={csrf} />
             </div>
           ) : (
             <>

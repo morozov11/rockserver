@@ -107,7 +107,12 @@ pub(super) fn build_router(state: AppState) -> Router {
         )
         .route(
             "/api/v1/browser/home-assistant",
-            axum::routing::get(ha_bridge::overview),
+            axum::routing::get(ha_bridge::overview).delete(ha_bridge::revoke),
+        )
+        .route(
+            "/api/v1/browser/home-assistant/credential",
+            axum::routing::post(ha_bridge::provision)
+                .layer(axum::extract::DefaultBodyLimit::max(16_384)),
         )
         .route(
             "/api/v1/device-control/directory",

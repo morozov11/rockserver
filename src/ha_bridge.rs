@@ -113,8 +113,30 @@ pub struct VisibleSensor {
 pub struct BridgeOverview {
     pub connected: bool,
     pub online: bool,
+    pub allowed_sensors: Vec<String>,
+    pub weather_entity: Option<String>,
     pub sensors: Vec<VisibleSensor>,
     pub weather: Option<StoredWeather>,
+}
+
+/// Checks one owner-chosen publication policy before issuing a bridge credential.
+pub fn valid_selection(sensors: &[String], weather_entity: &str) -> bool {
+    let mut unique = HashSet::new();
+    sensors.len() <= 128
+        && sensors
+            .iter()
+            .all(|id| valid_entity_id(id, "sensor.") && unique.insert(id))
+        && valid_entity_id(weather_entity, "weather.")
+}
+
+/// Accepts only bounded HA sensor or weather entity IDs, never device commands.
+pub fn valid_entity_id(value: &str, prefix: &str) -> bool {
+    value.starts_with(prefix)
+        && value.len() > prefix.len()
+        && value.len() <= 128
+        && value[prefix.len()..]
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
 /// Rejects malformed, disallowed or misleading HA observations before persistence.
@@ -280,6 +302,16 @@ pub enum IngestOutcome {
 /// Durable bridge storage, also implemented by deterministic test fakes.
 #[async_trait]
 pub trait BridgeStore: Send + Sync {
+    /// Creates or replaces one owner's credential and exact publication policy.
+    async fn provision(
+        &self,
+        user_id: Uuid,
+        token_hash: &[u8; 32],
+        sensors: &[String],
+        weather_entity: &str,
+    ) -> Result<bool, BridgeStoreError>;
+    /// Revokes the owner's credential and immediately hides its observations.
+    async fn revoke(&self, user_id: Uuid) -> Result<(), BridgeStoreError>;
     /// Resolves only an active integration credential to its owner and allowlist.
     async fn authenticate(
         &self,

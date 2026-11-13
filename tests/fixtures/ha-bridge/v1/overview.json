@@ -1,6 +1,8 @@
 {
   "connected": true,
   "online": true,
+  "allowed_sensors": ["sensor.room_temperature"],
+  "weather_entity": "weather.home",
   "sensors": [{
     "entity_id": "home_assistant.00000000000000000000000000000001.1122334455667788",
     "display_name": "Room temperature",

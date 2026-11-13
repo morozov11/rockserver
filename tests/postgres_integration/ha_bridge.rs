@@ -1,12 +1,21 @@
 //! Disposable PostgreSQL check for the owner-only HA sensor projection.
 
+use axum::{
+    body::{Body, to_bytes},
+    http::{Request, StatusCode},
+};
 use rockserver::ha_bridge::{
-    BridgePrincipal, BridgeStore, IngestOutcome, ReadingQuality, SensorBatch, SensorReading,
-    credential_hash,
+    BridgeStore, IngestOutcome, ReadingQuality, SensorBatch, SensorReading, credential_hash,
 };
 use rockserver::persistence::{PostgresAccountStore, PostgresHaBridgeStore};
+use rockserver::{
+    auth::{NewBrowserSession, SecretHash},
+    http::RouterBuilder,
+};
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use std::{collections::HashSet, env};
+use std::{env, sync::Arc};
+use tower::ServiceExt;
 use uuid::Uuid;
 
 #[tokio::test]
@@ -25,17 +34,20 @@ async fn postgres_ha_bridge_owner_projection_and_revocation() {
         .create_user_with_display_name(other, "Other owner")
         .await
         .unwrap();
-    let principal = BridgePrincipal {
-        user_id: owner,
-        integration_id: Uuid::new_v4(),
-        credential_hash: credential_hash("ha1.disposable-test"),
-        sensors: HashSet::from(["sensor.room_temperature".to_owned()]),
-        weather_entity: "weather.home".to_owned(),
-    };
-    sqlx::query("INSERT INTO home_assistant_integrations (id, user_id, credential_hash, allowed_sensors, weather_entity) VALUES ($1, $2, $3, $4, $5)")
-        .bind(principal.integration_id).bind(owner).bind(principal.credential_hash.as_slice())
-        .bind(vec!["sensor.room_temperature"]).bind("weather.home").execute(&pool).await.unwrap();
     let store = PostgresHaBridgeStore::from_pool(pool.clone());
+    let hash = credential_hash("ha1.disposable-test");
+    assert!(
+        store
+            .provision(
+                owner,
+                &hash,
+                &["sensor.room_temperature".to_owned()],
+                "weather.home"
+            )
+            .await
+            .unwrap()
+    );
+    let principal = store.authenticate(&hash).await.unwrap().unwrap();
     let epoch = Uuid::new_v4();
     store.begin(&principal, epoch).await.unwrap();
     let sensor = SensorReading {
@@ -67,12 +79,109 @@ async fn postgres_ha_bridge_owner_projection_and_revocation() {
     assert_eq!(visible.sensors.len(), 1);
     assert!(visible.sensors[0].entity_id.starts_with("home_assistant."));
     assert_eq!(visible.sensors[0].display_name, "Room temperature");
+    assert_eq!(visible.allowed_sensors, ["sensor.room_temperature"]);
+    assert_eq!(visible.weather_entity.as_deref(), Some("weather.home"));
     assert_ne!(visible.sensors[0].entity_id, "sensor.room_temperature");
     assert!(!store.read_overview(other).await.unwrap().connected);
-    sqlx::query("UPDATE home_assistant_integrations SET revoked_at = now() WHERE id = $1")
-        .bind(principal.integration_id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    let replacement = credential_hash("ha1.replacement-test");
+    assert!(
+        store
+            .provision(owner, &replacement, &[], "weather.home")
+            .await
+            .unwrap()
+    );
+    assert!(store.authenticate(&hash).await.unwrap().is_none());
+    assert!(store.read_overview(owner).await.unwrap().sensors.is_empty());
+    store.revoke(owner).await.unwrap();
+    assert!(store.authenticate(&replacement).await.unwrap().is_none());
     assert!(!store.read_overview(owner).await.unwrap().connected);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL pointing to a disposable PostgreSQL database"]
+async fn browser_ha_credential_route_requires_owner_and_csrf() {
+    let url = env::var("TEST_DATABASE_URL").expect("isolated disposable database URL");
+    let accounts = PostgresAccountStore::connect(&url).await.unwrap();
+    let owner = Uuid::new_v4();
+    accounts.create_user(owner).await.unwrap();
+    let cookie = "ha-browser-cookie";
+    let csrf = "ha-browser-csrf";
+    let cookie_hash = SecretHash::new(Sha256::digest(cookie.as_bytes()).into());
+    let csrf_hash = SecretHash::new(Sha256::digest(csrf.as_bytes()).into());
+    assert!(
+        accounts
+            .create_browser_session(NewBrowserSession {
+                session_id: Uuid::new_v4(),
+                user_id: owner,
+                session_token_hash: &cookie_hash,
+                csrf_hash: &csrf_hash,
+                passkey_reauthenticated_at_rfc3339: "2035-01-01T00:00:00Z",
+                expires_at_rfc3339: "2035-02-01T00:00:00Z",
+                absolute_expires_at_rfc3339: "2035-08-01T00:00:00Z",
+            })
+            .await
+            .unwrap()
+    );
+    let bridge = PostgresHaBridgeStore::from_pool(PgPool::connect(&url).await.unwrap());
+    let app = RouterBuilder::new()
+        .with_account_store(accounts)
+        .with_ha_bridge(Arc::new(bridge.clone()))
+        .with_trusted_proxy_token("test-proxy")
+        .build();
+    let body = r#"{"sensors":["sensor.room_temperature"],"weather_entity":"weather.home"}"#;
+    let request = |csrf_header: Option<&str>| {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri("/api/v1/browser/home-assistant/credential")
+            .header("origin", "https://rockplatform.win")
+            .header("x-forwarded-proto", "https")
+            .header("x-rockserver-proxy", "test-proxy")
+            .header("cookie", format!("rockserver_browser={cookie}"))
+            .header("content-type", "application/json");
+        if let Some(value) = csrf_header {
+            builder = builder.header("x-csrf-token", value);
+        }
+        builder.body(Body::from(body)).unwrap()
+    };
+    assert_eq!(
+        app.clone().oneshot(request(None)).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+    let response = app.clone().oneshot(request(Some(csrf))).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
+    let credential = payload["credential"].as_str().unwrap();
+    assert!(
+        bridge
+            .authenticate(&credential_hash(credential))
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let response = app.clone().oneshot(request(Some(csrf))).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        bridge
+            .authenticate(&credential_hash(credential))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let delete = Request::builder()
+        .method("DELETE")
+        .uri("/api/v1/browser/home-assistant")
+        .header("origin", "https://rockplatform.win")
+        .header("x-forwarded-proto", "https")
+        .header("x-rockserver-proxy", "test-proxy")
+        .header("cookie", format!("rockserver_browser={cookie}"))
+        .header("x-csrf-token", csrf)
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.oneshot(delete).await.unwrap().status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(!bridge.read_overview(owner).await.unwrap().connected);
 }

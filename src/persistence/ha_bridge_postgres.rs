@@ -82,6 +82,47 @@ async fn claim(
 
 #[async_trait]
 impl BridgeStore for PostgresHaBridgeStore {
+    async fn provision(
+        &self,
+        user_id: Uuid,
+        token_hash: &[u8; 32],
+        sensors: &[String],
+        weather_entity: &str,
+    ) -> Result<bool, BridgeStoreError> {
+        let mut tx = self.pool.begin().await.map_err(failed)?;
+        let row = sqlx::query(
+            "INSERT INTO home_assistant_integrations (id, user_id, credential_hash, allowed_sensors, weather_entity) \
+             SELECT $1, id, $3, $4, $5 FROM users WHERE id = $2 AND status = 'active' \
+             ON CONFLICT (user_id) DO UPDATE SET credential_hash = EXCLUDED.credential_hash, \
+             allowed_sensors = EXCLUDED.allowed_sensors, weather_entity = EXCLUDED.weather_entity, \
+             revoked_at = NULL, epoch = NULL, revision = 0, last_payload_hash = NULL, last_ingest_at = NULL \
+             RETURNING home_assistant_integrations.id"
+        ).bind(Uuid::new_v4()).bind(user_id).bind(token_hash.as_slice()).bind(sensors).bind(weather_entity)
+            .fetch_optional(&mut *tx).await.map_err(failed)?;
+        let Some(row) = row else {
+            return Ok(false);
+        };
+        let id: Uuid = row.get("id");
+        sqlx::query("DELETE FROM home_assistant_sensor_states WHERE integration_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(failed)?;
+        sqlx::query("DELETE FROM home_assistant_weather_states WHERE integration_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(failed)?;
+        tx.commit().await.map_err(failed)?;
+        Ok(true)
+    }
+
+    async fn revoke(&self, user_id: Uuid) -> Result<(), BridgeStoreError> {
+        sqlx::query("UPDATE home_assistant_integrations SET revoked_at = now(), epoch = NULL, revision = 0, last_payload_hash = NULL WHERE user_id = $1 AND revoked_at IS NULL")
+            .bind(user_id).execute(&self.pool).await.map_err(failed)?;
+        Ok(())
+    }
+
     async fn authenticate(
         &self,
         token_hash: &[u8; 32],
@@ -229,7 +270,7 @@ impl BridgeStore for PostgresHaBridgeStore {
 
     async fn read_overview(&self, user_id: Uuid) -> Result<BridgeOverview, BridgeStoreError> {
         let integration = sqlx::query(
-            "SELECT i.id, i.allowed_sensors, EXTRACT(EPOCH FROM (now() - i.last_ingest_at))::float8 AS lag_seconds \
+            "SELECT i.id, i.allowed_sensors, i.weather_entity, EXTRACT(EPOCH FROM (now() - i.last_ingest_at))::float8 AS lag_seconds \
              FROM home_assistant_integrations i JOIN users u ON u.id = i.user_id \
              WHERE i.user_id = $1 AND i.revoked_at IS NULL AND u.status = 'active'"
         ).bind(user_id).fetch_optional(&self.pool).await.map_err(failed)?;
@@ -237,12 +278,15 @@ impl BridgeStore for PostgresHaBridgeStore {
             return Ok(BridgeOverview {
                 connected: false,
                 online: false,
+                allowed_sensors: Vec::new(),
+                weather_entity: None,
                 sensors: Vec::new(),
                 weather: None,
             });
         };
         let integration_id: Uuid = integration.get("id");
         let allowed: Vec<String> = integration.get("allowed_sensors");
+        let weather_entity: String = integration.get("weather_entity");
         let lag: Option<f64> = integration.get("lag_seconds");
         let online = lag.is_some_and(|seconds| (0.0..=60.0).contains(&seconds));
         let rows = sqlx::query(
@@ -282,6 +326,8 @@ impl BridgeStore for PostgresHaBridgeStore {
         Ok(BridgeOverview {
             connected: true,
             online,
+            allowed_sensors: allowed,
+            weather_entity: Some(weather_entity),
             sensors,
             weather: self.read_weather(user_id).await?,
         })

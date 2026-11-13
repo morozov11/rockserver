@@ -298,6 +298,9 @@ async fn close(socket: &mut WebSocket, code: u16, reason: &'static str) {
 #[path = "ha_bridge/tests.rs"]
 mod tests;
 
+#[path = "ha_bridge/manage.rs"]
+mod manage;
 #[path = "ha_bridge/read.rs"]
 mod read;
+pub(super) use manage::{provision, revoke};
 pub(super) use read::{overview, weather};

@@ -1,6 +1,7 @@
 //! Operator-only provisioning and revocation for one owner's Home Assistant bridge.
 
 use ring::rand::{SecureRandom, SystemRandom};
+use rockserver::ha_bridge::valid_selection;
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use std::{env, error::Error};
@@ -19,16 +20,6 @@ fn token() -> Result<(String, Vec<u8>), Box<dyn Error>> {
     Ok((token.clone(), Sha256::digest(token.as_bytes()).to_vec()))
 }
 
-fn valid_entity(value: &str, prefix: &str) -> bool {
-    value.starts_with(prefix)
-        && value.len() > prefix.len()
-        && !value.contains("..")
-        && value.len() <= 128
-        && value.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'.')
-        })
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = env::args().collect();
@@ -40,11 +31,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     sqlx::migrate!().run(&pool).await?;
     match command.as_str() {
         "provision" => {
-            let Some(weather) = args.get(3).filter(|s| valid_entity(s, "weather.")) else {
+            let Some(weather) = args.get(3) else {
                 return Err("one weather.entity is required".into());
             };
             let sensors = args.get(4..).unwrap_or(&[]).to_vec();
-            if sensors.len() > 128 || sensors.iter().any(|s| !valid_entity(s, "sensor.")) {
+            if !valid_selection(&sensors, weather) {
                 return Err("expected at most 128 sensor.entity IDs".into());
             }
             let id = Uuid::new_v4();

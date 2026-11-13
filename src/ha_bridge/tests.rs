@@ -123,3 +123,26 @@ fn separate_credentials_have_distinct_hashes() {
         credential_hash("native-device-secret")
     );
 }
+
+#[test]
+fn owner_selection_accepts_only_unique_bounded_sensor_ids_and_one_weather_id() {
+    let sensors = vec!["sensor.room_temperature".to_owned()];
+    assert!(valid_selection(&sensors, "weather.home"));
+    assert!(!valid_selection(
+        &[sensors[0].clone(), sensors[0].clone()],
+        "weather.home"
+    ));
+    assert!(!valid_selection(
+        &["switch.lamp".to_owned()],
+        "weather.home"
+    ));
+    assert!(!valid_selection(&sensors, "sensor.outside"));
+    assert!(!valid_selection(
+        &["sensor.room.extra".to_owned()],
+        "weather.home"
+    ));
+    assert!(!valid_selection(
+        &["sensor.room\nother".to_owned()],
+        "weather.home"
+    ));
+}

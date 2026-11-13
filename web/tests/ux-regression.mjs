@@ -138,7 +138,7 @@ test("stage 6 renders honest device cards, QR empty state, and integration panel
   assert.match(centre, /Аккаунт и подключения/);
   assert.match(centre, /devices-title">Устройства</);
   assert.match(centre, /RockCast, RockMobile, Яндекс Дом и Home Assistant/);
-  assert.match(centre, /<HomeAssistantCard\s*\/>/);
+  assert.match(centre, /<HomeAssistantCard csrf=\{csrf\}\s*\/>/);
   // Account gate screens keep the four states and their texts in cabinet styling.
   assert.match(centre, /Загружаем аккаунт…/);
   assert.match(centre, /Сервис временно недоступен/);
