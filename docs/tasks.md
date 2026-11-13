@@ -3,7 +3,7 @@
 ## Round Yandex Home display values — 2026-11-13
 
 - Goal/scope: remove floating-point tails such as `8.700000000000001 Вт` from Yandex Home sensor cards. Changed only the shared server formatter for numeric `formatted_value`; raw JSON readings, text states, units and other integrations stay unchanged. Updated the OpenAPI descriptions and added a deterministic formatter test.
-- Checks/status: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` and `git diff --check` passed locally. Production deployment is pending.
+- Checks/status: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` and `git diff --check` passed locally. Commit `d6d63c831b99972c3727c8bf1c1290e53a8e1eb2` was deployed; the remote release worker reported `succeeded` and `https://rockplatform.win/health/ready` returned HTTP 200. The deployment watcher lost SSH once, but a separate status check confirmed success. A later SSH container-list check timed out. Live Yandex account rendering remains unverified.
 
 ## Install Home Assistant bridge on alex-center — 2026-11-13
 

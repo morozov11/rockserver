@@ -4,7 +4,7 @@ Last updated: 2026-11-13
 
 ## Yandex Home numeric display — 2026-11-13
 
-- The Yandex Home response formatter now rounds numeric property display strings to at most two decimal places while preserving integer values, text states and units. The raw `value` field remains unchanged. A deterministic test covers the floating-point tail from the reported power reading, 0.066 A, 220 V and a text state. The public OpenAPI descriptions for `formatted_value` are updated. Required local Rust checks passed. Production deployment is pending.
+- The Yandex Home response formatter now rounds numeric property display strings to at most two decimal places while preserving integer values, text states and units. The raw `value` field remains unchanged. A deterministic test covers the floating-point tail from the reported power reading, 0.066 A, 220 V and a text state. The public OpenAPI descriptions for `formatted_value` are updated. Required local Rust checks passed. Release `d6d63c831b99972c3727c8bf1c1290e53a8e1eb2` reported `succeeded` remotely, and the public `/health/ready` endpoint returned HTTP 200. Live Yandex account rendering was not checked; a supplementary SSH container-list check timed out.
 
 ## Home Assistant browser self-service — 2026-11-13
 
