@@ -2,6 +2,10 @@
 
 Last updated: 2026-11-13
 
+## Home Assistant visual setup load fix — 2026-11-13
+
+- A live HA configuration entry was created, but HA reported that `rockserver_bridge` failed to load. Read-only SSH log inspection found `Invalid config ... required key 'rockserver_bridge' not provided` for `configuration.yaml`. The component's `CONFIG_SCHEMA` now makes the legacy YAML block optional so UI-only setup can load. The targeted deterministic Python test and required Rust checks pass locally. Installation on `alex-center` and live WSS verification are pending; the installed file still has the old schema.
+
 ## Yandex Home numeric display — 2026-11-13
 
 - The Yandex Home response formatter now rounds numeric property display strings to at most two decimal places while preserving integer values, text states and units. The raw `value` field remains unchanged. A deterministic test covers the floating-point tail from the reported power reading, 0.066 A, 220 V and a text state. The public OpenAPI descriptions for `formatted_value` are updated. Required local Rust checks passed. Release `d6d63c831b99972c3727c8bf1c1290e53a8e1eb2` reported `succeeded` remotely, and the public `/health/ready` endpoint returned HTTP 200. Live Yandex account rendering was not checked; a supplementary SSH container-list check timed out.

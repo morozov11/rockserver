@@ -20,7 +20,7 @@ DOMAIN = "rockserver_bridge"
 _LOGGER = logging.getLogger(__name__)
 
 CONFIG_SCHEMA = vol.Schema({
-    vol.Required(DOMAIN): vol.Schema({
+    vol.Optional(DOMAIN): vol.Schema({
         vol.Required("server_url"): cv.string,
         vol.Required("credential"): cv.string,
         vol.Required("sensors"): vol.All(cv.ensure_list, [cv.string], vol.Length(max=128)),

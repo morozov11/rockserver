@@ -16,6 +16,7 @@ vol = types.ModuleType("voluptuous")
 vol.ALLOW_EXTRA = object()
 vol.Schema = lambda value, **_: value
 vol.Required = lambda value, **_: value
+vol.Optional = lambda value, **_: ("optional", value)
 vol.All = lambda *values: values
 vol.Length = lambda **values: values
 sys.modules["voluptuous"] = vol
@@ -113,6 +114,11 @@ class FakeRockServer:
         if len(self.sent) == 2:
             return {"type": "integration.ack", "revision": 1}
         raise EndSession
+
+
+class ConfigSchemaTests(unittest.TestCase):
+    def test_visual_setup_does_not_require_yaml_configuration(self):
+        self.assertIn(("optional", bridge.DOMAIN), bridge.CONFIG_SCHEMA)
 
 
 class BridgeTests(unittest.IsolatedAsyncioTestCase):

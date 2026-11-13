@@ -1,5 +1,10 @@
 # Task log
 
+## Fix HA visual setup load failure — 2026-11-13
+
+- Goal/scope: load a RockServer Bridge config entry created through the HA UI without requiring a `configuration.yaml` block. The live HA log identified the required YAML key as the setup failure. Changed the key to optional and added a deterministic schema regression test; legacy YAML configuration stays supported.
+- Checks/status: targeted Python schema test, `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings` and `cargo test` passed. The full Python fake suite stalled in its pre-existing asynchronous reconnect test on local Python 3.14 and was stopped; the new synchronous regression test passed separately. The installed HA file's SHA-256 still matches the old staged version. Installation on `alex-center` and live WSS validation are pending.
+
 ## Round Yandex Home display values — 2026-11-13
 
 - Goal/scope: remove floating-point tails such as `8.700000000000001 Вт` from Yandex Home sensor cards. Changed only the shared server formatter for numeric `formatted_value`; raw JSON readings, text states, units and other integrations stay unchanged. Updated the OpenAPI descriptions and added a deterministic formatter test.
