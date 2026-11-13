@@ -1,5 +1,13 @@
 # Task log
 
+## Release PostgreSQL 18 to production with cleanup — 2026-11-13
+
+- Goal/scope: commit and push the PostgreSQL 18 + E0 session work, migrate the live rockplatform.win database from 17.10 to 18.7, deploy HEAD, verify, and clean production garbage. Commits pushed: `0b8bc53` (pg18 pins), `bea5d1e` (AI roadmap + E0), `51f70e9` (rehearsal trusted-proxy-token fix found by the rehearsal), `afaa457` (compose volume mount moved to `/var/lib/postgresql`, required by the 18 image's major-version data layout).
+- Migration: live dump 37.7 MB SHA-256 `80e15667…` copied off-VPS; local restore rehearsal into disposable PostgreSQL 18 passed end-to-end; window: stack down → old volume archived (152 MB, SHA-256 `1e14b92f…`) → fresh 18 cluster via corrected compose → `pg_restore` → counts verified (16 825 stations/embeddings, 29 migrations, users/devices/HA intact).
+- Deploy/checks: `ops-001-d.ps1 -Action deploy` for `afaa457…` reported `readiness=passed` (first submit attempt hit a transient SSH banner timeout; safe resubmit). `https://rockplatform.win/health/ready` HTTP 200; container `PostgreSQL 18.7`; public search answers en+ru with semantic scores.
+- Cleanup: removed the PostgreSQL 17 image, superseded release images (kept `afaa457` current + `e593879` rollback pair), dangling images, `/tmp` staging, old deploy status/log files; disk 12 GB → 8.5 GB. Kept rollback artifacts: pre-migration dump (VPS + off-VPS copy) and archived 17 volume in `/opt/rockserver/backups/`.
+- Checks/status: released and verified live. Migration rollback path: restore dump into a fresh cluster (rehearsed) or unpack the volume archive; both documented in `docs/status.md`.
+
 ## E0 reference queries and quality baseline — 2026-11-13
 
 - Goal/scope: roadmap stage E0 — reference ru/en query sets with relevance by `station_id`, a metrics evaluator (Top-1/3/5, Recall@5/10, MRR, empty answers, latency), and a reproducible baseline on the pinned full catalog, without changing any runtime code.
