@@ -114,8 +114,8 @@ until the account issues a key and the HA component starts sending observations.
 
 ## Pilot checks still required
 
-No custom integration has been installed on `alex-center`. Before the first real connection, verify the HA config mount,
-selected entity IDs and their unit attributes, daily forecast support, WSS reachability and
-certificate, restart/reconnect behaviour, credential rotation/revocation, and stale results after
-disconnect. The exact HA installation type was inferred from a read-only SSH process listing and
-is not yet independently confirmed.
+The custom integration is installed on `alex-center` and HA 2026.9.4 restarted successfully.
+Before the first real connection, select entity IDs and verify their units, daily forecast
+support, WSS reachability and certificate, restart/reconnect behaviour, credential
+rotation/revocation, and stale results after disconnect. The visual config flow and live bridge
+connection have not yet been tested.

@@ -24,6 +24,10 @@ RockServer. No inbound port on the home network, no paired-device identity, no o
 
 ## Progress
 
+- On 2026-11-13 the owner ran the staged one-time `sudo` installer on `alex-center`. Independent
+  SSH confirmed all five installed file hashes, HA 2026.9.4 restarted, local HTTP 200, and only
+  the standard custom-integration warning. Host config mount is `/var/lib/homeassistant` →
+  container `/config`. No key has been issued or entered and no live WSS data has been checked.
 - New owner request: all connection management should happen in the RockServer cabinet like
   Yandex Home. The owner accepted one-time local HA component installation. Added browser
   provision/revoke with cookie, CSRF and trusted proxy checks; owner-chosen allowlist; one-time
@@ -70,13 +74,12 @@ RockServer. No inbound port on the home network, no paired-device identity, no o
 
 ## Next steps
 
-1. Confirm the actual HA config mount and HA version on `alex-center`; select real sensor/weather
-   IDs and confirm the weather entity supports daily forecasts.
-2. Install the revised custom integration once, issue a key in the RockServer cabinet, and paste
-   it into HA's visual config flow. Then test reconnect/stale/revocation on the live HA and server.
+1. Select real sensor/weather IDs in HA and confirm daily forecast support.
+2. Issue a key in the RockServer cabinet and paste it into HA's visual config flow. Then test
+   reconnect/stale/revocation on the live HA and server.
    The disposable PostgreSQL and HTTP tests covered browser CSRF, owner isolation, replacement
    and revoke; they did not exercise every legacy operator CLI branch.
 
-The owner authorized and received the RockServer commit/deployment. Live HA installation has not
-yet been performed. `alex-center` runs `python3 -P -m homeassistant --config /config`; its host
-mount path remains unknown because noninteractive Docker inspection is unavailable to the SSH user.
+The owner authorized and received the RockServer commit/deployment and installed the HA files.
+`alex-center` runs `python3 -P -m homeassistant --config /config`; the install script verified the
+host mount `/var/lib/homeassistant`. Live credential/config-flow and WSS checks remain.

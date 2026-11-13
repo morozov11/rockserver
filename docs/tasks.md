@@ -1,5 +1,11 @@
 # Task log
 
+## Install Home Assistant bridge on alex-center — 2026-11-13
+
+- Goal/scope: install the released custom component in the local HA without exposing HA or changing RockServer runtime. Found HA 2026.9.4 config at root-owned `/var/lib/homeassistant`; staged five public component files under `/home/alex` and verified their SHA-256. The owner entered the sudo password only in their terminal to run a fixed install script that checked the Docker `/config` mount, copied files and restarted the HA container.
+- Result/checks: independent SSH confirmed all five installed hashes match the repo, the new HA process started at 11:46:50 local time, HA root HTTP returned 200, and the current log has only the standard custom-integration warning for `rockserver_bridge`. No token was read or written by this task. The component has not been configured in the HA UI or connected to RockServer.
+- Status: installation complete; owner must select HA IDs, issue a key in the RockServer cabinet, and enter it in HA before live readings can be checked.
+
 ## Home Assistant self-service account connection — 2026-11-13
 
 - Goal: let a signed-in RockServer owner select HA sensors/weather and issue/revoke the bridge key in the personal cabinet, then enter that key visually in HA after one local component installation.
