@@ -2,7 +2,7 @@
 
 ## Clarify HA selection authentication errors — 2026-11-13
 
-- Goal/scope: diagnose the reported 401 on saving an HA selection and avoid suggesting invalid IDs when the browser session or CSRF proof failed. Updated the cabinet message for authentication and CSRF failures; the server's authorization checks are unchanged. After refreshing, the owner reported successful saving. `cargo fmt --check`, strict Clippy, `cargo test` and web TypeScript check passed; rollout pending. HA logs also showed repeated disconnect/retry and forecast-refresh warnings, which remain to be investigated.
+- Goal/scope: diagnose the reported 401 on saving an HA selection and avoid suggesting invalid IDs when the browser session or CSRF proof failed. Updated the cabinet message for authentication and CSRF failures; the server's authorization checks are unchanged. After refreshing, the owner reported successful saving. `cargo fmt --check`, strict Clippy, `cargo test` and web TypeScript check passed. The release worker reported `succeeded` for `e5938794e982db83abdd507dcdc83ac20d96bcf9` and public readiness returned HTTP 200; the local watcher had an SSH timeout. HA logs also showed repeated disconnect/retry and forecast-refresh warnings, which remain to be investigated.
 
 ## Change HA weather entity without replacing key — 2026-11-13
 
