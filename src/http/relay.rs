@@ -91,7 +91,7 @@ pub(super) async fn stream(
     let id = request_id(&headers);
     let url = match station_access(&state, &station_id, &uri, &headers, &id).await {
         Ok(url) => url,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let Ok(url) = Url::parse(&url) else {
         return failure(
@@ -171,28 +171,29 @@ pub(super) async fn stream(
 }
 
 // Shared gate: neither metadata endpoint nor audio opens an upstream before session/catalog checks.
+// The error is boxed to keep the Result small (clippy 1.100 result_large_err).
 async fn station_access(
     state: &AppState,
     station_id: &str,
     uri: &Uri,
     headers: &HeaderMap,
     id: &str,
-) -> Result<String, Response> {
+) -> Result<String, Box<Response>> {
     if uri.query().is_some() {
-        return Err(failure(
+        return Err(Box::new(failure(
             StatusCode::BAD_REQUEST,
             "invalid_query",
             "Query parameters are not accepted.",
             id,
-        ));
+        )));
     }
     if station_id.is_empty() || station_id.len() > 128 {
-        return Err(failure(
+        return Err(Box::new(failure(
             StatusCode::BAD_REQUEST,
             "invalid_station_id",
             "Station identifier is invalid.",
             id,
-        ));
+        )));
     }
     // A bearer takes precedence; a malformed bearer cannot silently fall back to a cookie.
     let authorized = if headers.contains_key(header::AUTHORIZATION) {
@@ -218,31 +219,31 @@ async fn station_access(
         false
     };
     if !authorized {
-        return Err(failure(
+        return Err(Box::new(failure(
             StatusCode::UNAUTHORIZED,
             "authentication_required",
             "A current user or device session is required.",
             id,
-        ));
+        )));
     }
 
     let station = match state.search_service.public_station(station_id).await {
         Ok(Some(station)) => station,
         Ok(None) => {
-            return Err(failure(
+            return Err(Box::new(failure(
                 StatusCode::NOT_FOUND,
                 "station_not_found",
                 "Station is unavailable.",
                 id,
-            ));
+            )));
         }
         Err(_) => {
-            return Err(failure(
+            return Err(Box::new(failure(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "catalog_unavailable",
                 "Catalog is unavailable.",
                 id,
-            ));
+            )));
         }
     };
     Ok(station.stream_url)

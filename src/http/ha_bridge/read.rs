@@ -17,38 +17,39 @@ use super::super::{
 };
 
 // Both read endpoints use the same first-party owner boundary as Yandex Home.
-async fn owner(state: &AppState, headers: &HeaderMap, id: &str) -> Result<Uuid, Response> {
+// The error is boxed to keep the Result small (clippy 1.100 result_large_err).
+async fn owner(state: &AppState, headers: &HeaderMap, id: &str) -> Result<Uuid, Box<Response>> {
     if !trusted_proxy_header_matches(headers, state.trusted_proxy_token.as_deref()) {
-        return Err(error_response(
+        return Err(Box::new(error_response(
             StatusCode::FORBIDDEN,
             "untrusted_request",
             "Trusted proxy is required.",
             id,
             json!({}),
-        ));
+        )));
     }
     let Some(cookie) = cookie_value(headers, "rockserver_browser") else {
-        return Err(error_response(
+        return Err(Box::new(error_response(
             StatusCode::UNAUTHORIZED,
             "authentication_required",
             "A browser session is required.",
             id,
             json!({}),
-        ));
+        )));
     };
     let Some(accounts) = state.account_store.as_ref() else {
-        return Err(unavailable(id));
+        return Err(Box::new(unavailable(id)));
     };
     match accounts.browser_session_user(&token_hash(cookie)).await {
         Ok(Some(owner)) => Ok(owner),
-        Ok(None) => Err(error_response(
+        Ok(None) => Err(Box::new(error_response(
             StatusCode::UNAUTHORIZED,
             "authentication_required",
             "A browser session is required.",
             id,
             json!({}),
-        )),
-        Err(_) => Err(unavailable(id)),
+        ))),
+        Err(_) => Err(Box::new(unavailable(id))),
     }
 }
 
@@ -67,7 +68,7 @@ pub(crate) async fn overview(State(state): State<AppState>, headers: HeaderMap) 
     let id = request_id(&headers);
     let owner = match owner(&state, &headers, &id).await {
         Ok(owner) => owner,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let Some(store) = state.ha_bridge.as_ref() else {
         return unavailable(&id);
@@ -83,7 +84,7 @@ pub(crate) async fn weather(State(state): State<AppState>, headers: HeaderMap) -
     let id = request_id(&headers);
     let owner = match owner(&state, &headers, &id).await {
         Ok(owner) => owner,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let Some(store) = state.ha_bridge.as_ref() else {
         return unavailable(&id);

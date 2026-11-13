@@ -1,0 +1,4 @@
+[toolchain]
+# Единый компилятор всех машин и Docker-сборок rockserver (решение 2026-11-13).
+# Обновляется только вместе с digest builder-образа в Dockerfile.
+channel = "1.100.0"

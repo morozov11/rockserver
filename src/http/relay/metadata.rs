@@ -74,7 +74,7 @@ pub(in crate::http::endpoints) async fn now_playing(
 ) -> Response {
     let id = request_id(&headers);
     if let Err(response) = station_access(&state, &station_id, &uri, &headers, &id).await {
-        return response;
+        return *response;
     }
     let mut response = with_request_id(
         Json(snapshot(&state.relay, &station_id)).into_response(),
@@ -95,7 +95,7 @@ pub(in crate::http::endpoints) async fn events(
 ) -> Response {
     let id = request_id(&headers);
     if let Err(response) = station_access(&state, &station_id, &uri, &headers, &id).await {
-        return response;
+        return *response;
     }
     let Ok(permit) = Arc::clone(&state.relay.subscribers).try_acquire_owned() else {
         return retry_after(
