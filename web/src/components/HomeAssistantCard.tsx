@@ -92,7 +92,14 @@ export function HomeAssistantCard({ csrf }: { csrf: string }) {
       await api.updateHomeAssistantSelection({ sensors, weather_entity: weatherId.trim() }, csrf);
       await load();
       setMessage("Список сохранён. Home Assistant переподключится с тем же ключом; прежние показания очищены.");
-    } catch { setMessage("Не удалось сохранить список. Проверьте ID датчиков и погоды."); }
+    } catch (error) {
+      const code = (error as { code?: string } | null)?.code;
+      setMessage(code === "authentication_required" || code === "csrf_failed"
+        ? "Сессия кабинета устарела. Обновите страницу или войдите снова и повторите сохранение. Ключ HA менять не нужно."
+        : code === "invalid_selection" || code === "invalid_request"
+          ? "Не удалось сохранить список. Проверьте ID датчиков и погоды."
+          : "Не удалось сохранить список. Попробуйте ещё раз.");
+    }
     finally { setBusy(false); }
   };
 

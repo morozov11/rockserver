@@ -2,6 +2,10 @@
 
 Last updated: 2026-11-13
 
+## Home Assistant selection authentication message — 2026-11-13
+
+- A reported selection save returned HTTP 401. The endpoint checks the browser cookie and CSRF token before validating entity IDs; a missing, expired or mismatched session proof returns `authentication_required`. After refreshing the page, the owner reported the selection saved successfully. The cabinet now tells the user to refresh or sign in again for authentication/CSRF errors instead of blaming IDs. Required Rust checks and web typecheck passed; rollout is pending. Read-only HA log inspection also showed repeated bridge disconnect/retry and forecast-refresh warnings; their cause and live forecast remain unverified.
+
 ## Home Assistant selection without key rotation — 2026-11-13
 
 - The browser card now has a separate **Save list** action for approved `sensor.*` IDs and one `weather.*` ID. The new owner/CSRF-protected `PUT /api/v1/browser/home-assistant/selection` keeps the credential hash and integration ID, clears old observations, invalidates the active connection epoch, and makes the HA component reconnect with the new allowlist. The weather target `weather.forecast_home_assistant` passes the existing entity-ID rules. Required Rust checks, web typecheck/tests/build, and two isolated PostgreSQL tests passed. Release `ce59ce47014a97a7b65e33f16870d621671b147c` reported `succeeded`; public readiness, page and published bundle returned HTTP 200, and the bundle contains the new button and route. The owner's live selection has not been changed; the real HA forecast for this entity still needs checking.

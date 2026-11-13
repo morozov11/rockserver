@@ -1,5 +1,9 @@
 # Task log
 
+## Clarify HA selection authentication errors — 2026-11-13
+
+- Goal/scope: diagnose the reported 401 on saving an HA selection and avoid suggesting invalid IDs when the browser session or CSRF proof failed. Updated the cabinet message for authentication and CSRF failures; the server's authorization checks are unchanged. After refreshing, the owner reported successful saving. `cargo fmt --check`, strict Clippy, `cargo test` and web TypeScript check passed; rollout pending. HA logs also showed repeated disconnect/retry and forecast-refresh warnings, which remain to be investigated.
+
 ## Change HA weather entity without replacing key — 2026-11-13
 
 - Goal/scope: let the owner change the approved HA weather entity to `weather.forecast_home_assistant` in the cabinet while keeping the already installed HA credential. Added a separate browser selection route and button; preserved key rotation as an explicit action. The store atomically updates the allowlist, invalidates the socket epoch and clears old sensor/weather observations, so reconnect uses the same key with a fresh snapshot. Updated OpenAPI, operator guide, diagram and integration/contract tests.
