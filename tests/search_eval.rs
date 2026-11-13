@@ -41,6 +41,9 @@ const FORMAT_ENV: &str = "ROCKSERVER_SEARCH_EVAL_FORMAT_2X2";
 #[path = "search_eval/format_experiment.rs"]
 mod format_experiment;
 
+#[path = "search_eval/e0_full_catalog.rs"]
+mod e0_full_catalog;
+
 #[derive(Deserialize)]
 struct GoldenSet {
     catalog_version: String,
