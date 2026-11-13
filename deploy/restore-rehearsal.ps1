@@ -51,6 +51,7 @@ $dbContainer = "rockserver-ops001c-db-$suffix"
 $appContainer = "rockserver-ops001c-app-$suffix"
 $databasePassword = [Guid]::NewGuid().ToString('N')
 $apiToken = [Guid]::NewGuid().ToString('N') + [Guid]::NewGuid().ToString('N')
+$trustedProxyToken = [Guid]::NewGuid().ToString('N') + [Guid]::NewGuid().ToString('N')
 $created = @()
 
 try {
@@ -73,7 +74,8 @@ try {
         'run', '--detach', '--name', $appContainer, '--network', $network,
         '--env', 'ROCKSERVER_BIND_ADDR=0.0.0.0:3000', '--env', 'ROCKSERVER_LOG_DIR=/tmp',
         '--env', 'RUST_LOG=warn', '--env', "DATABASE_URL=postgres://rockserver:$databasePassword@postgres:5432/rockserver",
-        '--env', "ROCKSERVER_API_BEARER_TOKEN=$apiToken", $RockServerImage
+        '--env', "ROCKSERVER_API_BEARER_TOKEN=$apiToken",
+        '--env', "ROCKSERVER_TRUSTED_PROXY_TOKEN=$trustedProxyToken", $RockServerImage
     )
     $created += $appContainer
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
