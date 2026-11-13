@@ -29,8 +29,11 @@ RockServer. No inbound port on the home network, no paired-device identity, no o
   provision/revoke with cookie, CSRF and trusted proxy checks; owner-chosen allowlist; one-time
   key display in the card; HA visual config/options flow with password field. Strict Clippy,
   TypeScript, 48 web tests, Vite build, three Python fake tests and a disposable PostgreSQL
-  lifecycle and browser HTTP/CSRF tests passed. Final sequential Rust checks passed. No commit or
-  deployment of this follow-up yet; live HA remains untouched.
+  lifecycle and browser HTTP/CSRF tests passed. Final sequential Rust checks passed. Commit
+  `f38ad61a2c7a8e9c1cb112c4f6e4a22a413a5c78` was deployed by OPS-001-D; remote worker
+  succeeded, matching containers are healthy, public readiness/page/bundle returned 200 and
+  anonymous credential issuance returned 403. The local watcher hit an SSH banner timeout after
+  worker success; read-only SSH independently confirmed the result. Live HA remains untouched.
 - Follow-up account work added `GET /api/v1/browser/home-assistant`, a Devices tab card for
   approved sensors/current weather/forecast, public hashed sensor IDs, display names, explicit
   freshness, OpenAPI fixtures, and UI tests. Required Rust checks passed before the final
