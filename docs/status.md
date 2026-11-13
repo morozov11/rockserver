@@ -4,7 +4,7 @@ Last updated: 2026-11-13
 
 ## Home Assistant visual setup load fix — 2026-11-13
 
-- A live HA configuration entry was created, but HA reported that `rockserver_bridge` failed to load. Read-only SSH log inspection found `Invalid config ... required key 'rockserver_bridge' not provided` for `configuration.yaml`. The component's `CONFIG_SCHEMA` now makes the legacy YAML block optional so UI-only setup can load. The targeted deterministic Python test and required Rust checks pass locally. Installation on `alex-center` and live WSS verification are pending; the installed file still has the old schema.
+- A live HA configuration entry was created, but HA reported that `rockserver_bridge` failed to load. Read-only SSH log inspection found `Invalid config ... required key 'rockserver_bridge' not provided` for `configuration.yaml`. The component's `CONFIG_SCHEMA` now makes the legacy YAML block optional so UI-only setup can load. The targeted deterministic Python test and required Rust checks pass locally. The corrected file and an installer were staged at `/home/alex/rockserver-ha-bridge-fix-a93e76f` with verified SHA-256 and shell syntax. Installation requires the owner's interactive sudo password; the installed file still has the old schema. Live WSS verification is pending.
 
 ## Yandex Home numeric display — 2026-11-13
 

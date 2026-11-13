@@ -3,7 +3,7 @@
 ## Fix HA visual setup load failure — 2026-11-13
 
 - Goal/scope: load a RockServer Bridge config entry created through the HA UI without requiring a `configuration.yaml` block. The live HA log identified the required YAML key as the setup failure. Changed the key to optional and added a deterministic schema regression test; legacy YAML configuration stays supported.
-- Checks/status: targeted Python schema test, `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings` and `cargo test` passed. The full Python fake suite stalled in its pre-existing asynchronous reconnect test on local Python 3.14 and was stopped; the new synchronous regression test passed separately. The installed HA file's SHA-256 still matches the old staged version. Installation on `alex-center` and live WSS validation are pending.
+- Checks/status: targeted Python schema test, `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings` and `cargo test` passed. The full Python fake suite stalled in its pre-existing asynchronous reconnect test on local Python 3.14 and was stopped; the new synchronous regression test passed separately. The installed HA file's SHA-256 still matches the old staged version. Staged the corrected file and installer at `/home/alex/rockserver-ha-bridge-fix-a93e76f`; verified the transferred SHA-256 and `bash -n`. The installer checks the previous file hash and Docker config mount, then replaces one file and restarts HA. Interactive sudo from the owner and live WSS validation remain pending.
 
 ## Round Yandex Home display values — 2026-11-13
 
