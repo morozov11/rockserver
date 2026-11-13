@@ -45,6 +45,9 @@ fn separate_ha_contract_accepts_readings_and_rejects_identity_or_commands() {
     );
     let overview = &document["paths"]["/api/v1/browser/home-assistant"]["get"];
     assert_eq!(overview["x-rockserver-status"], "implemented");
+    let selection = &document["paths"]["/api/v1/browser/home-assistant/selection"]["put"];
+    assert_eq!(selection["x-rockserver-status"], "implemented");
+    assert!(selection["responses"]["204"]["description"].is_string());
     assert_component_valid(&document, "HaBridgeOverview", &fixture("overview.json"));
     assert_component_invalid(
         &document,

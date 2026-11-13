@@ -20,8 +20,10 @@ The custom integration has HA process privileges, so install it only from review
    into the password field and leave the WSS address at the displayed RockServer value. No HA
    YAML or long-lived HA API token is needed for this UI setup.
 4. Return to the RockServer card and refresh. It will show connection status, approved sensor
-   readings, current weather and a short forecast. Replacing the key or entity selection in
-   RockServer requires pasting the new key into HA's **Configure** options for RockServer Bridge.
+   readings, current weather and a short forecast. To change sensors or the weather entity, edit
+   the IDs and select **Save list**. The existing key remains valid; the bridge reconnects and
+   sends a fresh snapshot. Old observations are cleared during the change. **Replace key** is a
+   separate action and requires pasting the new key into HA's **Configure** options.
    **Disconnect** in RockServer revokes the key and hides its observations; remove the HA
    integration as well if you no longer want the local task to retry.
 
@@ -92,7 +94,8 @@ rockserver_bridge:
 ```
 
 The local list and server-approved list are intersected. The selected weather entity must match
-the server setting exactly. For the new HA UI flow, the component receives the approved list
+the server setting exactly; a legacy YAML weather change therefore also needs a YAML edit and HA
+restart. For the HA UI flow, the component receives the approved list
 from the RockServer welcome frame. Its normal outbound HTTPS certificate validation remains
 enabled. Weather forecast refresh uses
 `weather.get_forecasts` with daily periods at most once every 15 minutes. Current weather is read
@@ -114,8 +117,7 @@ until the account issues a key and the HA component starts sending observations.
 
 ## Pilot checks still required
 
-The custom integration is installed on `alex-center` and HA 2026.9.4 restarted successfully.
-Before the first real connection, select entity IDs and verify their units, daily forecast
-support, WSS reachability and certificate, restart/reconnect behaviour, credential
-rotation/revocation, and stale results after disconnect. The visual config flow and live bridge
-connection have not yet been tested.
+The custom integration is installed on `alex-center`, and the HA UI config entry now loads.
+The bridge reached the forecast step after the server acknowledged its initial snapshot. Live
+cabinet readings, daily forecast support for the chosen entity, restart/reconnect behaviour,
+credential rotation/revocation, and stale results after disconnect still need verification.

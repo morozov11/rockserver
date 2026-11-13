@@ -302,5 +302,5 @@ mod tests;
 mod manage;
 #[path = "ha_bridge/read.rs"]
 mod read;
-pub(super) use manage::{provision, revoke};
+pub(super) use manage::{provision, revoke, update_selection};
 pub(super) use read::{overview, weather};

@@ -71,7 +71,7 @@ export function HomeAssistantCard({ csrf }: { csrf: string }) {
   useEffect(() => { void load(); }, []);
 
   const issue = async () => {
-    if (data?.connected && !window.confirm("Заменить ключ Home Assistant? Старый ключ сразу перестанет работать, прежние показания будут очищены.")) return;
+    if (data?.connected && !window.confirm("Заменить ключ Home Assistant? Старый ключ сразу перестанет работать.")) return;
     setBusy(true);
     setMessage("");
     setCredential(null);
@@ -81,6 +81,18 @@ export function HomeAssistantCard({ csrf }: { csrf: string }) {
       setCredential(response.credential);
       await load();
     } catch { setMessage("Не удалось выдать ключ. Проверьте ID датчиков и погоды."); }
+    finally { setBusy(false); }
+  };
+
+  const saveSelection = async () => {
+    setBusy(true);
+    setMessage("");
+    try {
+      const sensors = sensorIds.split(/[,\n]/).map((id) => id.trim()).filter(Boolean);
+      await api.updateHomeAssistantSelection({ sensors, weather_entity: weatherId.trim() }, csrf);
+      await load();
+      setMessage("Список сохранён. Home Assistant переподключится с тем же ключом; прежние показания очищены.");
+    } catch { setMessage("Не удалось сохранить список. Проверьте ID датчиков и погоды."); }
     finally { setBusy(false); }
   };
 
@@ -129,7 +141,7 @@ export function HomeAssistantCard({ csrf }: { csrf: string }) {
           <p class="yh-hint">ID сущностей можно скопировать в HA: Инструменты разработчика → Состояния. В HA укажите адрес <code>{serverUrl}</code>.</p>
           {credential && <div class="ha-credential" role="status"><p>Новый ключ доступа. Скопируйте его сейчас: после закрытия страницы он больше не показывается.</p><input readOnly value={credential} aria-label="Ключ доступа RockServer для HA" /><button type="button" class="secondary" onClick={() => void navigator.clipboard.writeText(credential)}>Скопировать ключ</button><button type="button" class="secondary" onClick={() => setCredential(null)}>Скрыть ключ</button></div>}
           {message && <p class="yh-hint" role="alert">{message}</p>}
-          <div class="yandex-actions-row"><button type="button" onClick={() => void issue()} disabled={busy || loading}>{data?.connected ? "Заменить ключ и список" : "Получить ключ"}</button>{data?.connected && <button type="button" class="secondary" onClick={() => void revoke()} disabled={busy}>Отключить</button>}</div>
+          <div class="yandex-actions-row">{data?.connected && <button type="button" onClick={() => void saveSelection()} disabled={busy || loading}>Сохранить список</button>}<button type="button" class={data?.connected ? "secondary" : undefined} onClick={() => void issue()} disabled={busy || loading}>{data?.connected ? "Заменить ключ" : "Получить ключ"}</button>{data?.connected && <button type="button" class="secondary" onClick={() => void revoke()} disabled={busy}>Отключить</button>}</div>
         </div>
       </div>
       <div class="yandex-actions-row"><button type="button" class="secondary" onClick={() => void load()} disabled={loading}>Обновить показания</button></div>

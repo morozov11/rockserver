@@ -117,6 +117,43 @@ impl BridgeStore for PostgresHaBridgeStore {
         Ok(true)
     }
 
+    async fn update_selection(
+        &self,
+        user_id: Uuid,
+        sensors: &[String],
+        weather_entity: &str,
+    ) -> Result<bool, BridgeStoreError> {
+        let mut tx = self.pool.begin().await.map_err(failed)?;
+        let row = sqlx::query(
+            "UPDATE home_assistant_integrations i SET allowed_sensors = $2, weather_entity = $3, \
+             epoch = NULL, revision = 0, last_payload_hash = NULL, last_ingest_at = NULL \
+             FROM users u WHERE i.user_id = $1 AND i.user_id = u.id \
+             AND i.revoked_at IS NULL AND u.status = 'active' RETURNING i.id",
+        )
+        .bind(user_id)
+        .bind(sensors)
+        .bind(weather_entity)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(failed)?;
+        let Some(row) = row else {
+            return Ok(false);
+        };
+        let id: Uuid = row.get("id");
+        sqlx::query("DELETE FROM home_assistant_sensor_states WHERE integration_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(failed)?;
+        sqlx::query("DELETE FROM home_assistant_weather_states WHERE integration_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(failed)?;
+        tx.commit().await.map_err(failed)?;
+        Ok(true)
+    }
+
     async fn revoke(&self, user_id: Uuid) -> Result<(), BridgeStoreError> {
         sqlx::query("UPDATE home_assistant_integrations SET revoked_at = now(), epoch = NULL, revision = 0, last_payload_hash = NULL WHERE user_id = $1 AND revoked_at IS NULL")
             .bind(user_id).execute(&self.pool).await.map_err(failed)?;
@@ -156,8 +193,10 @@ impl BridgeStore for PostgresHaBridgeStore {
         let result = sqlx::query(
             "UPDATE home_assistant_integrations i SET epoch = $3, revision = 0, last_payload_hash = NULL \
              FROM users u WHERE i.id = $1 AND i.user_id = $2 AND i.user_id = u.id \
-             AND i.revoked_at IS NULL AND i.credential_hash = $4 AND u.status = 'active'"
+             AND i.revoked_at IS NULL AND i.credential_hash = $4 AND u.status = 'active' \
+             AND i.weather_entity = $5 AND i.allowed_sensors @> $6 AND i.allowed_sensors <@ $6"
         ).bind(principal.integration_id).bind(principal.user_id).bind(epoch).bind(principal.credential_hash.as_slice())
+            .bind(&principal.weather_entity).bind(principal.sensors.iter().cloned().collect::<Vec<_>>())
             .execute(&self.pool).await.map_err(failed)?;
         if result.rows_affected() == 1 {
             Ok(())

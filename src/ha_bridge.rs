@@ -310,6 +310,13 @@ pub trait BridgeStore: Send + Sync {
         sensors: &[String],
         weather_entity: &str,
     ) -> Result<bool, BridgeStoreError>;
+    /// Changes an active owner's allowlist without replacing its credential.
+    async fn update_selection(
+        &self,
+        user_id: Uuid,
+        sensors: &[String],
+        weather_entity: &str,
+    ) -> Result<bool, BridgeStoreError>;
     /// Revokes the owner's credential and immediately hides its observations.
     async fn revoke(&self, user_id: Uuid) -> Result<(), BridgeStoreError>;
     /// Resolves only an active integration credential to its owner and allowlist.

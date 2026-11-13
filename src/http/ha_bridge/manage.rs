@@ -97,6 +97,57 @@ pub(crate) async fn provision(
     }
 }
 
+/// Saves an active owner's entity selection while retaining its existing HA credential.
+pub(crate) async fn update_selection(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Result<Json<ProvisionRequest>, JsonRejection>,
+) -> Response {
+    let id = request_id(&headers);
+    let owner = match browser_mutation_owner(&state, &headers, &id).await {
+        Ok(owner) => owner,
+        Err(response) => return *response,
+    };
+    let Json(payload) = match payload {
+        Ok(value) => value,
+        Err(_) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "Invalid Home Assistant selection.",
+                &id,
+                json!({}),
+            );
+        }
+    };
+    if !valid_selection(&payload.sensors, &payload.weather_entity) {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "invalid_selection",
+            "Select at most 128 unique sensor IDs and one weather ID.",
+            &id,
+            json!({}),
+        );
+    }
+    let Some(store) = state.ha_bridge.as_ref() else {
+        return unavailable(&id);
+    };
+    match store
+        .update_selection(owner, &payload.sensors, &payload.weather_entity)
+        .await
+    {
+        Ok(true) => with_request_id(StatusCode::NO_CONTENT.into_response(), &id),
+        Ok(false) => error_response(
+            StatusCode::NOT_FOUND,
+            "integration_not_found",
+            "Home Assistant is not connected.",
+            &id,
+            json!({}),
+        ),
+        Err(_) => unavailable(&id),
+    }
+}
+
 /// Revokes the signed-in owner's credential and hides its HA observations.
 pub(crate) async fn revoke(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let id = request_id(&headers);

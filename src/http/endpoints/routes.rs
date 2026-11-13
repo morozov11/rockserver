@@ -115,6 +115,11 @@ pub(super) fn build_router(state: AppState) -> Router {
                 .layer(axum::extract::DefaultBodyLimit::max(16_384)),
         )
         .route(
+            "/api/v1/browser/home-assistant/selection",
+            axum::routing::put(ha_bridge::update_selection)
+                .layer(axum::extract::DefaultBodyLimit::max(16_384)),
+        )
+        .route(
             "/api/v1/device-control/directory",
             axum::routing::get(directory::get),
         )

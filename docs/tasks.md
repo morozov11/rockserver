@@ -1,5 +1,10 @@
 # Task log
 
+## Change HA weather entity without replacing key — 2026-11-13
+
+- Goal/scope: let the owner change the approved HA weather entity to `weather.forecast_home_assistant` in the cabinet while keeping the already installed HA credential. Added a separate browser selection route and button; preserved key rotation as an explicit action. The store atomically updates the allowlist, invalidates the socket epoch and clears old sensor/weather observations, so reconnect uses the same key with a fresh snapshot. Updated OpenAPI, operator guide, diagram and integration/contract tests.
+- Checks/status: sequential `cargo fmt --check`, strict Clippy and full `cargo test` passed. Installed TypeScript compiler, 48 web tests and Vite build passed. Two HA integration tests passed against a disposable PostgreSQL 17/pgvector container, then the container was removed; they cover retained key, owner/CSRF route, cleared observations and rejected old session. Corepack could not download pnpm due unavailable registry DNS, so installed web tools were invoked directly. Production rollout is pending; no live account selection has been changed yet.
+
 ## Fix HA visual setup load failure — 2026-11-13
 
 - Goal/scope: load a RockServer Bridge config entry created through the HA UI without requiring a `configuration.yaml` block. The live HA log identified the required YAML key as the setup failure. Changed the key to optional and added a deterministic schema regression test; legacy YAML configuration stays supported.

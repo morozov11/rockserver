@@ -2,6 +2,10 @@
 
 Last updated: 2026-11-13
 
+## Home Assistant selection without key rotation — 2026-11-13
+
+- The browser card now has a separate **Save list** action for approved `sensor.*` IDs and one `weather.*` ID. The new owner/CSRF-protected `PUT /api/v1/browser/home-assistant/selection` keeps the credential hash and integration ID, clears old observations, invalidates the active connection epoch, and makes the HA component reconnect with the new allowlist. The weather target `weather.forecast_home_assistant` passes the existing entity-ID rules. Required Rust checks, web typecheck/tests/build, and two isolated PostgreSQL tests passed. Production rollout is pending. The real HA forecast for this entity still needs checking.
+
 ## Home Assistant visual setup load fix — 2026-11-13
 
 - A live HA configuration entry was created, but HA reported that `rockserver_bridge` failed to load. Read-only SSH log inspection found `Invalid config ... required key 'rockserver_bridge' not provided` for `configuration.yaml`. The component's `CONFIG_SCHEMA` now makes the legacy YAML block optional so UI-only setup can load. The targeted deterministic Python test and required Rust checks passed. The owner ran the checked installer with interactive sudo; the installed SHA-256 is `bf0019705f88e2c436f70df96aad6e8277eb14e8a81052ed7e5a2c854f3b5fcb`, HA restarted and local HTTP returned 200. The new log has no YAML setup error. It does have one `RockServer bridge forecast refresh failed` warning; because that code path follows the server welcome and snapshot acknowledgment, the bridge reached the forecast step, but live account data and forecast content have not been independently checked. Next: inspect the weather entity's daily-forecast support if the warning persists and verify readings in the cabinet.

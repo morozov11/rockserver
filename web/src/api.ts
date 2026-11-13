@@ -45,6 +45,7 @@ export const api = {
   yandexHomeSensors() { return request<YandexHomeSensorsResponse>("/api/v1/browser/yandex-home/sensors"); },
   homeAssistant() { return request<HaOverview>("/api/v1/browser/home-assistant"); },
   issueHomeAssistantCredential(selection: { sensors: string[]; weather_entity: string }, csrfToken: string) { return request<{ credential: string }>("/api/v1/browser/home-assistant/credential", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(selection) }); },
+  updateHomeAssistantSelection(selection: { sensors: string[]; weather_entity: string }, csrfToken: string) { return request<void>("/api/v1/browser/home-assistant/selection", { method: "PUT", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(selection) }); },
   revokeHomeAssistant(csrfToken: string) { return request<void>("/api/v1/browser/home-assistant", { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } }); },
   disconnectYandexHome(csrfToken: string) { return request<void>("/api/v1/browser/yandex-home", { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } }); },
   renameDevice(deviceId: string, device_display_name: string, csrfToken: string) { return request<void>(`/api/v1/browser/devices/${encodeURIComponent(deviceId)}`, { method: "PATCH", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ device_display_name }) }); },

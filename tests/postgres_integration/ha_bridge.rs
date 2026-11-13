@@ -83,6 +83,46 @@ async fn postgres_ha_bridge_owner_projection_and_revocation() {
     assert_eq!(visible.weather_entity.as_deref(), Some("weather.home"));
     assert_ne!(visible.sensors[0].entity_id, "sensor.room_temperature");
     assert!(!store.read_overview(other).await.unwrap().connected);
+    assert!(
+        store
+            .update_selection(owner, &[], "weather.forecast_home_assistant")
+            .await
+            .unwrap()
+    );
+    assert!(
+        !store
+            .update_selection(other, &[], "weather.home")
+            .await
+            .unwrap()
+    );
+    let changed = store.authenticate(&hash).await.unwrap().unwrap();
+    assert_eq!(changed.weather_entity, "weather.forecast_home_assistant");
+    assert!(changed.sensors.is_empty());
+    assert!(store.begin(&principal, Uuid::new_v4()).await.is_err());
+    store.begin(&changed, Uuid::new_v4()).await.unwrap();
+    assert_eq!(
+        store
+            .sensors(
+                &principal,
+                epoch,
+                SensorBatch {
+                    revision: 2,
+                    sensors: vec![]
+                },
+                false
+            )
+            .await
+            .unwrap(),
+        IngestOutcome::Stale
+    );
+    let cleared = store.read_overview(owner).await.unwrap();
+    assert!(!cleared.online);
+    assert!(cleared.sensors.is_empty());
+    assert!(cleared.weather.is_none());
+    assert_eq!(
+        cleared.weather_entity.as_deref(),
+        Some("weather.forecast_home_assistant")
+    );
     let replacement = credential_hash("ha1.replacement-test");
     assert!(
         store
@@ -159,6 +199,32 @@ async fn browser_ha_credential_route_requires_owner_and_csrf() {
             .await
             .unwrap()
             .is_some()
+    );
+    let selection = Request::builder()
+        .method("PUT")
+        .uri("/api/v1/browser/home-assistant/selection")
+        .header("origin", "https://rockplatform.win")
+        .header("x-forwarded-proto", "https")
+        .header("x-rockserver-proxy", "test-proxy")
+        .header("cookie", format!("rockserver_browser={cookie}"))
+        .header("x-csrf-token", csrf)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"{"sensors":[],"weather_entity":"weather.forecast_home_assistant"}"#,
+        ))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(selection).await.unwrap().status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        bridge
+            .authenticate(&credential_hash(credential))
+            .await
+            .unwrap()
+            .unwrap()
+            .weather_entity,
+        "weather.forecast_home_assistant"
     );
     let response = app.clone().oneshot(request(Some(csrf))).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);

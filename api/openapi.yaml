@@ -906,6 +906,33 @@ paths:
         "401": { description: Browser session is missing or invalid. }
         "403": { description: Trusted browser/CSRF proof is missing. }
         "503": { description: Integration storage is unavailable. }
+  /api/v1/browser/home-assistant/selection:
+    put:
+      operationId: updateHomeAssistantBridgeSelection
+      summary: Change the signed-in owner's HA entity selection without rotating the credential
+      x-rockserver-status: implemented
+      description: >-
+        Keeps the existing credential and integration identity. Clears prior observations and
+        invalidates the active bridge epoch so the agent reconnects with the new allowlist.
+        The browser owner is derived from the session cookie, never from the request.
+      security: [{ RockserverBrowserCookie: [] }]
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HaBridgeProvisionRequest" }
+      responses:
+        "204": { description: Selection saved; old observations cleared and bridge resync required. }
+        "400": { description: Invalid sensor/weather selection or JSON. }
+        "401": { description: Browser session is missing or invalid. }
+        "403": { description: Trusted browser/CSRF proof is missing. }
+        "404": { description: This owner has no active HA integration. }
+        "503": { description: Integration storage is unavailable. }
   /api/v1/browser/home-assistant/weather:
     get:
       operationId: getHomeAssistantWeather
