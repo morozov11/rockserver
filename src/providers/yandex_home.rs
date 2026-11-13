@@ -464,7 +464,19 @@ fn format_property_name(instance: &str) -> String {
 
 fn format_value(value: &Value, unit: Option<&str>) -> String {
     let base = match value {
-        Value::Number(num) => num.to_string(),
+        Value::Number(num) if num.is_i64() || num.is_u64() => num.to_string(),
+        Value::Number(num) => num.as_f64().map_or_else(
+            || num.to_string(),
+            |number| {
+                let rounded = format!("{number:.2}");
+                let concise = rounded.trim_end_matches('0').trim_end_matches('.');
+                if concise == "-0" {
+                    "0".to_owned()
+                } else {
+                    concise.to_owned()
+                }
+            },
+        ),
         Value::String(s) => match s.as_str() {
             "opened" => "Открыто".to_owned(),
             "closed" => "Закрыто".to_owned(),
@@ -516,8 +528,19 @@ fn property_priority(instance: &str) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{YandexHomeClient, YandexHomeError, parse_home_devices};
+    use super::{YandexHomeClient, YandexHomeError, format_value, parse_home_devices};
     use serde_json::json;
+
+    #[test]
+    fn numeric_properties_show_at_most_two_decimal_places() {
+        assert_eq!(
+            format_value(&json!(8.700000000000001), Some("Вт")),
+            "8.7 Вт"
+        );
+        assert_eq!(format_value(&json!(0.066), Some("А")), "0.07 А");
+        assert_eq!(format_value(&json!(220), Some("В")), "220 В");
+        assert_eq!(format_value(&json!("opened"), None), "Открыто");
+    }
 
     #[test]
     fn parses_home_devices_and_properties() {

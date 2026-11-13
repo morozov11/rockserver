@@ -1,5 +1,10 @@
 # Task log
 
+## Round Yandex Home display values — 2026-11-13
+
+- Goal/scope: remove floating-point tails such as `8.700000000000001 Вт` from Yandex Home sensor cards. Changed only the shared server formatter for numeric `formatted_value`; raw JSON readings, text states, units and other integrations stay unchanged. Updated the OpenAPI descriptions and added a deterministic formatter test.
+- Checks/status: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` and `git diff --check` passed locally. Production deployment is pending.
+
 ## Install Home Assistant bridge on alex-center — 2026-11-13
 
 - Goal/scope: install the released custom component in the local HA without exposing HA or changing RockServer runtime. Found HA 2026.9.4 config at root-owned `/var/lib/homeassistant`; staged five public component files under `/home/alex` and verified their SHA-256. The owner entered the sudo password only in their terminal to run a fixed install script that checked the Docker `/config` mount, copied files and restarted the HA container.

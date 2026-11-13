@@ -2,6 +2,10 @@
 
 Last updated: 2026-11-13
 
+## Yandex Home numeric display — 2026-11-13
+
+- The Yandex Home response formatter now rounds numeric property display strings to at most two decimal places while preserving integer values, text states and units. The raw `value` field remains unchanged. A deterministic test covers the floating-point tail from the reported power reading, 0.066 A, 220 V and a text state. The public OpenAPI descriptions for `formatted_value` are updated. Required local Rust checks passed. Production deployment is pending.
+
 ## Home Assistant browser self-service — 2026-11-13
 
 - Installed the five-file `rockserver_bridge` component on `alex-center` at `/var/lib/homeassistant/custom_components/rockserver_bridge` through an owner-entered interactive `sudo` step. The install script verified source SHA-256 and the Docker `/config` bind mount before copying and restarting the HA container. Independent read-only SSH confirmed matching installed SHA-256, a new HA 2026.9.4 process, local HTTP 200, and only HA's standard untested-custom-integration warning in the current log. No key has been entered or live WSS data checked yet.

@@ -1983,7 +1983,7 @@ components:
         name: { type: string, minLength: 1, maxLength: 128 }
         value: {}
         unit: { type: [string, "null"], maxLength: 64 }
-        formatted_value: { type: string, minLength: 1, maxLength: 256 }
+        formatted_value: { type: string, minLength: 1, maxLength: 256, description: Numeric Yandex readings are rounded to at most two decimal places before the optional unit is appended. }
         updated_at: { type: [string, "null"], format: date-time }
     YandexHomeSensor:
       type: object
@@ -1996,7 +1996,7 @@ components:
         name: { type: string, minLength: 1, maxLength: 128 }
         value: {}
         unit: { type: [string, "null"], maxLength: 64 }
-        formatted_value: { type: string, minLength: 1, maxLength: 256 }
+        formatted_value: { type: string, minLength: 1, maxLength: 256, description: Numeric Yandex readings are rounded to at most two decimal places before the optional unit is appended. }
         temperature: { type: [number, "null"] }
         updated_at: { type: [string, "null"], format: date-time }
     BrowserDevice:
