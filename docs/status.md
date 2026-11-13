@@ -4,7 +4,7 @@ Last updated: 2026-11-13
 
 ## Home Assistant selection without key rotation — 2026-11-13
 
-- The browser card now has a separate **Save list** action for approved `sensor.*` IDs and one `weather.*` ID. The new owner/CSRF-protected `PUT /api/v1/browser/home-assistant/selection` keeps the credential hash and integration ID, clears old observations, invalidates the active connection epoch, and makes the HA component reconnect with the new allowlist. The weather target `weather.forecast_home_assistant` passes the existing entity-ID rules. Required Rust checks, web typecheck/tests/build, and two isolated PostgreSQL tests passed. Production rollout is pending. The real HA forecast for this entity still needs checking.
+- The browser card now has a separate **Save list** action for approved `sensor.*` IDs and one `weather.*` ID. The new owner/CSRF-protected `PUT /api/v1/browser/home-assistant/selection` keeps the credential hash and integration ID, clears old observations, invalidates the active connection epoch, and makes the HA component reconnect with the new allowlist. The weather target `weather.forecast_home_assistant` passes the existing entity-ID rules. Required Rust checks, web typecheck/tests/build, and two isolated PostgreSQL tests passed. Release `ce59ce47014a97a7b65e33f16870d621671b147c` reported `succeeded`; public readiness, page and published bundle returned HTTP 200, and the bundle contains the new button and route. The owner's live selection has not been changed; the real HA forecast for this entity still needs checking.
 
 ## Home Assistant visual setup load fix — 2026-11-13
 
