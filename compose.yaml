@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:pg18
     environment:
       POSTGRES_DB: ${ROCKSERVER_POSTGRES_DB:-rockserver}
       POSTGRES_USER: ${ROCKSERVER_POSTGRES_USER:-rockserver}

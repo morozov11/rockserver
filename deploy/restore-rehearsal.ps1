@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$BackupFile,
     [string]$RockServerImage = 'rockserver:local',
-    [string]$PostgresImage = 'pgvector/pgvector:pg17@sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38',
+    [string]$PostgresImage = 'pgvector/pgvector:pg18@sha256:38681dc6eaf55308e2a4c6de392d131652dcfac70e1263e35cd9b5ea3fe39782',
     [switch]$DryRun,
     [switch]$KeepArtifacts
 )
