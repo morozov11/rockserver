@@ -1,5 +1,13 @@
 # Task log
 
+## E3 release and production embedder bring-up — 2026-11-14
+
+- Goal/scope: commit/push E3 with green CI, then deploy the embedding service and rockserver to rockplatform.win so the vector search path is live. Commits: `b7c5c67` (E3, both CI runs green), `9c99227` (compose passes `ROCKSERVER_EMBEDDER_ADDR/TOKEN`), `d269e93` (dropped the stale `embedding_backfill` override from `compose.production.yaml` that invalidated the merged compose and safely failed the first deploy attempt; `deploy_security` now also checks the production override).
+- Embedder on production: image `rock-embedder:sha-6284631` built from `rock-llm-service` main, shipped via `docker save`/scp/`docker load`, running as `rock-embedder` attached to the internal `rockserver_database` network with alias `embedder` (session pool 1, one intra thread, 1200 MiB/1.0 CPU limits, `grpc_health_probe` healthy). A random token was written to `/opt/rockserver/release.env` together with `ROCKSERVER_EMBEDDER_ADDR=embedder:8080`; those keys are outside the owner.env strip list, so redeploys preserve them.
+- rockserver release: OPS-001-D deployed `d269e93…` (`readiness=passed`, image `sha256:03b528f8…`). The startup lifecycle passed Info/advisory-lock/schema checks and is backfilling `station_embeddings_v1` through live `embed_stations` gRPC batches (~180 rows/min on the single-core VPS; ~1.5 h to the full 16 825; readiness was never blocked). Public search answered normally during the fill; embedder memory fits with ≈800 MiB still available.
+- Cleanup: removed the unused 487 MiB `/opt/rockserver/assets` ONNX directory, superseded release images, `/tmp` staging and the transfer tarball; kept the current and previous release pairs plus the embedder image. The legacy `station_embeddings` table and its indexes remain until the planned manual removal after an observation period.
+- Checks/status: released and verified live; vector fill continues in the background and is expected to reach 16 825 rows on its own.
+
 ## E3 removal of local ONNX embedding path and classifier — 2026-11-14
 
 - Goal/scope: roadmap stage E3 — completely remove local ONNX Runtime embedding path, `onnx-local` Cargo feature, ORT dependencies, `SemanticLanguageClassifier`, legacy `PostgresEmbeddingStore`/`station_embeddings` table interactions, and deployment ONNX assets/scripts/variables from rockserver, closing audits #4 and #5.

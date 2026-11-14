@@ -2,6 +2,12 @@
 
 Last updated: 2026-11-14
 
+## E3 released; embedder live on production — 2026-11-14
+
+- E3 (`Remove the local ONNX embedding path`) was committed and pushed with green CI, followed by two deployment-wiring commits: the production compose now passes `ROCKSERVER_EMBEDDER_ADDR`/`ROCKSERVER_EMBEDDER_TOKEN` into the service, and a stale `embedding_backfill` override in `compose.production.yaml` (left over from E3 — it made the merged compose invalid and failed the first deploy attempt at validation) was removed with a hardened `deploy_security` invariant covering the production override.
+- Production bring-up of the vector path: the `rock-embedder:sha-6284631` image (built from `rock-llm-service` main) was shipped to the VPS and runs as `rock-embedder` on the internal `rockserver_database` network (alias `embedder`, pool 1, one intra thread, 1200 MiB limit, healthy); `release.env` carries `ROCKSERVER_EMBEDDER_ADDR=embedder:8080` and a generated token (not owner.env keys, so they survive redeploys). rockserver was then released as `d269e93…` through the standard OPS-001-D flow — `readiness=passed`, all containers healthy, and the startup lifecycle immediately began filling `station_embeddings_v1` through live gRPC batches (`embed_stations` with correlation ids in the embedder log). Fill progress on the single-core VPS is roughly 180 rows/min (full 16 825 expected within ~1.5 h; the sqlx "slow statement" warnings during batch inserts are the 1 s alert threshold on a busy box, not errors). Public `/api/v1/search` answers normally during the fill; memory headroom remains (≈800 MiB available).
+- Cleanup: the now-unused 487 MiB ONNX asset directory was deleted from the VPS, superseded release images and staging leftovers removed (kept: current `d269e93` pair, previous `afaa457` rollback pair, embedder image). The legacy `station_embeddings` table stays in place until manual removal after an observation period, as planned. The first deploy attempt failed safely at compose validation — production never left the previous release during that attempt.
+
 ## E3 removal of local ONNX embedding path and classifier — 2026-11-14
 
 - Stage E3 of the AI provider roadmap is implemented locally (nothing committed). Audits #4 and #5 are closed: the local ONNX Runtime embedding path, the `SemanticLanguageClassifier`, and all related assets and configurations are removed from rockserver.
