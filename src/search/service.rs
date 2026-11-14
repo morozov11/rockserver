@@ -13,7 +13,7 @@ use super::{
         DeterministicQueryParser, QueryParser, QueryParserInput, tokenize,
         validate_intent_with_taxonomy,
     },
-    taxonomy::{GenreTaxonomy, GenreTaxonomySource},
+    taxonomy::{GenreTaxonomy, GenreTaxonomySource, TaxonomyCache},
 };
 
 /// Search orchestration with deterministic parser and metadata fallbacks.
@@ -22,7 +22,7 @@ pub struct SearchService {
     repository: Arc<dyn StationRepository + Send + Sync>,
     query_parser: Arc<dyn QueryParser>,
     embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
-    taxonomy_source: Option<Arc<dyn GenreTaxonomySource>>,
+    taxonomy_cache: Arc<TaxonomyCache>,
 }
 
 impl SearchService {
@@ -32,7 +32,7 @@ impl SearchService {
             repository,
             query_parser: Arc::new(DeterministicQueryParser),
             embedding_provider: None,
-            taxonomy_source: None,
+            taxonomy_cache: Arc::new(TaxonomyCache::from_env(None)),
         }
     }
 
@@ -48,31 +48,35 @@ impl SearchService {
             repository,
             query_parser,
             embedding_provider,
-            taxonomy_source: None,
+            taxonomy_cache: Arc::new(TaxonomyCache::from_env(None)),
         }
     }
 
     /// Uses a live controlled genre vocabulary for parsing, validation, and fallback.
     pub fn with_taxonomy_source(mut self, source: Arc<dyn GenreTaxonomySource>) -> Self {
-        self.taxonomy_source = Some(source);
+        self.taxonomy_cache = Arc::new(TaxonomyCache::from_env(Some(source)));
         self
     }
 
+    /// Replaces the taxonomy cache with a custom instance.
+    pub fn with_taxonomy_cache(mut self, cache: Arc<TaxonomyCache>) -> Self {
+        self.taxonomy_cache = cache;
+        self
+    }
+
+    /// Sets the taxonomy cache TTL (useful for tests or custom environments).
+    pub fn with_taxonomy_ttl(mut self, ttl: std::time::Duration) -> Self {
+        self.taxonomy_cache = Arc::new(TaxonomyCache::new(self.taxonomy_cache.source(), ttl));
+        self
+    }
+
+    /// Forces a refresh of the cached taxonomy from its source.
+    pub async fn refresh_taxonomy(&self) -> Result<GenreTaxonomy, String> {
+        self.taxonomy_cache.refresh().await
+    }
+
     async fn taxonomy(&self) -> GenreTaxonomy {
-        match &self.taxonomy_source {
-            Some(source) => match source.load().await {
-                Ok(taxonomy) if taxonomy.is_usable() => taxonomy,
-                Ok(_) => {
-                    tracing::warn!("genre taxonomy is unusable; using builtin fallback");
-                    GenreTaxonomy::builtin()
-                }
-                Err(_) => {
-                    tracing::warn!("genre taxonomy unavailable; using builtin fallback");
-                    GenreTaxonomy::builtin()
-                }
-            },
-            None => GenreTaxonomy::builtin(),
-        }
+        self.taxonomy_cache.get_or_load().await
     }
 
     /// Returns a bounded public catalog page without exposing repository internals.

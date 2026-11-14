@@ -1,5 +1,18 @@
 # Task log
 
+## E4 database taxonomy with contract versioning and cache — 2026-11-15
+
+- Goal/scope: roadmap stage E4 — load controlled genre taxonomy from PostgreSQL (`genre_hierarchy`, migration 0006) with canonical SHA-256 versioning according to contract §5.1, eliminate per-query database reads via TTL caching, define a deterministic prompt tag subset rule (≤ 150 tags), keep `CANONICAL_TAGS` strictly as fallback, and close audit #10 with integration divergence tests on disposable PostgreSQL.
+- Result:
+  - Contract §5.1 hashing: `src/search/taxonomy/version.rs` implements `taxonomy_version(tags)` (UTF-8 byte sort, compact JSON array, SHA-256, `"sha256:<hex>"`). Golden contract test vector `["rock", "jazz", "blues"]` matches `sha256:9ce0dd764d87a64be0c744d49c8c7fb39c059603649e1b0b42fc4f184d90a436` exactly. `GenreTaxonomy` calculates and exposes version via `.version()`.
+  - In-memory cache & TTL: `src/search/taxonomy/cache.rs` implements `TaxonomyCache` integrated into `SearchService` (configurable TTL via `ROCKSERVER_TAXONOMY_TTL_SECS`, default 300 s). Per-query database round-trips eliminated; queries serve from memory under read locks. Graceful fallback on database error to `CANONICAL_TAGS` (`GenreTaxonomy::builtin()`) with explicit source (`db` vs `fallback`) and version in logs.
+  - LLM prompt tag selection rule: `src/search/taxonomy/selection.rs` implements `select_prompt_tags`. Selects canonical root genres (`parent_tag IS NULL`, 28 items) plus intermediate category genres with children (43 items), omitting leaf subgenres to satisfy the ≤ 150 tag contract limit. On migration 0006 catalog (1,646 tags), yields exactly 71 tags deterministically.
+  - Modularity: decomposed `src/search/taxonomy.rs` into `mod.rs`, `version.rs`, `selection.rs`, `cache.rs`, `builtin.rs`, `tests.rs`, keeping all files < 400 lines (56–378 lines).
+  - Tests: 24 unit tests in `src/search/taxonomy/tests.rs` (contract hash, stability, cache hit counter, TTL expiry, graceful degradation) + 4 in `src/search/tests/taxonomy.rs`.
+  - Disposable PostgreSQL integration test: `tests/postgres_integration/search_taxonomy.rs` verified against disposable container (`rockserver-srch011-eval-8bdc1608`). Confirmed 1,646 canonical DB tags, version `sha256:87923b777b4f5f2bd234950d6e192d3bdc5b541ebe192d5ee81cfb8e275a23c5`, 71 prompt tags, and expected divergence from the 43-tag fallback. Audit #10 closed.
+- Checks/status: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, full `cargo test` (249 unit tests + integration suites) passed. Implemented locally, nothing committed (awaiting owner instruction).
+- Next steps: Stage E5 (language modules).
+
 ## E3 release and production embedder bring-up — 2026-11-14
 
 - Goal/scope: commit/push E3 with green CI, then deploy the embedding service and rockserver to rockplatform.win so the vector search path is live. Commits: `b7c5c67` (E3, both CI runs green), `9c99227` (compose passes `ROCKSERVER_EMBEDDER_ADDR/TOKEN`), `d269e93` (dropped the stale `embedding_backfill` override from `compose.production.yaml` that invalidated the merged compose and safely failed the first deploy attempt; `deploy_security` now also checks the production override).

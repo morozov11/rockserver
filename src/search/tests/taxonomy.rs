@@ -56,7 +56,8 @@ async fn request_taxonomy_controls_llm_schema_and_final_tags() {
         Arc::new(LlmQueryParser::new(provider.clone())),
         None,
     )
-    .with_taxonomy_source(source.clone());
+    .with_taxonomy_source(source.clone())
+    .with_taxonomy_ttl(std::time::Duration::ZERO);
     let input = QueryParserInput {
         query: "rock".into(),
         locale: "en-US".into(),
@@ -195,4 +196,53 @@ async fn genre_fallback_drops_filter_when_no_hierarchy_match() {
     // prevents random stations from leaking through. The builtin catalog
     // has no term "reggae" anywhere, so the result should be empty.
     assert!(results.is_empty());
+}
+
+#[tokio::test]
+async fn search_service_caches_taxonomy_across_multiple_queries() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingSource {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl GenreTaxonomySource for CountingSource {
+        async fn load(&self) -> Result<GenreTaxonomy, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(GenreTaxonomy::builtin())
+        }
+    }
+
+    let source = Arc::new(CountingSource {
+        calls: AtomicUsize::new(0),
+    });
+    let service = SearchService::new(Arc::new(
+        InMemoryStationRepository::with_builtin_catalog().unwrap(),
+    ))
+    .with_taxonomy_source(source.clone());
+
+    let input = QueryParserInput {
+        query: "rock".into(),
+        locale: "en-US".into(),
+    };
+    let constraints = SearchConstraints {
+        limit: 10,
+        offset: 0,
+        excluded_station_ids: BTreeSet::new(),
+    };
+
+    // Run 5 queries in succession
+    for _ in 0..5 {
+        let _ = service
+            .interpret_and_search(input.clone(), &constraints)
+            .await;
+    }
+
+    // Source must be called only once due to cache
+    assert_eq!(source.calls.load(Ordering::SeqCst), 1);
+
+    // Explicit refresh forces reload
+    let _ = service.refresh_taxonomy().await;
+    assert_eq!(source.calls.load(Ordering::SeqCst), 2);
 }

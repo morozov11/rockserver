@@ -82,14 +82,25 @@ pub async fn taxonomy_from_pool(pool: &sqlx::PgPool) -> GenreTaxonomy {
     match load_genre_hierarchy(pool).await {
         Ok(taxonomy) if taxonomy.is_usable() => {
             tracing::info!(
+                source = "db",
+                version = %taxonomy.version(),
                 tags = taxonomy.canonical_tags().len(),
+                prompt_tags = taxonomy.prompt_tags().len(),
                 "genre taxonomy loaded from database"
             );
             taxonomy
         }
         other => {
-            tracing::warn!(error = ?other.err(), "genre taxonomy unavailable; using builtin fallback");
-            GenreTaxonomy::builtin()
+            let fallback = GenreTaxonomy::builtin();
+            tracing::warn!(
+                source = "fallback",
+                version = %fallback.version(),
+                tags = fallback.canonical_tags().len(),
+                prompt_tags = fallback.prompt_tags().len(),
+                error = ?other.err(),
+                "genre taxonomy unavailable; using builtin fallback"
+            );
+            fallback
         }
     }
 }

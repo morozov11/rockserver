@@ -1,6 +1,20 @@
 # Project status
 
-Last updated: 2026-11-14
+Last updated: 2026-11-15
+
+## E4 database taxonomy with contract versioning and cache — 2026-11-15
+
+- Stage E4 of the AI provider roadmap is implemented locally (nothing committed). Audit #10 is closed: the controlled genre taxonomy is loaded from PostgreSQL (`genre_hierarchy`, migration 0006) with in-memory TTL caching and contract versioning, and divergence with the static fallback is verified on a disposable database.
+- Key components:
+  - Canonical taxonomy version: implemented `taxonomy_version(tags)` (`src/search/taxonomy/version.rs`) strictly following §5.1 of `contract.md`. Tags are sorted lexicographically by UTF-8 bytes, formatted as a compact JSON array without whitespace, hashed using SHA-256, and formatted as `"sha256:<hex>"`. The fixed contract test vector `["rock", "jazz", "blues"]` matches `sha256:9ce0dd764d87a64be0c744d49c8c7fb39c059603649e1b0b42fc4f184d90a436` bit-for-bit with rockmodules. `GenreTaxonomy` calculates and exposes its version via `.version()` / `.taxonomy_version()`.
+  - Non-per-query caching & TTL: implemented thread-safe `TaxonomyCache` (`src/search/taxonomy/cache.rs`) in `SearchService` with configurable TTL (default 300 s / 5 min via `ROCKSERVER_TAXONOMY_TTL_SECS`). Eliminates per-query database round-trips: repeated queries read from memory under read locks in sub-microsecond time. Proven by unit test `cache_avoids_per_query_database_hits` with atomic query counting. On database failure, graceful degradation falls back to `CANONICAL_TAGS` (`GenreTaxonomy::builtin()`) with explicit source (`db` vs `fallback`) and version logging.
+  - Deterministic prompt tag selection: `genre_hierarchy` has 1,646 entries (too large for LLM enum schemas and exceeding the contract limit of ≤ 150 tags). `select_prompt_tags` (`src/search/taxonomy/selection.rs`) selects all canonical root genres (`parent_tag IS NULL`: 28 genres, including moods) plus intermediate branching category genres that have subgenres (43 genres, such as `house`, `techno`, `death metal`, `alternative rock`), while filtering out leaf subgenres (e.g. `mexican meditation`) which remain in PostgreSQL for post-filtering and ancestor broadening (`ancestors`/`broaden_tags`). On the migration 0006 catalog, this yields exactly 71 tags, well within the 150-tag limit.
+  - Modularity: decomposed `src/search/taxonomy.rs` (previously 433 lines) into focused submodules < 400 lines each (`mod.rs`, `version.rs`, `selection.rs`, `cache.rs`, `builtin.rs`, `tests.rs`).
+- Verification:
+  - `cargo fmt --check` clean.
+  - `cargo clippy --all-targets --all-features -- -D warnings` clean.
+  - Unit tests: 24 tests in `src/search/taxonomy::tests` + 4 in `src/search::tests::taxonomy` + full `cargo test` (249 unit tests + integration suites) passing.
+  - PostgreSQL integration: executed against disposable Docker database (`rockserver-srch011-eval-8bdc1608`). Confirmed DB taxonomy loads 1,646 canonical tags, computes version `sha256:87923b777b4f5f2bd234950d6e192d3bdc5b541ebe192d5ee81cfb8e275a23c5`, selects 71 prompt tags, and expectedly diverges in count from the 43-tag static fallback.
 
 ## E3 released; embedder live on production — 2026-11-14
 
