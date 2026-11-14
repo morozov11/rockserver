@@ -44,6 +44,11 @@ services:
       # intentional no-vectors mode; a token is required whenever set.
       ROCKSERVER_EMBEDDER_ADDR: ${ROCKSERVER_EMBEDDER_ADDR:-}
       ROCKSERVER_EMBEDDER_TOKEN: ${ROCKSERVER_EMBEDDER_TOKEN:-}
+      # Deadline overrides for slow/single-core hosts; defaults live in the
+      # embedder client (query 300 ms, batch 30 s, info 5 s).
+      ROCKSERVER_EMBEDDER_QUERY_TIMEOUT_MS: ${ROCKSERVER_EMBEDDER_QUERY_TIMEOUT_MS:-}
+      ROCKSERVER_EMBEDDER_BATCH_TIMEOUT_MS: ${ROCKSERVER_EMBEDDER_BATCH_TIMEOUT_MS:-}
+      ROCKSERVER_EMBEDDER_INFO_TIMEOUT_MS: ${ROCKSERVER_EMBEDDER_INFO_TIMEOUT_MS:-}
       ROCKSERVER_FULL_CATALOG_PATH: /opt/rockserver/release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.sqlite
     depends_on:
       postgres:
