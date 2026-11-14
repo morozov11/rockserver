@@ -182,10 +182,20 @@ fn compose_omits_embedding_backfill_and_onnx() {
         env!("CARGO_MANIFEST_DIR")
     ))
     .expect("compose.local.yaml must be present");
+    let compose_production = std::fs::read_to_string(format!(
+        "{}/deploy/compose.production.yaml",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("compose.production.yaml must be present");
 
     assert!(
         !compose.contains("embedding_backfill:"),
         "compose.yaml must not contain embedding_backfill service"
+    );
+    assert!(
+        !compose_production.contains("embedding_backfill:"),
+        "compose.production.yaml must not override the removed embedding_backfill \
+         service: an override without a base service makes the merged project invalid"
     );
     assert!(
         !compose.contains("ROCKSERVER_ONNX_"),
