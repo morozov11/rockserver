@@ -10,6 +10,7 @@ use crate::search::{
 };
 
 use super::embedding_postgres::vector_literal;
+use super::embedding_version::{EMBEDDINGS_DIMENSION, EMBEDDINGS_MODEL};
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
@@ -33,8 +34,8 @@ query_tags AS (
 ),
 search_input AS MATERIALIZED (
     SELECT CASE
-        WHEN $14::text = '' THEN NULL
-        ELSE plainto_tsquery('simple', $14)
+        WHEN $11::text = '' THEN NULL
+        ELSE plainto_tsquery('simple', $11)
     END AS fts_query
 ),
 tag_candidate_ids AS (
@@ -112,7 +113,7 @@ prefiltered AS MATERIALIZED (
     ) AS primary_stream ON primary_stream.health <> 'degraded'
     WHERE s.retired_at IS NULL
     ORDER BY prefilter_score DESC, s.id ASC
-    LIMIT GREATEST(($6 + $17) * 20, 200)
+    LIMIT GREATEST(($6 + $14) * 20, 200)
 ),
 ann_candidate_ids AS MATERIALIZED (
     SELECT
@@ -121,8 +122,10 @@ ann_candidate_ids AS MATERIALIZED (
         primary_stream.codec,
         primary_stream.bitrate_kbps,
         primary_stream.health
-    FROM station_embeddings AS station_embedding
-    JOIN stations AS s ON s.id = station_embedding.station_id
+    FROM station_embeddings_v1 AS station_embedding
+    JOIN stations AS s
+      ON s.id = station_embedding.station_id
+     AND station_embedding.fields_hash = s.fields_hash
     JOIN LATERAL (
         SELECT stream_url, codec, bitrate_kbps, health
         FROM station_streams
@@ -130,16 +133,15 @@ ann_candidate_ids AS MATERIALIZED (
         ORDER BY is_primary DESC, id ASC
         LIMIT 1
     ) AS primary_stream ON primary_stream.health <> 'degraded'
-    WHERE $18::text IS NOT NULL
-      AND station_embedding.model = 'intfloat/multilingual-e5-small'
-      AND station_embedding.version = $9
-      AND station_embedding.dimension = 384
+    WHERE $15::text IS NOT NULL
       AND s.retired_at IS NULL
       AND ($3::text IS NULL OR s.language = $3)
       AND ($4::text IS NULL OR s.country_code = $4)
       AND NOT (s.id = ANY($5::text[]))
-    ORDER BY station_embedding.embedding::vector(384) <=> ($18::text)::vector(384)
-    LIMIT GREATEST(($6 + $17) * 20, 200)
+    -- The station-id tie-break keeps candidate selection deterministic when
+    -- equal cosine distances leave the tail of the HNSW scan unordered.
+    ORDER BY station_embedding.embedding <=> ($15::text)::vector(384), station_embedding.station_id ASC
+    LIMIT GREATEST(($6 + $14) * 20, 200)
 ),
 candidate_ids AS (
     SELECT id, stream_url, codec, bitrate_kbps, health FROM prefiltered
@@ -186,9 +188,9 @@ candidates AS MATERIALIZED (
         ) AS name_token_match_count,
         cardinality(name_tokens.tokens) AS name_token_count,
         CASE
-            WHEN $15::bool THEN EXISTS (
+            WHEN $12::bool THEN EXISTS (
                 SELECT 1
-                FROM UNNEST($16::text[]) AS hinted(query)
+                FROM UNNEST($13::text[]) AS hinted(query)
                 WHERE hinted.query <> ''
                   AND regexp_replace(lower(s.name), '[^[:alnum:]]+', ' ', 'g') LIKE '%' || hinted.query || '%'
             )
@@ -212,11 +214,9 @@ candidates AS MATERIALIZED (
         ) AS tokens
     ) AS name_tokens
     LEFT JOIN station_icons AS icon ON icon.station_id = s.id
-    LEFT JOIN station_embeddings AS station_embedding
+    LEFT JOIN station_embeddings_v1 AS station_embedding
       ON station_embedding.station_id = s.id
-     AND station_embedding.model = $8
-     AND station_embedding.version = $9
-     AND station_embedding.dimension = $10
+     AND station_embedding.fields_hash = s.fields_hash
      AND $7::text IS NOT NULL
 ), scored AS MATERIALIZED (
     SELECT
@@ -227,7 +227,7 @@ candidates AS MATERIALIZED (
             + trgm_score * 0.3
             + CASE
                 -- Prefer exact station-name hits for short "play station X" style queries.
-                WHEN $13::int > 0 AND name_token_match_count >= $13::int
+                WHEN $10::int > 0 AND name_token_match_count >= $10::int
                     THEN 1.0 / GREATEST(name_token_count, 1)::float8
                 ELSE 0.0
               END
@@ -236,7 +236,7 @@ candidates AS MATERIALIZED (
                 ELSE 0.0
               END
         )
-            / GREATEST($13::int + cardinality($2::text[]), 1)
+            / GREATEST($10::int + cardinality($2::text[]), 1)
             AS metadata_score,
         CASE
             WHEN embedding IS NULL OR $7::text IS NULL THEN NULL
@@ -260,14 +260,14 @@ SELECT
     semantic_score,
     CASE
         WHEN semantic_score IS NULL THEN metadata_score
-        ELSE $11::float8 * LEAST(1.0, GREATEST(0.0, metadata_score))
-             + $12::float8 * semantic_score
+        ELSE $8::float8 * LEAST(1.0, GREATEST(0.0, metadata_score))
+             + $9::float8 * semantic_score
     END AS score,
     COUNT(*) OVER() AS total_matches
 FROM scored
 WHERE metadata_score > 0 OR semantic_score > 0
 ORDER BY score DESC, id ASC
-LIMIT $6 OFFSET $17
+LIMIT $6 OFFSET $14
 "#;
 
 /// PostgreSQL-backed station catalog with startup migrations and seeded development data.
@@ -333,9 +333,6 @@ impl StationRepository for PostgresStationRepository {
             .bind(&parameters.excluded_station_ids)
             .bind(parameters.limit)
             .bind(&parameters.embedding)
-            .bind(&parameters.embedding_model)
-            .bind(&parameters.embedding_version)
-            .bind(parameters.embedding_dimension)
             .bind(parameters.metadata_weight)
             .bind(parameters.semantic_weight)
             .bind(parameters.core_term_count)
@@ -564,9 +561,6 @@ struct PostgresSearchParameters {
     offset: i64,
     embedding: Option<String>,
     ann_embedding: Option<String>,
-    embedding_model: Option<String>,
-    embedding_version: Option<String>,
-    embedding_dimension: Option<i32>,
     metadata_weight: f64,
     semantic_weight: f64,
     core_term_count: i32,
@@ -583,14 +577,13 @@ impl PostgresSearchParameters {
         constraints: &SearchConstraints,
         embedding: Option<&Embedding>,
     ) -> Result<Self, ParameterConversionError> {
-        let embedding_dimension = embedding
-            .map(|value| i32::try_from(value.provenance().dimension))
-            .transpose()
-            .map_err(|_| ParameterConversionError::EmbeddingDimension)?;
+        // The ANN branch reads the versioned table whose vector space is tied
+        // to one model and dimension; other provenances keep exact hybrid
+        // scoring but never enter candidate retrieval.
         let ann_embedding = embedding
             .filter(|value| {
                 let provenance = value.provenance();
-                provenance.model == "intfloat/multilingual-e5-small" && provenance.dimension == 384
+                provenance.model == EMBEDDINGS_MODEL && provenance.dimension == EMBEDDINGS_DIMENSION
             })
             .map(vector_literal);
         Ok(Self {
@@ -604,9 +597,6 @@ impl PostgresSearchParameters {
                 .map_err(|_| ParameterConversionError::Offset)?,
             embedding: embedding.map(vector_literal),
             ann_embedding,
-            embedding_model: embedding.map(|value| value.provenance().model.clone()),
-            embedding_version: embedding.map(|value| value.provenance().version.clone()),
-            embedding_dimension,
             metadata_weight: METADATA_WEIGHT,
             semantic_weight: SEMANTIC_WEIGHT,
             core_term_count: query.core_term_count as i32,
@@ -621,7 +611,6 @@ impl PostgresSearchParameters {
 enum ParameterConversionError {
     Limit,
     Offset,
-    EmbeddingDimension,
 }
 
 impl std::fmt::Display for ParameterConversionError {
@@ -629,9 +618,6 @@ impl std::fmt::Display for ParameterConversionError {
         match self {
             Self::Limit => formatter.write_str("search limit cannot fit in PostgreSQL bigint"),
             Self::Offset => formatter.write_str("search offset cannot fit in PostgreSQL bigint"),
-            Self::EmbeddingDimension => {
-                formatter.write_str("embedding dimension cannot fit in PostgreSQL integer")
-            }
         }
     }
 }
@@ -641,6 +627,7 @@ impl std::error::Error for ParameterConversionError {}
 #[cfg(test)]
 mod tests {
     use super::{PostgresSearchParameters, SEARCH_SQL, StationRow};
+    use crate::persistence::embeddings_table_name;
     use crate::search::{
         METADATA_WEIGHT, RankedStation, SEMANTIC_WEIGHT, SearchConstraints, StationHealth,
         normalize_query,
@@ -713,8 +700,15 @@ mod tests {
         }
         assert!(SEARCH_SQL.contains("candidate_match_ids AS"));
         assert!(SEARCH_SQL.contains("ann_candidate_ids AS MATERIALIZED"));
-        assert!(SEARCH_SQL.contains("station_embedding.embedding::vector(384) <=>"));
+        // Candidate retrieval reads the current versioned table, matches the
+        // sent fields hash, and breaks equal-distance ties by station ID.
+        let v1_table = embeddings_table_name(crate::persistence::EMBEDDINGS_VERSION);
+        assert!(SEARCH_SQL.contains(&format!("FROM {v1_table} AS station_embedding")));
+        assert!(SEARCH_SQL.contains("station_embedding.fields_hash = s.fields_hash"));
         assert!(SEARCH_SQL.contains("FROM ann_candidate_ids"));
+        assert!(SEARCH_SQL.contains(
+            "ORDER BY station_embedding.embedding <=> ($15::text)::vector(384), station_embedding.station_id ASC"
+        ));
         assert!(SEARCH_SQL.contains("JOIN candidate_match_ids AS match_ids"));
         assert_eq!(SEARCH_SQL.matches("UNION\n    SELECT id FROM").count(), 2);
         assert!(SEARCH_SQL.contains("search_input AS MATERIALIZED"));

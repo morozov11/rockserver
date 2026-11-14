@@ -6,6 +6,8 @@ use crate::search::{EmbeddingProvider, EmbeddingProviderError};
 
 /// Explicit development-only deterministic embedding provider.
 pub mod deterministic_embedding;
+/// gRPC client of the embedding service and its table lifecycle (`embed.v1`).
+pub mod embedder;
 /// CPU-only local ONNX implementation of multilingual E5-small.
 #[cfg(feature = "onnx-local")]
 pub mod onnx_e5;

@@ -45,5 +45,8 @@ mod search_taxonomy;
 #[path = "postgres_integration/embedding_backfill.rs"]
 mod embedding_backfill;
 
-#[path = "postgres_integration/embedding_rollout.rs"]
-mod embedding_rollout;
+#[path = "postgres_integration/embedding_lifecycle.rs"]
+mod embedding_lifecycle;
+
+#[path = "postgres_integration/embedding_store.rs"]
+mod embedding_store;

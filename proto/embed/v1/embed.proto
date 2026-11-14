@@ -1,0 +1,85 @@
+// Сервис эмбеддингов — контракт rockserver ↔ сервис (rock-llm-service).
+// Канонический текст: docs/contract.md, раздел 3. Изменение поведения — новая
+// версия пакета (embed.v2), правки v1 только без изменения поведения.
+syntax = "proto3";
+
+package embed.v1;
+
+// Векторы поисковых запросов и станций. Префиксы модели ("query:"/"passage:")
+// и шаблон текста станции — внутри сервиса; rockserver их не знает.
+//
+// Аутентификация: метаданные "authorization: Bearer <ROCK_MODULES_TOKEN>" на
+// всех трёх методах. Без токена — UNAUTHENTICATED. Штатный grpc.health.v1 и
+// HTTP /metrics токена не требуют.
+service Embedder {
+  // Описание развёрнутой версии. Проверяется rockserver перед использованием.
+  rpc Info(InfoRequest) returns (InfoResponse);
+
+  // Вектор поискового запроса; text — 1-512 символов после trim.
+  rpc EmbedQuery(EmbedQueryRequest) returns (EmbedQueryResponse);
+
+  // Векторы пачки станций (1-64); ответ — ровно один вектор на каждый id,
+  // в порядке запроса. Пачка считается одним проходом модели.
+  rpc EmbedStations(EmbedStationsRequest) returns (EmbedStationsResponse);
+}
+
+message InfoRequest {}
+
+message InfoResponse {
+  // Версия API; совпадает с версией пакета (1).
+  uint32 version = 1;
+  // Модель, например "intfloat/multilingual-e5-small".
+  string model = 2;
+  // Закреплённая ревизия модели (хеш коммита Hugging Face).
+  string model_revision = 3;
+  // Размерность векторов (384).
+  uint32 dim = 4;
+  // Значение, которое rockserver пишет в station_embeddings.version.
+  string vector_version = 5;
+  // Digest образа из сборки; "новый образ = новая версия".
+  string image_digest = 6;
+}
+
+message EmbedQueryRequest {
+  // 1-512 символов после trim. Пустой или длиннее — ошибка валидации.
+  string text = 1;
+}
+
+message EmbedQueryResponse {
+  // Версия API (1) в каждом ответе.
+  uint32 version = 1;
+  // Вектор длины dim, конечные числа, ненулевая норма.
+  repeated float vector = 2;
+}
+
+message StationInput {
+  // Идентификатор станции rockserver; уникален внутри пачки.
+  string id = 1;
+  // Нормализованное имя станции; обязательно.
+  string name = 2;
+  // Теги станции.
+  repeated string tags = 3;
+  // Код языка или отсутствие (proto3 optional: не задан = null).
+  optional string language = 4;
+  // Код страны или отсутствие.
+  optional string country_code = 5;
+}
+
+message EmbedStationsRequest {
+  // 1-64 станции; id уникальны.
+  repeated StationInput stations = 1;
+}
+
+message StationVector {
+  // Идентификатор из запроса.
+  string id = 1;
+  // Вектор длины dim.
+  repeated float vector = 2;
+}
+
+message EmbedStationsResponse {
+  // Версия API (1) в каждом ответе.
+  uint32 version = 1;
+  // Порядок совпадает с порядком запроса.
+  repeated StationVector vectors = 2;
+}

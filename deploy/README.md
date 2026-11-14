@@ -241,32 +241,32 @@ semantic search enabled. Subsequent deployments use the verified cache. No ONNX 
 local asset path is entered by the owner. Updating the model/runtime is a normal reviewed Git
 change to this lock file, never an unpinned automatic update.
 
-### Offline E5 version change
+### Embedding service and versioned vector tables (E2)
 
-An E5 preprocessing/version change is a maintenance-window release. Stop `caddy` and `rockserver`
-before running the new image's `embedding_backfill` job. Keep the old image/assets and its
-`station_embeddings` rows: backfill writes the new `(model, version)` beside them and does
-not delete the old version. Do not import a changed catalog during this window. The new image
-must declare its actual provider provenance and include reviewed model/tokenizer assets;
-changing a database flag alone does not switch query embeddings.
+Query/station embeddings come from the `embed.v1` gRPC service of the modules repository
+(`rock-llm-service`, fragment `deploy/compose.embedder.yaml`; pool 1 fits the shared 2 GiB
+server). Vectors live in per-version `station_embeddings_v{N}` tables keyed by
+`stations.fields_hash`; the legacy `station_embeddings` table and its indexes are no longer
+read by search and are removed manually only after the transition.
 
-Evaluate the candidate against the same pinned, labelled query set as the baseline. Review
-Recall@5/10, MRR, empty responses, ranked IDs, and representative regressions before approving.
-For a version other than `onnx-v1`, place a JSON review file inside the already mounted ONNX
-asset directory and set `ROCKSERVER_E5_QUALITY_REVIEW_PATH` to its in-container path via a
-Compose environment override. The file must contain `model`, `version`, `dimension`,
-`dataset_sha256`, `baseline` and `candidate` objects (`query_count`, `recall_at_5`,
-`recall_at_10`, `mrr`, `empty_responses`), `approved: true`, nonempty `reviewer`, and nonempty
-`rationale`. The operator decides whether the measured trade-off is acceptable; no automatic
-quality threshold is substituted for that review.
+Enabling the v1 path in production is a deliberate deployment step, separate from releasing
+the E2 image:
 
-Start the new service only after backfill and review. Startup fails before binding its listener
-if the actual E5 provider lacks a current vector for any active station, if the E5/384 ANN
-index is invalid, or if the new-version review is missing or mismatched. The index check matches
-the version-neutral ANN expression and predicate; migration `0028` keeps the former `onnx-v1`
-index as well. If startup or observed quality fails, stop the new service and restart the retained
-old image/assets. Its old vectors remain available and startup checks them again. A future
-version using a different model name or dimension needs a reviewed SQL/index change first.
+1. Start the `embedder` container on the shared internal network with `ROCK_MODULES_TOKEN`.
+2. Point `rockserver` at it with `ROCKSERVER_EMBEDDER_ADDR` (host:port) and the same token;
+   remove the ONNX provider environment of the previous release. Without the address the
+   process serves metadata search only — never enable the address before the service answers.
+3. On startup the background lifecycle verifies `Info`, takes the per-table advisory lock,
+   creates/verifies `station_embeddings_v1`, enables the vector branch (without waiting for
+   full coverage), and backfills pending stations in batches; a manual
+   `backfill_embeddings --version 1` run (same env) does the same without the server.
+
+An embedding version change is a maintenance-window release: stop `rockserver`, stage
+`backfill_embeddings --version N+1` beside the intact v{N} rows, release the image whose
+`EMBEDDINGS_VERSION` points at the new table, and keep the old release for rollback (a
+reverted binary simply keeps reading the old table). Do not import a changed catalog during
+the window; imports never delete vectors, changed stations are re-embedded on the next
+lifecycle run or manual backfill.
 
 Local validation, with no VPS or credential/network use:
 

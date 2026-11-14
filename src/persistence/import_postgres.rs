@@ -8,6 +8,7 @@ use crate::catalog::{
     CatalogImportError, CatalogImportStore, ImportCounts, ImportedStation, PinnedSharedCatalog,
     ROCKCATALOG_SOURCE,
 };
+use crate::persistence::station_fields_hash;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
@@ -286,26 +287,30 @@ async fn upsert_stations(
             ));
         }
         let document_text = searchable_text(station);
-        let document_changed = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM stations WHERE source = $1 AND source_station_id = $2 AND searchable_text IS DISTINCT FROM $3)",
-        )
-        .bind(source).bind(&station.source_station_id).bind(&document_text)
-        .fetch_one(&mut **transaction).await
-        .map_err(|_| CatalogImportError::safe("PostgreSQL station metadata check failed"))?;
+        // Attests the exact fields the embedding service receives; versioned
+        // vector rows keep matching this hash or are re-embedded later. The
+        // importer never touches vector tables itself.
+        let fields_hash = station_fields_hash(
+            &station.name,
+            &station.tags,
+            station.language.as_deref(),
+            station.country_code.as_deref(),
+        );
         sqlx::query(
             r#"
-INSERT INTO stations (id, source, source_station_id, name, homepage_url, tags, language, country_code, searchable_text, last_import_run_id, retired_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL)
+INSERT INTO stations (id, source, source_station_id, name, homepage_url, tags, language, country_code, searchable_text, fields_hash, last_import_run_id, retired_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL)
 ON CONFLICT (source, source_station_id) DO UPDATE SET
     name = EXCLUDED.name, homepage_url = EXCLUDED.homepage_url, tags = EXCLUDED.tags,
     language = EXCLUDED.language, country_code = EXCLUDED.country_code,
-    searchable_text = EXCLUDED.searchable_text, last_import_run_id = EXCLUDED.last_import_run_id,
+    searchable_text = EXCLUDED.searchable_text, fields_hash = EXCLUDED.fields_hash,
+    last_import_run_id = EXCLUDED.last_import_run_id,
     retired_at = NULL, updated_at = now()
 "#,
         )
         .bind(&station.id).bind(source).bind(&station.source_station_id).bind(&station.name)
         .bind(&station.homepage_url).bind(&station.tags).bind(&station.language).bind(&station.country_code)
-        .bind(&document_text).bind(run_id).execute(&mut **transaction).await
+        .bind(&document_text).bind(&fields_hash).bind(run_id).execute(&mut **transaction).await
         .map_err(|_| CatalogImportError::safe("PostgreSQL station upsert failed"))?;
         sqlx::query(
             "INSERT INTO station_icons (station_id, source_url, source_priority, status) VALUES ($1, $2, $3, CASE WHEN $2::text IS NULL THEN 'missing' ELSE 'pending' END) ON CONFLICT (station_id) DO UPDATE SET source_url = CASE WHEN station_icons.manual_override THEN station_icons.source_url ELSE EXCLUDED.source_url END, source_priority = CASE WHEN station_icons.manual_override THEN station_icons.source_priority ELSE EXCLUDED.source_priority END, refresh_needed = CASE WHEN station_icons.manual_override THEN station_icons.refresh_needed ELSE station_icons.source_url IS DISTINCT FROM EXCLUDED.source_url END, status = CASE WHEN station_icons.manual_override THEN station_icons.status WHEN station_icons.status = 'ready' THEN 'ready' ELSE EXCLUDED.status END, updated_at = now()",
@@ -316,15 +321,6 @@ ON CONFLICT (source, source_station_id) DO UPDATE SET
         .execute(&mut **transaction)
         .await
         .map_err(|_| CatalogImportError::safe("PostgreSQL station icon source upsert failed"))?;
-        if document_changed {
-            sqlx::query("DELETE FROM station_embeddings WHERE station_id = $1")
-                .bind(&station.id)
-                .execute(&mut **transaction)
-                .await
-                .map_err(|_| {
-                    CatalogImportError::safe("PostgreSQL embedding invalidation failed")
-                })?;
-        }
         // Clear current primary flags before choosing the replacement primary stream.
         sqlx::query(
             "UPDATE station_streams SET is_primary = false WHERE station_id = $1 AND source = $2",

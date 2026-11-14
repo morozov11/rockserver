@@ -2,11 +2,21 @@
 
 use async_trait::async_trait;
 use rockserver::catalog::{
-    CatalogImportError, CatalogImportProvider, ImportPage, ImportedStation, ImportedStream,
+    CatalogImportError, CatalogImportProvider, CatalogImporter, ImportLimits, ImportPage,
+    ImportedStation, ImportedStream,
 };
+use rockserver::persistence::{
+    EMBEDDINGS_DIMENSION, EMBEDDINGS_MODEL, EMBEDDINGS_VERSION, EmbeddingVersionStore,
+    PendingStationEmbedding, PostgresImportStore,
+};
+use rockserver::providers::embedder::EmbedderService;
 use rockserver::providers::radio_browser::SOURCE;
-use rockserver::search::RankedStation;
+use rockserver::search::{Embedding, EmbeddingProvenance, EmbeddingProviderError, RankedStation};
 use sqlx::PgPool;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 use uuid::Uuid;
 
 /// Connects an inspection pool to the target test database.
@@ -120,4 +130,151 @@ WHERE id = $1
     assert_eq!((row.1, row.2, row.3, row.4), expected_counts);
     assert_eq!(row.5.is_some(), expects_error);
     assert!(row.6, "terminal run must have completed_at");
+}
+
+/// Deterministic fake of the embedding service (`embed.v1`) for lifecycle and
+/// versioned-store tests. Vectors distinguish stations by name so tests can
+/// observe re-embedding after field changes; the first batch can run a
+/// competing catalog import to exercise the write race.
+pub(crate) struct FakeEmbedderService {
+    import_store: Option<PostgresImportStore>,
+    changed_station: Option<ImportedStation>,
+    import_ran: std::sync::Mutex<bool>,
+    batch_calls: Arc<AtomicUsize>,
+}
+
+impl FakeEmbedderService {
+    pub(crate) fn new() -> Self {
+        Self {
+            import_store: None,
+            changed_station: None,
+            import_ran: std::sync::Mutex::new(false),
+            batch_calls: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    /// Runs a competing import inside the first `embed_stations` call.
+    pub(crate) fn importing_on_first_batch(
+        mut self,
+        store: PostgresImportStore,
+        station: ImportedStation,
+    ) -> Self {
+        self.import_store = Some(store);
+        self.changed_station = Some(station);
+        self
+    }
+
+    /// Number of `embed_stations` batches served so far.
+    pub(crate) fn batch_calls(&self) -> usize {
+        self.batch_calls.load(Ordering::SeqCst)
+    }
+
+    fn vector_for(name: &str) -> Vec<f32> {
+        let mut values = vec![0.0; EMBEDDINGS_DIMENSION];
+        if name.to_lowercase().contains("alpha") {
+            values[0] = 1.0;
+        } else {
+            values[1] = 1.0;
+        }
+        values
+    }
+}
+
+#[async_trait]
+impl EmbedderService for FakeEmbedderService {
+    fn provenance(&self) -> Option<EmbeddingProvenance> {
+        Some(EmbeddingProvenance {
+            model: EMBEDDINGS_MODEL.to_owned(),
+            version: "onnx-v1".to_owned(),
+            dimension: EMBEDDINGS_DIMENSION,
+        })
+    }
+
+    async fn info(&self) -> Result<EmbeddingProvenance, EmbeddingProviderError> {
+        Ok(self.provenance().unwrap())
+    }
+
+    async fn embed_query(&self, _text: &str) -> Result<Embedding, EmbeddingProviderError> {
+        Ok(Embedding::new(
+            EMBEDDINGS_MODEL,
+            "onnx-v1",
+            EMBEDDINGS_DIMENSION,
+            Self::vector_for("Alpha Query"),
+        )
+        .unwrap())
+    }
+
+    async fn embed_stations(
+        &self,
+        batch: &[PendingStationEmbedding],
+    ) -> Result<Vec<Embedding>, EmbeddingProviderError> {
+        self.batch_calls.fetch_add(1, Ordering::SeqCst);
+        // The scripted race: a concurrent import changes station fields
+        // between the pending read and the guarded vector write. The flag
+        // flips before awaiting so no sync guard crosses an await point.
+        let run_import_now = {
+            let mut import_ran = self.import_ran.lock().unwrap();
+            std::mem::replace(&mut *import_ran, true)
+        };
+        if !run_import_now
+            && let (Some(store), Some(station)) = (&self.import_store, &self.changed_station)
+        {
+            CatalogImporter::new(
+                OnePageProvider::station(station.clone()),
+                store.clone(),
+                ImportLimits {
+                    page_size: 10,
+                    max_pages: 1,
+                },
+            )
+            .run()
+            .await
+            .expect("racing import must succeed");
+        }
+        Ok(batch
+            .iter()
+            .map(|station| {
+                Embedding::new(
+                    EMBEDDINGS_MODEL,
+                    "onnx-v1",
+                    EMBEDDINGS_DIMENSION,
+                    Self::vector_for(&station.name),
+                )
+                .unwrap()
+            })
+            .collect())
+    }
+}
+
+/// Connects a verified versioned-embedding store and empties the catalog
+/// (CASCADE also clears `station_embeddings_v1` rows via the foreign key).
+pub(crate) async fn embedding_store_setup(url: &str) -> (EmbeddingVersionStore, PgPool) {
+    let mut store = EmbeddingVersionStore::connect(url).await.unwrap();
+    store
+        .ensure_table(EMBEDDINGS_VERSION, EMBEDDINGS_DIMENSION)
+        .await
+        .unwrap();
+    let pool = PgPool::connect(url).await.unwrap();
+    sqlx::query("TRUNCATE stations CASCADE")
+        .execute(&pool)
+        .await
+        .unwrap();
+    (store, pool)
+}
+
+/// Inserts a station with a primary healthy stream and no `fields_hash`.
+pub(crate) async fn manual_station(pool: &PgPool, id: &str, name: &str) {
+    sqlx::query("INSERT INTO stations (id, source_station_id, name, tags, language, country_code, searchable_text) VALUES ($1, $1, $2, '{}', 'en', 'US', $2)")
+        .bind(id).bind(name).execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO station_streams (station_id, source_stream_id, stream_url, health, is_primary) VALUES ($1, $1, 'https://example.com/' || $1, 'healthy', true)")
+        .bind(id).execute(pool).await.unwrap();
+}
+
+/// The disposable-database guard and URL used by the embedding tests.
+pub(crate) fn disposable_url() -> String {
+    assert_eq!(
+        std::env::var("ROCKSERVER_SEARCH_EVAL_DISPOSABLE").as_deref(),
+        Ok("1")
+    );
+    std::env::var("TEST_DATABASE_URL").expect("isolated disposable database URL")
 }

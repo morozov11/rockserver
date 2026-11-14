@@ -1,21 +1,20 @@
-use std::{env, error::Error, fs, sync::Arc};
+use std::{env, error::Error, sync::Arc};
 
 use rockserver::{
     config::Config,
     http::TRUSTED_PROXY_TOKEN_ENV,
     persistence::{
-        DATABASE_URL_ENV, PostgresAccountStore, PostgresAdminStore, PostgresEmbeddingStore,
-        PostgresGenreTaxonomySource, repository_from_env,
+        DATABASE_URL_ENV, PostgresAccountStore, PostgresAdminStore, PostgresGenreTaxonomySource,
+        repository_from_env,
     },
-    providers::embedding_provider_from_env,
-    providers::yandex_home::YandexHomeClient,
+    providers::embedder::{EmbedderClient, EmbedderConfig, EmbedderGateway, EmbedderLifecycle},
     providers::yandex_llm::YandexLlmProvider,
     providers::yandex_speechkit::YandexSpeechKitRecognizer,
     providers::yandex_speechkit_streaming::YandexSpeechKitStreamingRecognizer,
+    providers::{embedding_provider_from_env, yandex_home::YandexHomeClient},
     search::{
-        DeterministicQueryParser, EmbeddingProviderError, EmbeddingQualityReview, LlmProvider,
-        LlmQueryParser, QueryParser, SearchService, SemanticLanguageClassifier,
-        semantic_language_filters_enabled,
+        DeterministicQueryParser, LlmProvider, LlmQueryParser, QueryParser, SearchService,
+        SemanticLanguageClassifier, semantic_language_filters_enabled,
     },
     serve, shutdown_signal, telemetry,
     voice::{CommandInterpreter, DeterministicCommandInterpreter, LlmCommandInterpreter},
@@ -35,31 +34,34 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let account_store = PostgresAccountStore::connect(&database_url).await?;
     rockserver::http::recover_station_icon_imports(&account_store).await;
     let admin_store = PostgresAdminStore::connect(&database_url).await?;
-    let embedding_provider = embedding_provider_from_env()?;
-    if let Some(provenance) = embedding_provider
-        .as_ref()
-        .and_then(|provider| provider.provenance())
-        && provenance.model == "intfloat/multilingual-e5-small"
-    {
-        let store = PostgresEmbeddingStore::connect(&database_url).await?;
-        let readiness = store.e5_release_readiness(&provenance).await;
-        store.close().await;
-        if !readiness?.is_ready() {
-            return Err(EmbeddingProviderError::safe(
-                "E5 release is incomplete or its ANN index is unavailable",
+    // The embedding service client takes precedence over the legacy local
+    // providers (onnx-local remains available until roadmap stage E3, and the
+    // old release-readiness startup gate is superseded by the E2 lifecycle:
+    // the process starts in the no-vectors mode and the background task
+    // enables the vector branch after Info and schema verification).
+    let embedder_config = EmbedderConfig::from_env()?;
+    let (embedding_provider, embedder_lifecycle) = match embedder_config {
+        Some(embedder) => {
+            if env::var("ROCKSERVER_SEMANTIC_PROVIDER").is_ok_and(|value| !value.trim().is_empty())
+            {
+                tracing::warn!(
+                    "ROCKSERVER_SEMANTIC_PROVIDER is ignored while ROCKSERVER_EMBEDDER_ADDR is set"
+                );
+            }
+            let service = Arc::new(EmbedderClient::lazy(embedder)?);
+            let gateway = Arc::new(EmbedderGateway::disabled());
+            let lifecycle = EmbedderLifecycle::new(
+                Arc::clone(&service),
+                Arc::clone(&gateway),
+                database_url.clone(),
+            );
+            (
+                Some(gateway as Arc<dyn rockserver::search::EmbeddingProvider>),
+                Some(lifecycle),
             )
-            .into());
         }
-        if provenance.version != "onnx-v1" {
-            let review_path = env::var("ROCKSERVER_E5_QUALITY_REVIEW_PATH").map_err(|_| {
-                EmbeddingProviderError::safe("E5 quality review path is required for a new version")
-            })?;
-            let review = fs::read(review_path).map_err(|_| {
-                EmbeddingProviderError::safe("E5 quality review file is unreadable")
-            })?;
-            EmbeddingQualityReview::validate_json(&review, &provenance)?;
-        }
-    }
+        None => (embedding_provider_from_env()?, None),
+    };
     let language_classifier = match (&embedding_provider, semantic_language_filters_enabled()?) {
         (Some(provider), true) if provider.supports_semantic_intent_filters() => {
             match SemanticLanguageClassifier::load(provider.clone()).await {
@@ -120,6 +122,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .map(|provider| Arc::new(provider) as Arc<dyn rockserver::voice::StreamingSpeechRecognizer>)
         .unwrap_or(unavailable);
     let yandex_home = YandexHomeClient::optional_from_env()?;
+    if let Some(lifecycle) = embedder_lifecycle {
+        tokio::spawn(lifecycle.run());
+    }
     serve(
         listener,
         rockserver::http::router_with_speech_recognizers_bearer_account_admin_store_proxy_and_voice_interpreter(

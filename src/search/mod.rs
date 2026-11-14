@@ -16,6 +16,7 @@ pub mod taxonomy;
 #[cfg(test)]
 mod tests;
 
+pub use circuit_breaker::{CircuitBreaker, CircuitBreakerPolicy};
 pub use domain::{
     MIN_RELEVANCE_SCORE, RankedStation, RepositoryError, SearchConstraints, SearchOutcome,
     SearchQuery, Station, StationHealth, StationRepository,

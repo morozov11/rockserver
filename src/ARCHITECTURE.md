@@ -22,6 +22,7 @@ import work.
 | `auth` | Passkey account, browser session, device pairing, and native-session contracts. | User/device authentication. |
 | `catalog` | Catalog records, shared release validation, and controlled imports. | Station catalog ownership or imports. |
 | `config`, `telemetry` | Process configuration validation and safe structured logs. | Startup configuration or operational logging. |
+| `grpc` | Vendored `embed.v1`/`google.rpc` schemas compiled by `build.rs` into tonic/prost types. | Neural-service contract types. |
 | `device_control` | Transport-free protocol-v1 models, validation, lifecycle, and store contract. | Any control model or persisted control record. |
 | `device_control_auth` | Server-derived native principal for control ingress. | Control authentication only. |
 | `device_control_command` | Owner-scoped command admission, idempotency, delivery, and terminal results. | Executing a typed control command. |
@@ -32,6 +33,7 @@ import work.
 | `personal_data` | Account-owned favourites and playback-history sync domain: validated records, last-writer-wins merge, bounds, retention, and the store contract. | Personal-data sync records, limits, or persistence. |
 | `persistence` | PostgreSQL implementations, migrations, and startup backend selection. | SQL, durable state, or repository wiring. |
 | `providers` | Bounded adapters for Radio Browser, Yandex, and embedding providers. | External-service request/response mechanics. |
+| `providers/embedder/` | gRPC client of the embedding service (`embed.v1`): config, deadline/breaker client, error mapping, switchable search adapter, versioned-table backfill, and the startup lifecycle. | Embedding-service calls or the versioned vector table. |
 | `search` | Normalized query, parsing/embedding traits, filters, ranking, and station repository contract. | Search meaning, ranking, or repository-neutral behavior. |
 | `station_icons` | Persistent storage, normalization, and coordinator for station-icon artifacts. | Station icons, storage, or background icon import. |
 | `voice` | Provider-neutral speech and voice-command models. | Speech recognition or recognized-command flow. |
@@ -47,6 +49,7 @@ The `speech` and `voice_command` modules in `lib.rs` are compatibility re-export
   stable facade; add a new concept to its owning file rather than to the facade.
 - `persistence/account_postgres/` groups account, browser, passkey, pairing, rate-limit, cleanup,
   and native-session flows. `rows.rs` owns private SQL row conversions; it is not a domain-model
+- `persistence/embedding_version/` owns the versioned `station_embeddings_v{N}` storage: the canonical `stations.fields_hash` format, `ensure_table` schema verification, pending reads, and import-race-safe vector writes on one advisory-locked connection.
   home.
 - `http/control/` keeps protocol framing/serialization (`protocol.rs`), revision admission and validation (`state.rs`), and transport/unit tests (`tests.rs`) apart from the WebSocket ingress lifecycle (`control.rs`).
 - `http/endpoints/` separates Axum route definitions (`routes.rs`) and state assembly via

@@ -1,0 +1,29 @@
+// Канонические сообщения rich error details gRPC (google.rpc), сокращённая
+// копия: только ErrorInfo (спецификация gRPC, Apache-2.0, copyright Google).
+// Канонический текст: google/rpc/error_details.proto. Используется всеми
+// сервисами репозитория для кодов ошибок контракта (docs/contract.md, раздел 1).
+syntax = "proto3";
+
+package google.rpc;
+
+import "google/protobuf/any.proto";
+
+// Сообщение статуса верхнего уровня (google/rpc/status.proto).
+message Status {
+  // Код gRPC (числовое значение google.rpc.Code).
+  int32 code = 1;
+  // Сообщение без пользовательских данных.
+  string message = 2;
+  // Детали; сервисы кладут сюда ErrorInfo.
+  repeated google.protobuf.Any details = 3;
+}
+
+// Машиночитаемый код ошибки контракта.
+message ErrorInfo {
+  // Код из контракта, например "invalid_request", "model_not_loaded".
+  string reason = 1;
+  // Владелец кода — все сервисы rock-llm-service.
+  string domain = 2;
+  // Дополнительные пары; сервисы используют для метаданных без секретов.
+  map<string, string> metadata = 3;
+}

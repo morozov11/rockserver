@@ -127,10 +127,11 @@ async fn changed_source_rejects_stale_vector_write() {
     store.close().await;
 }
 
-/// Importing non-searchable metadata preserves a vector; changing text invalidates one.
+/// Imports never delete vectors (E2): metadata and text changes keep the row,
+/// and the legacy workflow only re-embeds when the document text changed.
 #[tokio::test]
 #[ignore = "requires an isolated disposable PostgreSQL TEST_DATABASE_URL"]
-async fn import_invalidates_only_when_searchable_text_changes() {
+async fn import_preserves_vectors_and_text_changes_trigger_reembedding() {
     let (store, pool) = setup().await;
     let url = env::var("TEST_DATABASE_URL").unwrap();
     let import_store = PostgresImportStore::connect(&url).await.unwrap();
@@ -145,20 +146,17 @@ async fn import_invalidates_only_when_searchable_text_changes() {
         station.homepage_url = Some(homepage.to_owned());
         station
     };
-    for (station, before, inferences) in [
+    for (station, inferences) in [
         (
             make_station("Initial Radio", "https://example.com/initial"),
-            0,
             1,
         ),
         (
             make_station("Initial Radio", "https://example.com/new-homepage"),
-            1,
             0,
         ),
         (
             make_station("Changed Radio", "https://example.com/new-homepage"),
-            0,
             1,
         ),
     ] {
@@ -173,8 +171,9 @@ async fn import_invalidates_only_when_searchable_text_changes() {
         .run()
         .await
         .unwrap();
-        assert_eq!(vector_count(&pool).await, before);
+        // No invalidation: an existing vector survives every import.
         assert_eq!(run(&store, None).await, (inferences, Some(inferences)));
+        assert_eq!(vector_count(&pool).await, 1);
     }
     // The final name change re-embedded the single imported station.
     assert_eq!(vector_count(&pool).await, 1);

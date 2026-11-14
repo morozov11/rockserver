@@ -10,8 +10,15 @@ default = []
 # this feature and point ORT_DYLIB_PATH at a locally installed ONNX Runtime.
 onnx-local = ["dep:ndarray", "dep:ort", "dep:tokenizers"]
 
+[build-dependencies]
+tonic-prost-build = "0.14"
+# protoc vendored into a crate: the version is pinned by Cargo.lock so every
+# machine compiles the contract with the same compiler.
+protoc-bin-vendored = "3.3"
+
 [dependencies]
 async-trait = "0.1"
+bytes = "1"
 argon2 = "0.5"
 axum = { version = "0.8", features = ["ws"] }
 dotenvy = "0.15"
@@ -28,10 +35,13 @@ prost = "0.14.4"
 tonic = { version = "0.14.6", default-features = false, features = [
     "codegen",
     "channel",
+    "router",
+    "server",
     "tls-native-roots",
     "tls-ring",
 ] }
 tonic-prost = "0.14.6"
+prost-types = "0.14"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tower-http = { version = "0.6", features = ["trace"] }

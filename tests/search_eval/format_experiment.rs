@@ -4,10 +4,13 @@ use std::{collections::BTreeSet, sync::Arc, time::Instant};
 
 use async_trait::async_trait;
 use rockserver::{
-    persistence::{PostgresEmbeddingStore, PostgresStationRepository},
+    persistence::{
+        EMBEDDINGS_DIMENSION, EMBEDDINGS_VERSION, EmbeddingVersionStore, PostgresStationRepository,
+        WrittenStationEmbedding, station_fields_hash,
+    },
     search::{
         DeterministicQueryParser, Embedding, EmbeddingProvenance, EmbeddingProvider,
-        EmbeddingProviderError, EmbeddingStore, QueryParserInput, SearchConstraints, SearchService,
+        EmbeddingProviderError, QueryParserInput, SearchConstraints, SearchService,
         StationRepository,
     },
 };
@@ -137,53 +140,24 @@ pub(super) async fn run(
             .map(|row| row.get::<String, _>("name").to_lowercase())
             .collect::<BTreeSet<_>>(),
     );
-    let store = PostgresEmbeddingStore::connect(database_url).await.unwrap();
-    let connected_provider = EvalProvider {
-        inner: Arc::clone(&inner),
-        cleaned: false,
-        connected: true,
-        station_names: Arc::clone(&station_names),
-    };
-    for row in &rows {
-        let name: String = row.get("name");
-        let tags: Vec<String> = row.get("tags");
-        let language: Option<String> = row.get("language");
-        let country: Option<String> = row.get("country_code");
-        let document = format!(
-            "{} is an internet radio station. It plays {} music. Broadcast language: {}. Country: {}.",
-            name,
-            tags.join(", "),
-            language.as_deref().unwrap_or("unspecified"),
-            country.as_deref().unwrap_or("unspecified"),
-        );
-        let embedding = connected_provider.embed_document(&document).await.unwrap();
-        store
-            .upsert_embedding(row.get("id"), &embedding)
-            .await
-            .unwrap();
-    }
+    let mut store = EmbeddingVersionStore::connect(database_url).await.unwrap();
+    store
+        .acquire_advisory_lock(EMBEDDINGS_VERSION)
+        .await
+        .unwrap();
+    store
+        .ensure_table(EMBEDDINGS_VERSION, EMBEDDINGS_DIMENSION)
+        .await
+        .unwrap();
     println!(
         "format_example current={:?} connected={:?}",
         rows[0].get::<String, _>("searchable_text"),
-        {
-            let name: String = rows[0].get("name");
-            let tags: Vec<String> = rows[0].get("tags");
-            format!(
-                "{} is an internet radio station. It plays {} music. Broadcast language: {}. Country: {}.",
-                name,
-                tags.join(", "),
-                rows[0]
-                    .get::<Option<String>, _>("language")
-                    .as_deref()
-                    .unwrap_or("unspecified"),
-                rows[0]
-                    .get::<Option<String>, _>("country_code")
-                    .as_deref()
-                    .unwrap_or("unspecified")
-            )
-        }
+        synthetic_document(&rows[0])
     );
+    // The versioned table holds one variant at a time; each document variant
+    // is (re)written before its two query variants are evaluated.
     for (connected, document_label) in [(false, "current"), (true, "connected")] {
+        fill_variant(&mut store, &inner, &rows, connected).await;
         for (cleaned, query_label) in [(false, "raw"), (true, "cleaned")] {
             let provider = Arc::new(EvalProvider {
                 inner: Arc::clone(&inner),
@@ -194,7 +168,59 @@ pub(super) async fn run(
             evaluate_cell(repository, provider, fixture, query_label, document_label).await;
         }
     }
-    store.close().await;
+}
+
+/// Builds the synthetic "connected" document for one station row.
+fn synthetic_document(row: &sqlx::postgres::PgRow) -> String {
+    let name: String = row.get("name");
+    let tags: Vec<String> = row.get("tags");
+    format!(
+        "{} is an internet radio station. It plays {} music. Broadcast language: {}. Country: {}.",
+        name,
+        tags.join(", "),
+        row.get::<Option<String>, _>("language")
+            .as_deref()
+            .unwrap_or("unspecified"),
+        row.get::<Option<String>, _>("country_code")
+            .as_deref()
+            .unwrap_or("unspecified")
+    )
+}
+
+/// Rewrites `station_embeddings_v1` with one document variant.
+async fn fill_variant(
+    store: &mut EmbeddingVersionStore,
+    inner: &Arc<dyn EmbeddingProvider>,
+    rows: &[sqlx::postgres::PgRow],
+    connected: bool,
+) {
+    let mut batch = Vec::with_capacity(rows.len());
+    for row in rows {
+        let name: String = row.get("name");
+        let tags: Vec<String> = row.get("tags");
+        let language: Option<String> = row.get("language");
+        let country_code: Option<String> = row.get("country_code");
+        let document = if connected {
+            synthetic_document(row)
+        } else {
+            row.get::<String, _>("searchable_text")
+        };
+        let embedding = inner.embed_document(&document).await.unwrap();
+        batch.push(WrittenStationEmbedding {
+            station_id: row.get("id"),
+            fields_hash: station_fields_hash(
+                &name,
+                &tags,
+                language.as_deref(),
+                country_code.as_deref(),
+            ),
+            values: embedding.values().to_vec(),
+        });
+    }
+    store
+        .write_embeddings(EMBEDDINGS_VERSION, &batch)
+        .await
+        .unwrap();
 }
 
 async fn evaluate_cell(

@@ -1,12 +1,18 @@
 //! E0 full-catalog evaluation against the pinned complete station release.
 //!
-//! Roadmap `ai-provider-architecture` stage E0: reference query sets for ru/en
-//! with relevance marked by `station_id`, evaluated through the real PostgreSQL
-//! search path on the checksum-pinned 16 825-station snapshot. Reports Top-1/3/5,
-//! Recall@5/10, MRR, empty answers and latency per language and category, and
-//! asserts a second pass returns identical ordering (determinism). The regular
-//! test validates labels against the pinned release without a database; the
-//! ignored evaluation additionally requires an explicitly disposable PostgreSQL.
+//! Roadmap `ai-provider-architecture` stages E0/E2: reference query sets for
+//! ru/en with relevance marked by `station_id`, evaluated through the real
+//! PostgreSQL search path on the checksum-pinned 16 825-station snapshot.
+//! Reports Top-1/3/5, Recall@5/10, MRR, empty answers and latency per language
+//! and category, and asserts a second pass returns identical ordering
+//! (determinism). Semantic modes fill `station_embeddings_v1`: locally with
+//! ONNX (`ROCKSERVER_SEARCH_EVAL_WITH_ONNX=1`) or through the gRPC embedder
+//! (`ROCKSERVER_SEARCH_EVAL_WITH_EMBEDDER=1`); both must reproduce the E0
+//! semantic baseline (the service is bit-identical to `onnx-v1`) and also
+//! report ANN recall versus exact kNN plus an EXPLAIN proof of the HNSW scan.
+//! The regular test validates labels against the pinned release without a
+//! database; the ignored evaluation additionally requires an explicitly
+//! disposable PostgreSQL.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -26,9 +32,12 @@ use rockserver::{
 use serde::Deserialize;
 use sqlx::PgPool;
 
+use super::e0_semantic::{self, Metrics};
+
 const FIXTURE: &str = include_str!("../fixtures/search_eval_e0_full_catalog.json");
 const DISPOSABLE_ENV: &str = "ROCKSERVER_SEARCH_EVAL_DISPOSABLE";
 const ONNX_ENV: &str = "ROCKSERVER_SEARCH_EVAL_WITH_ONNX";
+const EMBEDDER_ENV: &str = "ROCKSERVER_SEARCH_EVAL_WITH_EMBEDDER";
 const CATALOG_SHA256: &str = "ad469d405f177d7e476cf9b3d9985497d0e2c6132ac0f3ce14485f4eab402073";
 /// The `rockcast/src/voice/rank.rs` regression cases must stay in the ru set (RC2 gate).
 const MANDATORY_RU_SPOKEN: &[(&str, &str)] = &[
@@ -53,100 +62,33 @@ const CATEGORIES: &[&str] = &[
 ];
 
 #[derive(Deserialize)]
-struct E0Fixture {
-    catalog_version: String,
-    catalog_sha256: String,
-    sets: Vec<E0Set>,
+pub(super) struct E0Fixture {
+    pub(super) catalog_version: String,
+    pub(super) catalog_sha256: String,
+    pub(super) sets: Vec<E0Set>,
 }
 
 #[derive(Deserialize)]
-struct E0Set {
-    language: String,
-    locale: String,
-    cases: Vec<E0Case>,
-    paraphrase_cases: Vec<E0Case>,
-    negative_cases: Vec<String>,
+pub(super) struct E0Set {
+    pub(super) language: String,
+    pub(super) locale: String,
+    pub(super) cases: Vec<E0Case>,
+    pub(super) paraphrase_cases: Vec<E0Case>,
+    pub(super) negative_cases: Vec<String>,
 }
 
 #[derive(Deserialize)]
-struct E0Case {
-    category: String,
-    query: String,
-    relevant: Vec<String>,
-}
-
-#[derive(Default)]
-struct Metrics {
-    cases: usize,
-    top1_hits: usize,
-    top3_hits: usize,
-    top5_hits: usize,
-    recall_5_sum: f64,
-    recall_10_sum: f64,
-    reciprocal_rank_sum: f64,
-    empty_results: usize,
-    latencies_ms: Vec<f64>,
-}
-
-impl Metrics {
-    fn record(&mut self, relevant: &[String], result_ids: &[String], elapsed_ms: f64) {
-        self.cases += 1;
-        let relevant = relevant.iter().map(String::as_str).collect::<BTreeSet<_>>();
-        let hit_within = |limit: usize| {
-            result_ids
-                .iter()
-                .take(limit)
-                .any(|id| relevant.contains(id.as_str()))
-        };
-        self.top1_hits += usize::from(hit_within(1));
-        self.top3_hits += usize::from(hit_within(3));
-        self.top5_hits += usize::from(hit_within(5));
-        let recall = |limit: usize| {
-            result_ids
-                .iter()
-                .take(limit)
-                .filter(|id| relevant.contains(id.as_str()))
-                .count() as f64
-                / relevant.len() as f64
-        };
-        self.recall_5_sum += recall(5);
-        self.recall_10_sum += recall(10);
-        self.reciprocal_rank_sum += result_ids
-            .iter()
-            .position(|id| relevant.contains(id.as_str()))
-            .map_or(0.0, |rank| 1.0 / (rank + 1) as f64);
-        self.empty_results += usize::from(result_ids.is_empty());
-        self.latencies_ms.push(elapsed_ms);
-    }
-
-    fn summary(&mut self) -> String {
-        self.latencies_ms.sort_by(f64::total_cmp);
-        let percentile = |fraction: f64| {
-            let index = ((self.latencies_ms.len() - 1) as f64 * fraction).ceil() as usize;
-            self.latencies_ms[index]
-        };
-        let n = self.cases.max(1) as f64;
-        format!(
-            "n={} top1={:.3} top3={:.3} top5={:.3} recall@5={:.3} recall@10={:.3} mrr={:.3} empty={} latency_p50_ms={:.1} latency_p95_ms={:.1}",
-            self.cases,
-            self.top1_hits as f64 / n,
-            self.top3_hits as f64 / n,
-            self.top5_hits as f64 / n,
-            self.recall_5_sum / n,
-            self.recall_10_sum / n,
-            self.reciprocal_rank_sum / n,
-            self.empty_results,
-            percentile(0.50),
-            percentile(0.95),
-        )
-    }
+pub(super) struct E0Case {
+    pub(super) category: String,
+    pub(super) query: String,
+    pub(super) relevant: Vec<String>,
 }
 
 #[derive(Clone)]
-struct PreparedCase {
-    category: String,
-    query: String,
-    relevant: Vec<String>,
+pub(super) struct PreparedCase {
+    pub(super) category: String,
+    pub(super) query: String,
+    pub(super) relevant: Vec<String>,
 }
 
 async fn validated_fixture() -> (E0Fixture, BTreeSet<String>) {
@@ -228,15 +170,6 @@ async fn release_station_ids(adapter: &FullReleaseCatalogAdapter) -> BTreeSet<St
     ids
 }
 
-#[test]
-fn top_hits_use_the_first_k_results_only() {
-    let mut metrics = Metrics::default();
-    metrics.record(&["a".into()], &["x".into(), "a".into()], 1.0);
-    assert_eq!(metrics.top1_hits, 0);
-    assert_eq!(metrics.top3_hits, 1);
-    assert_eq!(metrics.recall_5_sum, 1.0);
-}
-
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL for a disposable PostgreSQL database and explicit destructive opt-in"]
 async fn e0_evaluates_full_catalog_through_postgres_search() {
@@ -248,6 +181,11 @@ async fn e0_evaluates_full_catalog_through_postgres_search() {
     let database_url = env::var("TEST_DATABASE_URL").expect("set TEST_DATABASE_URL");
     let (fixture, _station_ids) = validated_fixture().await;
     let with_onnx = env::var(ONNX_ENV).ok().as_deref() == Some("1");
+    let with_embedder = env::var(EMBEDDER_ENV).ok().as_deref() == Some("1");
+    assert!(
+        !with_onnx || !with_embedder,
+        "enable at most one of {ONNX_ENV} and {EMBEDDER_ENV}"
+    );
     #[cfg(not(feature = "onnx-local"))]
     assert!(
         !with_onnx,
@@ -291,26 +229,35 @@ async fn e0_evaluates_full_catalog_through_postgres_search() {
             .expect("count active stations");
     assert_eq!(active_count, 16_825);
 
-    let embedding_provider: Option<Arc<dyn EmbeddingProvider>> = {
+    // Provider selection: embedder gRPC client, local ONNX (bit-identical
+    // vectors), or metadata-only. Semantic modes fill station_embeddings_v1.
+    let mut provenance = "none (metadata-only)".to_owned();
+    let mut embedding_provider: Option<Arc<dyn EmbeddingProvider>> = None;
+    if with_embedder {
+        let (provider, label) = e0_semantic::e0_embedder_fill(&database_url).await;
+        embedding_provider = Some(provider);
+        provenance = label;
+    } else if with_onnx {
         #[cfg(feature = "onnx-local")]
         {
-            e0_full_catalog_embeddings(&database_url, with_onnx).await
+            let (provider, label) = e0_semantic::e0_onnx_fill(&database_url).await;
+            embedding_provider = Some(provider);
+            provenance = label;
         }
-        #[cfg(not(feature = "onnx-local"))]
-        {
-            None
-        }
-    };
-    let provenance = if embedding_provider.is_some() {
-        "onnx-e5-local"
-    } else {
-        "none (metadata-only)"
-    };
+    }
     let semantic_enabled = embedding_provider.is_some();
+    if semantic_enabled {
+        for table in ["stations", "station_embeddings_v1"] {
+            sqlx::query(&format!("ANALYZE {table}"))
+                .execute(&pool)
+                .await
+                .expect("planner statistics");
+        }
+    }
     let service = SearchService::with_providers(
         Arc::new(repository.clone()),
         Arc::new(DeterministicQueryParser),
-        embedding_provider,
+        embedding_provider.clone(),
     );
 
     println!(
@@ -360,21 +307,17 @@ async fn e0_evaluates_full_catalog_through_postgres_search() {
                 nondeterministic.push(prepared[index].query.clone());
             }
         }
-        if semantic_enabled {
-            // Known defect recorded in the roadmap: the ANN branch breaks score
-            // ties by scan order instead of a deterministic key, so the semantic
-            // pass is not yet order-stable. Report instead of failing the run.
-            println!(
-                "determinism lang={} stable={} unstable_queries={nondeterministic:?}",
-                set.language,
-                prepared.len() - nondeterministic.len()
-            );
-        } else {
-            assert!(
-                nondeterministic.is_empty(),
-                "non-deterministic metadata ordering for {nondeterministic:?}"
-            );
-        }
+        // The ANN candidate order is tie-broken by station ID (E2), so both
+        // the metadata and semantic passes must be order-stable now.
+        println!(
+            "determinism lang={} stable={} unstable_queries={nondeterministic:?}",
+            set.language,
+            prepared.len() - nondeterministic.len()
+        );
+        assert!(
+            nondeterministic.is_empty(),
+            "non-deterministic ordering for {nondeterministic:?}"
+        );
         let mut overall = Metrics::default();
         let mut by_category: BTreeMap<String, Metrics> = BTreeMap::new();
         for (case, (ids, elapsed_ms)) in prepared.iter().zip(&first) {
@@ -383,6 +326,9 @@ async fn e0_evaluates_full_catalog_through_postgres_search() {
                 .entry(case.category.clone())
                 .or_default()
                 .record(&case.relevant, ids, *elapsed_ms);
+        }
+        if semantic_enabled {
+            e0_semantic::assert_against_semantic_baseline(&set.language, &overall);
         }
         let mut paraphrase = Metrics::default();
         for case in &set.paraphrase_cases {
@@ -451,6 +397,9 @@ async fn e0_evaluates_full_catalog_through_postgres_search() {
     for line in language_summaries {
         println!("{line}");
     }
+    if let Some(provider) = &embedding_provider {
+        e0_semantic::ann_recall_and_explain(&pool, provider, &fixture).await;
+    }
     pool.close().await;
     repository.close().await;
 }
@@ -488,55 +437,4 @@ async fn run_eval_pass(
         outcomes.push((ids, elapsed_ms));
     }
     outcomes
-}
-
-/// Loads local ONNX assets and embeds every station when the semantic pass is enabled.
-#[cfg(feature = "onnx-local")]
-async fn e0_full_catalog_embeddings(
-    database_url: &str,
-    with_onnx: bool,
-) -> Option<Arc<dyn EmbeddingProvider>> {
-    use rockserver::{
-        persistence::PostgresEmbeddingStore,
-        providers::onnx_e5::{DIMENSION, MODEL, OnnxE5Config, OnnxE5EmbeddingProvider, VERSION},
-        search::EmbeddingStore,
-    };
-    if !with_onnx {
-        return None;
-    }
-    let config = OnnxE5Config::from_env().expect("local ONNX assets configured");
-    let provider = Arc::new(OnnxE5EmbeddingProvider::load(&config).expect("local E5 model"));
-    let embedding_store = PostgresEmbeddingStore::connect(database_url)
-        .await
-        .expect("embedding store");
-    let documents = embedding_store
-        .station_documents(
-            &rockserver::search::EmbeddingProvenance {
-                model: MODEL.to_owned(),
-                version: VERSION.to_owned(),
-                dimension: DIMENSION,
-            },
-            None,
-            16_825,
-        )
-        .await
-        .expect("station documents");
-    assert_eq!(documents.len(), 16_825);
-    let started = Instant::now();
-    for document in documents {
-        let embedding = provider
-            .embed_document(&document.text)
-            .await
-            .expect("station embedding");
-        embedding_store
-            .upsert_embedding(&document.station_id, &embedding)
-            .await
-            .expect("persist station embedding");
-    }
-    println!(
-        "e0 embedded 16825 stations in {:.0}s",
-        started.elapsed().as_secs_f64()
-    );
-    embedding_store.close().await;
-    Some(provider as Arc<dyn EmbeddingProvider>)
 }

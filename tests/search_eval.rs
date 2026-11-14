@@ -23,13 +23,13 @@ use serde::Deserialize;
 use sqlx::PgPool;
 
 #[cfg(feature = "onnx-local")]
-use rockserver::{
-    persistence::PostgresEmbeddingStore,
-    providers::onnx_e5::{DIMENSION, MODEL, OnnxE5Config, OnnxE5EmbeddingProvider, VERSION},
-    search::EmbeddingStore,
+use rockserver::providers::onnx_e5::{
+    DIMENSION, MODEL, OnnxE5Config, OnnxE5EmbeddingProvider, VERSION,
 };
 #[cfg(feature = "onnx-local")]
 use sha2::{Digest, Sha256};
+#[cfg(feature = "onnx-local")]
+use sqlx::Row as _;
 
 const FIXTURE: &str = include_str!("fixtures/search_eval_golden_set.json");
 const DISPOSABLE_ENV: &str = "ROCKSERVER_SEARCH_EVAL_DISPOSABLE";
@@ -43,6 +43,9 @@ mod format_experiment;
 
 #[path = "search_eval/e0_full_catalog.rs"]
 mod e0_full_catalog;
+
+#[path = "search_eval/e0_semantic.rs"]
+mod e0_semantic;
 
 #[derive(Deserialize)]
 struct GoldenSet {
@@ -246,35 +249,7 @@ async fn evaluates_pinned_catalog_through_postgres_search() {
         #[cfg(feature = "onnx-local")]
         {
             if let Some(provider) = prepared_provider {
-                let embedding_store = PostgresEmbeddingStore::connect(&database_url)
-                    .await
-                    .expect("embedding store");
-                let documents = embedding_store
-                    .station_documents(
-                        &rockserver::search::EmbeddingProvenance {
-                            model: MODEL.to_owned(),
-                            version: VERSION.to_owned(),
-                            dimension: DIMENSION,
-                        },
-                        None,
-                        catalog.stations().len(),
-                    )
-                    .await
-                    .expect("station documents");
-                assert_eq!(documents.len(), catalog.stations().len());
-                for document in documents {
-                    let embedding = provider
-                        .embed_document(&document.text)
-                        .await
-                        .expect("station embedding");
-                    assert_eq!(embedding.provenance().model, MODEL);
-                    assert_eq!(embedding.provenance().version, VERSION);
-                    embedding_store
-                        .upsert_embedding(&document.station_id, &embedding)
-                        .await
-                        .expect("persist station embedding");
-                }
-                embedding_store.close().await;
+                fill_versioned_table_with_onnx(&database_url, &provider).await;
                 Some(provider as Arc<dyn EmbeddingProvider>)
             } else {
                 None
@@ -282,6 +257,7 @@ async fn evaluates_pinned_catalog_through_postgres_search() {
         }
         #[cfg(not(feature = "onnx-local"))]
         {
+            let _ = &catalog;
             None
         }
     };
@@ -496,6 +472,73 @@ async fn evaluates_pinned_catalog_through_postgres_search() {
     import_store.close().await;
     pool.close().await;
     repository.close().await;
+}
+
+/// Fills `station_embeddings_v1` from the local model so the semantic pass
+/// uses the same versioned storage path as production search.
+#[cfg(feature = "onnx-local")]
+async fn fill_versioned_table_with_onnx(database_url: &str, provider: &OnnxE5EmbeddingProvider) {
+    use rockserver::persistence::{
+        EMBEDDINGS_DIMENSION, EMBEDDINGS_VERSION, EmbeddingVersionStore, WrittenStationEmbedding,
+        station_fields_hash,
+    };
+
+    let mut store = EmbeddingVersionStore::connect(database_url)
+        .await
+        .expect("versioned embedding store");
+    store
+        .acquire_advisory_lock(EMBEDDINGS_VERSION)
+        .await
+        .expect("backfill lock");
+    store
+        .ensure_table(EMBEDDINGS_VERSION, EMBEDDINGS_DIMENSION)
+        .await
+        .expect("versioned table");
+    let pool = sqlx::PgPool::connect(database_url)
+        .await
+        .expect("station read pool");
+    let rows = sqlx::query(
+        "SELECT id, name, tags, language, country_code, searchable_text          FROM stations WHERE retired_at IS NULL ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("station rows");
+    let mut batch = Vec::with_capacity(500);
+    for row in &rows {
+        let name: String = row.get("name");
+        let tags: Vec<String> = row.get("tags");
+        let language: Option<String> = row.get("language");
+        let country_code: Option<String> = row.get("country_code");
+        let text: String = row.get("searchable_text");
+        let embedding = provider
+            .embed_document(&text)
+            .await
+            .expect("station embedding");
+        batch.push(WrittenStationEmbedding {
+            station_id: row.get("id"),
+            fields_hash: station_fields_hash(
+                &name,
+                &tags,
+                language.as_deref(),
+                country_code.as_deref(),
+            ),
+            values: embedding.values().to_vec(),
+        });
+        if batch.len() == 500 {
+            store
+                .write_embeddings(EMBEDDINGS_VERSION, &batch)
+                .await
+                .expect("persist station embeddings");
+            batch.clear();
+        }
+    }
+    if !batch.is_empty() {
+        store
+            .write_embeddings(EMBEDDINGS_VERSION, &batch)
+            .await
+            .expect("persist station embeddings");
+    }
+    pool.close().await;
 }
 
 #[cfg(feature = "onnx-local")]
