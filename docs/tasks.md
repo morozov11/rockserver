@@ -1,5 +1,11 @@
 # Task log
 
+## Fix CI readiness smoke deadlock — 2026-11-14
+
+- Goal/scope: make the GitHub Actions readiness smoke green again. The workflow's `docker compose up --detach --wait` started `catalog_seed` and `embedding_backfill` concurrently; their parallel upserts (stations vs. `station_embeddings` FK) deadlock on PostgreSQL, and `embedding_backfill` additionally fails in CI because runners mount no verified ONNX assets. CI had been red since 2026-10-25, previously masked by earlier compile/clippy failures; the `924728d` run was the first to reach the smoke and exposed both causes (reproduced locally: `deadlock detected` in the postgres log, `local E5 model file is missing` in backfill).
+- Result: the smoke step in `.github/workflows/ci-release.yml` now mirrors the production order of `remote-ops-001-d.sh` — `up --detach --wait postgres`, then `run --rm catalog_seed`, then `up --detach --wait rockserver caddy`, then the Caddy readiness curl. `embedding_backfill` is intentionally not started in CI (documented in the step: no ONNX assets on runners, metadata-only service). No application or compose changes: production already runs the one-shots sequentially and is unaffected.
+- Checks/status: the exact new sequence verified locally against the same compose files (16 825 stations imported with 0 failed/skipped, no deadlock, rockserver/caddy healthy, `readiness=200`, full teardown). Pushed to trigger CI; the GitHub run is the final confirmation gate.
+
 ## E1 modules service + compiler 1.100.0 — 2026-11-13
 
 - Goal/scope: implement stage E1 of the AI provider roadmap (shared library + embedding service in the new `rock-llm-service` repository) and, by the owner's decision during the stage, move both repositories to Rust 1.100.0 and switch all module services to gRPC.

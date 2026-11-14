@@ -1,6 +1,10 @@
 # Project status
 
-Last updated: 2026-11-13
+Last updated: 2026-11-14
+
+## CI readiness smoke repair — 2026-11-14
+
+- The GitHub Actions smoke has been red in practice since 2026-10-25: earlier runs died at compile/clippy stages, and the run for `924728d` (first to reach the smoke after the E1 toolchain/clippy work) failed there. Root causes reproduced locally: `docker compose up --wait` starts the `catalog_seed` and `embedding_backfill` one-shots in parallel, and their concurrent upserts (stations vs. `station_embeddings` with FK) deadlock on PostgreSQL (`deadlock detected` in the postgres log); additionally `embedding_backfill` requires verified ONNX assets that CI runners do not mount ("local E5 model file is missing"). Production is unaffected — `remote-ops-001-d.sh` always runs the one-shots sequentially. The smoke now mirrors that production order: `up --wait postgres`, then `run --rm catalog_seed`, then `up --wait rockserver caddy`, readiness via Caddy; `embedding_backfill` stays out of CI (no assets, service is metadata-only there). Verified locally end-to-end with the same compose files: 16 825 stations imported, no deadlock, all containers healthy, `readiness=200`. CI on GitHub is the final gate for this change.
 
 ## E1 modules service + Rust 1.100.0 — 2026-11-13
 

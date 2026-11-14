@@ -70,8 +70,19 @@ jobs:
           trap cleanup EXIT
           docker compose --project-name "${project}" --env-file .env.example \
             --file deploy/compose.yaml --file deploy/compose.local.yaml config --quiet
+          # Mirror the production deploy order from remote-ops-001-d.sh: the
+          # catalog one-shot must finish before long-running services start.
+          # A plain `up --wait` would also start catalog_seed and
+          # embedding_backfill in parallel, and their concurrent upserts
+          # (stations vs. station_embeddings FK) deadlock on PostgreSQL.
+          # embedding_backfill stays out of CI: the runner has no verified
+          # ONNX assets, and the service runs metadata-only here.
           docker compose --project-name "${project}" --env-file .env.example \
-            --file deploy/compose.yaml --file deploy/compose.local.yaml up --detach --wait
+            --file deploy/compose.yaml --file deploy/compose.local.yaml up --detach --wait postgres
+          docker compose --project-name "${project}" --env-file .env.example \
+            --file deploy/compose.yaml --file deploy/compose.local.yaml run --rm catalog_seed
+          docker compose --project-name "${project}" --env-file .env.example \
+            --file deploy/compose.yaml --file deploy/compose.local.yaml up --detach --wait rockserver caddy
           curl --fail --silent --show-error http://127.0.0.1:18080/health/ready >/dev/null
 
   publish:
