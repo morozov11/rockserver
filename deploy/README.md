@@ -244,6 +244,9 @@ the E2 image:
 2. Point `rockserver` at it with `ROCKSERVER_EMBEDDER_ADDR` (host:port) and the same token;
    remove the ONNX provider environment of the previous release. Without the address the
    process serves metadata search only — never enable the address before the service answers.
+   Both variables live in the protected `/opt/rockserver/release.env` (they are not
+   owner.env keys, so they survive every redeploy) and the compose `rockserver` service
+   passes them into the container.
 3. On startup the background lifecycle verifies `Info`, takes the per-table advisory lock,
    creates/verifies `station_embeddings_v1`, enables the vector branch (without waiting for
    full coverage), and backfills pending stations in batches; a manual

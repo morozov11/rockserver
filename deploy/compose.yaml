@@ -40,6 +40,10 @@ services:
       YANDEX_LLM_TIMEOUT_MS: ${YANDEX_LLM_TIMEOUT_MS:-}
       YANDEX_HOME_CLIENTID: ${YANDEX_HOME_CLIENTID:-}
       YANDEX_HOME_SECRET: ${YANDEX_HOME_SECRET:-}
+      # gRPC embedding service (rock-llm-service). An empty address keeps the
+      # intentional no-vectors mode; a token is required whenever set.
+      ROCKSERVER_EMBEDDER_ADDR: ${ROCKSERVER_EMBEDDER_ADDR:-}
+      ROCKSERVER_EMBEDDER_TOKEN: ${ROCKSERVER_EMBEDDER_TOKEN:-}
       ROCKSERVER_FULL_CATALOG_PATH: /opt/rockserver/release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.sqlite
     depends_on:
       postgres:
