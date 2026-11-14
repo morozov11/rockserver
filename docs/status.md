@@ -2,6 +2,27 @@
 
 Last updated: 2026-11-14
 
+## E3 removal of local ONNX embedding path and classifier — 2026-11-14
+
+- Stage E3 of the AI provider roadmap is implemented locally (nothing committed). Audits #4 and #5 are closed: the local ONNX Runtime embedding path, the `SemanticLanguageClassifier`, and all related assets and configurations are removed from rockserver.
+- Code removed:
+  - `src/providers/onnx_e5.rs`, feature `onnx-local` in `Cargo.toml`, and optional dependencies `ort`, `ndarray`, `tokenizers`. Dependency tree reduced by 11 transitive crates; `Cargo.lock` cleaned. Unused `src/providers/deterministic_embedding.rs` deleted.
+  - `SemanticLanguageClassifier` and its diagnostic logs (SRCH-004 branch: `src/search/semantic_filters.rs`, `tests/search_language_eval.rs`, `ROCKSERVER_SEMANTIC_PROVIDER=onnx-e5-local`; `with_providers_and_language_classifier` constructor simplified to `with_providers`; public search trait contracts preserved).
+  - Legacy `PostgresEmbeddingStore`, `station_documents`, `upsert_embedding`, `EmbeddingBackfill`, and all code operating on the old `station_embeddings` table: `src/persistence/embedding_postgres.rs`, `src/search/embedding_release.rs`, `tests/postgres_integration/embedding_backfill.rs`, and `tests/onnx_e5_live.rs`. Migrations 0004/0005/0027/0028 remain unchanged in sqlx history.
+  - Environment variables removed from config and `.env.example`: `ROCKSERVER_SEMANTIC_PROVIDER`, `ROCKSERVER_ONNX_MODEL_PATH`, `ROCKSERVER_ONNX_TOKENIZER_PATH`, `ROCKSERVER_ONNX_INTRA_THREADS`, `ORT_DYLIB_PATH`.
+- Evaluator:
+  - ONNX mode in E0 evaluator removed (`ROCKSERVER_SEARCH_EVAL_WITH_ONNX`, `tests/search_eval/format_experiment.rs`, `e0_onnx_fill`, SHA-256 file helpers). Evaluator docs updated: semantic E0 evaluations run solely through the gRPC embedder service (`tests/search_eval/e0_semantic.rs`), which was proven bit-for-bit identical to the recorded baseline in E1/E2.
+- Deployment chain:
+  - `deploy/compose.yaml`: removed `embedding_backfill` service, ONNX volume mount `/opt/rockserver/assets/onnx`, and ONNX environment variables.
+  - `deploy/remote-ops-001-d.sh`: removed `download_onnx` function, requirement for `onnx-assets.json`, and ONNX variables from owner.env allowlist.
+  - `deploy/ops-001-d.ps1` and `deploy/ops-001-d.psm1`: removed `onnx-assets.json` bundling, `Test-Ops001DOnnxManifest`, and ONNX environment injection. Deleted `deploy/onnx-assets.lock.json`.
+  - Updated `deploy/tests/ops-001-d-tests.ps1` and `tests/deploy_security.rs` with new invariants (9 tests passing).
+  - Deployment note recorded in `deploy/README.md`: deploying to production without a running embedder service (rockmodules) puts the server in safe metadata-only mode.
+- Verification:
+  - `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and full `cargo test` clean and green (without any `onnx-local` feature).
+  - Grep check for `\bonnx`, `\bort_`, `ORT_DYLIB` returns 0 matches in code, tests, deploy scripts, and `.env.example` (excluding sqlx migrations).
+- Next steps: Stage E4 (taxonomy from DB).
+
 ## E2 embedder client, versioned vectors, deterministic ANN — 2026-11-14
 
 - Stage E2 of the AI provider roadmap is implemented locally (nothing committed). rockserver now speaks to the embedding service over gRPC: the `embed.v1` schema (plus the reduced `google.rpc` ErrorInfo schema) is vendored in `proto/` from rock-llm-service commit `6284631` (SHA-256 in `proto/README.md`) and compiled by `build.rs` via tonic-prost with a vendored protoc. The client (`src/providers/embedder/`) sends the bearer token in `authorization` plus a correlation id, applies grpc-timeout deadlines (query 300 ms / batch 30 s / info 5 s, overridable), runs one contract breaker per service (5 failures → 30 s, reused `CircuitBreaker`), classifies errors by `ErrorInfo` reason without parsing messages (service-refused answers do not open the breaker), and rejects responses carrying a foreign API version. `ROCKSERVER_EMBEDDER_ADDR` absent means the no-vectors mode (not a startup error); an address without `ROCKSERVER_EMBEDDER_TOKEN` fails fast. Unit tests run against an in-process tonic server; no network in unit tests.

@@ -40,21 +40,10 @@ services:
       YANDEX_LLM_TIMEOUT_MS: ${YANDEX_LLM_TIMEOUT_MS:-}
       YANDEX_HOME_CLIENTID: ${YANDEX_HOME_CLIENTID:-}
       YANDEX_HOME_SECRET: ${YANDEX_HOME_SECRET:-}
-      ROCKSERVER_SEMANTIC_PROVIDER: ${ROCKSERVER_SEMANTIC_PROVIDER:-}
-      ROCKSERVER_ONNX_MODEL_PATH: ${ROCKSERVER_ONNX_MODEL_PATH:-}
-      ROCKSERVER_ONNX_TOKENIZER_PATH: ${ROCKSERVER_ONNX_TOKENIZER_PATH:-}
-      # Compose must not pass an empty value here: the Rust configuration
-      # correctly rejects an explicitly empty thread count.  Keep this a
-      # positive default on low-memory VPS hosts while allowing an operator to
-      # override it through the protected runtime environment file.
-      ROCKSERVER_ONNX_INTRA_THREADS: ${ROCKSERVER_ONNX_INTRA_THREADS:-2}
-      ORT_DYLIB_PATH: ${ORT_DYLIB_PATH:-}
       ROCKSERVER_FULL_CATALOG_PATH: /opt/rockserver/release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.sqlite
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - ${ROCKSERVER_ONNX_ASSET_DIR:-/opt/rockserver/assets/onnx}:/opt/rockserver/assets/onnx:ro
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:3000/health/live > /dev/null"]
       interval: 10s
@@ -76,25 +65,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - database
-
-  embedding_backfill:
-    image: ${ROCKSERVER_IMAGE:-rockserver:local}
-    restart: "no"
-    entrypoint: ["/usr/local/bin/backfill_embeddings"]
-    environment:
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be injected outside Git}
-      ROCKSERVER_LOG_DIR: /var/log/rockserver
-      ROCKSERVER_SEMANTIC_PROVIDER: onnx-e5-local
-      ROCKSERVER_ONNX_MODEL_PATH: /opt/rockserver/assets/onnx/model.onnx
-      ROCKSERVER_ONNX_TOKENIZER_PATH: /opt/rockserver/assets/onnx/tokenizer.json
-      ORT_DYLIB_PATH: /opt/rockserver/assets/onnx/libonnxruntime.so
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ${ROCKSERVER_ONNX_ASSET_DIR:-/opt/rockserver/assets/onnx}:/opt/rockserver/assets/onnx:ro
     networks:
       - database
 

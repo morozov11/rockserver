@@ -1,6 +1,5 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = 'C:\repos\rockserver'
-$assetsRoot = 'C:\Users\alex\Documents\Codex\2026-08-17\referenced-chatgpt-conversation-this-is-an\work\e5-assets'
 $envFile = Join-Path $projectRoot '.env'
 
 if (-not (Test-Path -LiteralPath $envFile)) { throw "Missing local configuration: $envFile" }
@@ -27,15 +26,6 @@ if ([string]::IsNullOrWhiteSpace($env:ROCKSERVER_TRUSTED_PROXY_TOKEN)) {
     Write-Host 'ROCKSERVER_TRUSTED_PROXY_TOKEN is unset; using a process-local proxy credential.' -ForegroundColor Yellow
 }
 if ($env:ROCKSERVER_TRUSTED_PROXY_TOKEN.Trim().Length -lt 32) { throw 'ROCKSERVER_TRUSTED_PROXY_TOKEN must contain at least 32 characters.' }
-$model = Join-Path $assetsRoot 'model.onnx'
-$tokenizer = Join-Path $assetsRoot 'tokenizer.json'
-$runtime = Get-ChildItem -LiteralPath (Join-Path $assetsRoot 'ort') -Recurse -Filter 'onnxruntime.dll' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
-if (-not (Test-Path -LiteralPath $model) -or -not (Test-Path -LiteralPath $tokenizer) -or -not $runtime) { throw 'Local E5/ONNX assets are missing. Run the model setup once before starting the server.' }
-
-$env:ROCKSERVER_SEMANTIC_PROVIDER = 'onnx-e5-local'
-$env:ROCKSERVER_ONNX_MODEL_PATH = $model
-$env:ROCKSERVER_ONNX_TOKENIZER_PATH = $tokenizer
-$env:ORT_DYLIB_PATH = $runtime
 
 function Get-LanIPv4Addresses {
     $addresses = @()
@@ -107,4 +97,4 @@ else {
     Write-Host ("Admin console shell: http://{0}:{1}/admin" -f $displayAddress, $port)
 }
 Write-Host ("Local admin login is enabled only for {0}." -f $env:ROCKSERVER_LOCAL_ADMIN_ORIGIN) -ForegroundColor Yellow
-cargo run --features onnx-local --bin rockserver
+cargo run --bin rockserver

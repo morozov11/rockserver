@@ -46,7 +46,7 @@
 | E0 | Эталонные запросы ru/en, скрипт метрик, базовая линия | rockserver | — | Выполнено локально 2026-11-13; наборы и порог — на внешнем ревью |
 | E1 | Репозиторий модулей + сервис эмбеддингов + развёртывание | модули | E0 (для приёмки E2) | Выполнено 2026-11-13 (gRPC `embed.v1`, побитовая сверка `onnx-v1` пройдена; см. `rock-llm-service`) |
 | E2 | Клиент эмбеддера, таблица `station_embeddings_v{N}`, ANN-ветка, backfill | rockserver | E1 | Выполнено локально 2026-11-14 (gRPC-клиент `embed.v1`, `station_embeddings_v1`+`fields_hash`, lifecycle-задача, детерминированный ANN; см. результат ниже) |
-| E3 | Удаление ONNX и классификатора из rockserver | rockserver | E2 | Не начат |
+| E3 | Удаление ONNX и классификатора из rockserver | rockserver | E2 | Выполнено 2026-11-14 (ONNX, ort/ndarray/tokenizers, классификатор, старый PostgresEmbeddingStore и deploy-ассеты удалены; сборка и тесты зелёные) |
 | E4 | Таксономия из БД с версией | rockserver | — (до E6) | Не начат |
 | E5 | Языковые модули, API списка языков, язык общения | rockserver | — (до E6/E7/E8) | Не начат |
 | E6 | Сервис LLM (поиск + команды), клиент, фолбэки, фикс фильтров | модули + rockserver | E4, E5 | Не начат |
@@ -174,6 +174,16 @@ builder-образа обновлён).
 Приёмка: аудиты 4, 5 — сборка и тесты зелёные без ONNX и фичи.
 
 Откат: `git revert` (файлы возвращаются целиком).
+
+### Результат выполнения E3 — 2026-11-14
+
+- Удалён `src/providers/onnx_e5.rs`, feature `onnx-local` в `Cargo.toml`, зависимости `ort`, `ndarray`, `tokenizers` и неиспользуемый `src/providers/deterministic_embedding.rs`. Дерево зависимостей сократилось на 11 транзитивных крейтов; Cargo.lock очищен.
+- Удалён `SemanticLanguageClassifier` и его диагностические логи (ветка SRCH-004: `src/search/semantic_filters.rs`, `tests/search_language_eval.rs`, удалён `ROCKSERVER_SEMANTIC_PROVIDER=onnx-e5-local`, конструктор `with_providers_and_language_classifier` аккуратно заменён на `with_providers`, публичный трейт-контракт поиска не изменился).
+- Удалены старый `PostgresEmbeddingStore`, `station_documents`, `upsert_embedding`, `EmbeddingBackfill` и вся работа со старой таблицей `station_embeddings`: `src/persistence/embedding_postgres.rs`, `src/search/embedding_release.rs`, `tests/postgres_integration/embedding_backfill.rs` и `tests/onnx_e5_live.rs`. Миграции старой таблицы и индексов (0004/0005/0027/0028) неизменно сохранены в sqlx-истории.
+- Удалены ONNX-переменные из конфигурации и `.env.example` (`ROCKSERVER_SEMANTIC_PROVIDER`, `ROCKSERVER_ONNX_MODEL_PATH`, `ROCKSERVER_ONNX_TOKENIZER_PATH`, `ROCKSERVER_ONNX_INTRA_THREADS`, `ORT_DYLIB_PATH`).
+- Оценщик E0: удалён локальный ONNX-режим (`ROCKSERVER_SEARCH_EVAL_WITH_ONNX`, `tests/search_eval/format_experiment.rs`, `e0_onnx_fill`, локальные sha256-хелперы). Семантический режим E0 сохранён исключительно через gRPC-эмбеддер (`tests/search_eval/e0_semantic.rs`), побитово эквивалентный эталону.
+- Деплой-цепочка: из `deploy/compose.yaml` удалены compose-сервис `embedding_backfill`, монтирование ONNX-ассетов и переменные; из `deploy/remote-ops-001-d.sh` удалены `download_onnx`, требование `onnx-assets.json` и ONNX-переменные из allowlist owner.env; из `deploy/ops-001-d.ps1`/`psm1` удалены передача `onnx-assets.json` в bundle и проверка манифеста; удалён файл `deploy/onnx-assets.lock.json`. Обновлены `deploy/tests/ops-001-d-tests.ps1` и `tests/deploy_security.rs` (новые инварианты проверены, 9 тестов зелёные). В `deploy/README.md` зафиксирован статус: деплой на прод без поднятого сервиса эмбеддера работает в безопасном режиме metadata-only.
+- Аудиты 4 и 5 полностью закрыты.
 
 ## E4 — таксономия из БД
 
@@ -308,7 +318,7 @@ gRPC-редакции (раздел 5). Клиент rockserver — `tonic`, о�
 | 1, 11 | `EXPLAIN` показывает HNSW; recall@k на эталонах не хуже базы; кандидаты не теряются при фильтрах |
 | 2 | `score` ∈ [0,1] на всех путях, контрактный тест OpenAPI |
 | 3 | одна функция слияния у обоих хранилищ (тест); `rockcast/src/voice/rank.rs` удалён (RC2) |
-| 4, 5 | ONNX и классификатор удалены из `rockserver` |
+| 4, 5 | ONNX и классификатор удалены из `rockserver` (закрыты в E3 2026-11-14) |
 | 6 | текст станции строит сервис; вектор запроса — по `raw_query` |
 | 7, 8 | тесты: смена полей → пересчёт; гонка с импортом; переключение и откат версии |
 | 9 | breaker/кэш/запасной/закреплённая модель/лимиты — тесты на фейках |

@@ -3,13 +3,11 @@
 mod circuit_breaker;
 mod domain;
 mod embedding;
-mod embedding_release;
 mod in_memory;
 mod language;
 mod llm;
 mod query;
 mod ranking;
-mod semantic_filters;
 mod service;
 pub mod taxonomy;
 
@@ -22,11 +20,9 @@ pub use domain::{
     SearchQuery, Station, StationHealth, StationRepository,
 };
 pub use embedding::{
-    Embedding, EmbeddingBackfill, EmbeddingBackfillResult, EmbeddingProvenance, EmbeddingProvider,
-    EmbeddingProviderError, EmbeddingStore, EmbeddingStoreError, EmbeddingValidationError,
-    MAX_EMBEDDING_DIMENSION, StationEmbeddingDocument,
+    Embedding, EmbeddingProvenance, EmbeddingProvider, EmbeddingProviderError, EmbeddingStoreError,
+    EmbeddingValidationError, MAX_EMBEDDING_DIMENSION,
 };
-pub use embedding_release::EmbeddingQualityReview;
 pub use in_memory::{InMemoryStationRepository, UnavailableStationRepository};
 pub use llm::{
     LlmProvider, LlmProviderError, LlmQueryParser, LlmRequest, MAX_LLM_INTENT_JSON_BYTES,
@@ -36,7 +32,4 @@ pub use query::{
     SearchAction, normalize_query, tokenize,
 };
 pub use ranking::{METADATA_WEIGHT, SEMANTIC_WEIGHT};
-pub use semantic_filters::{
-    SEMANTIC_LANGUAGE_FILTERS_ENV, SemanticLanguageClassifier, semantic_language_filters_enabled,
-};
 pub use service::SearchService;

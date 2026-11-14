@@ -1,13 +1,12 @@
 # Starts RockServer on the host and serves the administrator SPA through a disposable Caddy container.
-# Prerequisites: host PostgreSQL (DATABASE_URL in .env), admin bootstrap, ONNX assets for run-rockserver-local.ps1,
-# Docker Desktop for Caddy, and pnpm for the web bundle when web/dist is missing.
+# Prerequisites: host PostgreSQL (DATABASE_URL in .env), admin bootstrap, Docker Desktop for Caddy,
+# and pnpm for the web bundle when web/dist is missing.
 param(
     [int]$AdminUiPort = 3080
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$assetsRoot = 'C:\Users\alex\Documents\Codex\2026-08-17\referenced-chatgpt-conversation-this-is-an\work\e5-assets'
 $envFile = Join-Path $projectRoot '.env'
 $caddyImage = 'caddy:2.10.0-alpine'
 $caddyfile = Join-Path $projectRoot 'deploy\Caddyfile.dev-host'
@@ -62,18 +61,6 @@ if ([string]::IsNullOrWhiteSpace($env:ROCKSERVER_TRUSTED_PROXY_TOKEN)) {
 }
 if ($env:ROCKSERVER_TRUSTED_PROXY_TOKEN.Trim().Length -lt 32) { throw 'ROCKSERVER_TRUSTED_PROXY_TOKEN must contain at least 32 characters.' }
 
-$model = Join-Path $assetsRoot 'model.onnx'
-$tokenizer = Join-Path $assetsRoot 'tokenizer.json'
-$runtime = Get-ChildItem -LiteralPath (Join-Path $assetsRoot 'ort') -Recurse -Filter 'onnxruntime.dll' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
-if (-not (Test-Path -LiteralPath $model) -or -not (Test-Path -LiteralPath $tokenizer) -or -not $runtime) {
-    throw 'Local E5/ONNX assets are missing. Run the model setup once before starting the server.'
-}
-
-$env:ROCKSERVER_SEMANTIC_PROVIDER = 'onnx-e5-local'
-$env:ROCKSERVER_ONNX_MODEL_PATH = $model
-$env:ROCKSERVER_ONNX_TOKENIZER_PATH = $tokenizer
-$env:ORT_DYLIB_PATH = $runtime
-
 $bindAddress = $env:ROCKSERVER_BIND_ADDR
 if ([string]::IsNullOrWhiteSpace($bindAddress)) {
     $bindAddress = '0.0.0.0:3000'
@@ -108,7 +95,7 @@ Set-Location -LiteralPath $projectRoot
 
 Write-Host "Starting RockServer at $bindAddress (API backend for Caddy) ..."
 $rockserver = Start-Process -FilePath 'cargo' `
-    -ArgumentList @('run', '--features', 'onnx-local', '--bin', 'rockserver') `
+    -ArgumentList @('run', '--bin', 'rockserver') `
     -WorkingDirectory $projectRoot `
     -PassThru `
     -NoNewWindow

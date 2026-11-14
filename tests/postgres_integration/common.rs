@@ -185,7 +185,7 @@ impl EmbedderService for FakeEmbedderService {
     fn provenance(&self) -> Option<EmbeddingProvenance> {
         Some(EmbeddingProvenance {
             model: EMBEDDINGS_MODEL.to_owned(),
-            version: "onnx-v1".to_owned(),
+            version: "v1".to_owned(),
             dimension: EMBEDDINGS_DIMENSION,
         })
     }
@@ -197,7 +197,7 @@ impl EmbedderService for FakeEmbedderService {
     async fn embed_query(&self, _text: &str) -> Result<Embedding, EmbeddingProviderError> {
         Ok(Embedding::new(
             EMBEDDINGS_MODEL,
-            "onnx-v1",
+            "v1",
             EMBEDDINGS_DIMENSION,
             Self::vector_for("Alpha Query"),
         )
@@ -236,7 +236,7 @@ impl EmbedderService for FakeEmbedderService {
             .map(|station| {
                 Embedding::new(
                     EMBEDDINGS_MODEL,
-                    "onnx-v1",
+                    "v1",
                     EMBEDDINGS_DIMENSION,
                     Self::vector_for(&station.name),
                 )

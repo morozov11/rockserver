@@ -92,3 +92,115 @@ fn staging_cleanup_is_preview_first_and_exact_target_only() {
     assert!(remote.contains("REVOKE DEVICE $id"));
     assert!(remote.contains("REVOKE CREDENTIAL $id"));
 }
+
+/// Ensures the deployment bundle does not package or require legacy ONNX assets.
+#[test]
+fn deploy_bundle_does_not_contain_onnx_assets() {
+    let launcher = std::fs::read_to_string(format!(
+        "{}/deploy/ops-001-d.ps1",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("deployment launcher must be present");
+    let remote = std::fs::read_to_string(format!(
+        "{}/deploy/remote-ops-001-d.sh",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("remote deployment script must be present");
+
+    assert!(
+        !launcher.contains("onnx-assets"),
+        "deploy launcher must not package onnx-assets"
+    );
+    assert!(
+        !remote.contains("onnx-assets.json"),
+        "remote deploy script must not require onnx-assets.json"
+    );
+    assert!(
+        !remote.contains("download_onnx"),
+        "remote deploy script must not contain download_onnx"
+    );
+    assert!(
+        !std::path::Path::new(&format!(
+            "{}/deploy/onnx-assets.lock.json",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .exists(),
+        "onnx-assets.lock.json must be deleted"
+    );
+}
+
+/// Ensures the owner.env allowlist rejects legacy ONNX runtime environment variables.
+#[test]
+fn owner_env_allowlist_rejects_onnx_variables() {
+    let remote = std::fs::read_to_string(format!(
+        "{}/deploy/remote-ops-001-d.sh",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("remote deployment script must be present");
+    let psm1 = std::fs::read_to_string(format!(
+        "{}/deploy/ops-001-d.psm1",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("deploy module must be present");
+
+    assert!(
+        !remote.contains("ROCKSERVER_ONNX"),
+        "remote script allowlist must not allow ROCKSERVER_ONNX variables"
+    );
+    assert!(
+        !remote.contains("ROCKSERVER_SEMANTIC_PROVIDER"),
+        "remote script allowlist must not allow ROCKSERVER_SEMANTIC_PROVIDER"
+    );
+    assert!(
+        !remote.contains("ORT_DYLIB_PATH"),
+        "remote script allowlist must not allow ORT_DYLIB_PATH"
+    );
+    assert!(
+        !psm1.contains("ROCKSERVER_ONNX"),
+        "deploy module must not configure ROCKSERVER_ONNX variables"
+    );
+    assert!(
+        !psm1.contains("ROCKSERVER_SEMANTIC_PROVIDER"),
+        "deploy module must not configure ROCKSERVER_SEMANTIC_PROVIDER"
+    );
+    assert!(
+        !psm1.contains("ORT_DYLIB_PATH"),
+        "deploy module must not configure ORT_DYLIB_PATH"
+    );
+}
+
+/// Ensures production Compose configurations omit legacy embedding backfill and ONNX runtime mounts.
+#[test]
+fn compose_omits_embedding_backfill_and_onnx() {
+    let compose = std::fs::read_to_string(format!(
+        "{}/deploy/compose.yaml",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("compose.yaml must be present");
+    let compose_local = std::fs::read_to_string(format!(
+        "{}/deploy/compose.local.yaml",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("compose.local.yaml must be present");
+
+    assert!(
+        !compose.contains("embedding_backfill:"),
+        "compose.yaml must not contain embedding_backfill service"
+    );
+    assert!(
+        !compose.contains("ROCKSERVER_ONNX_"),
+        "compose.yaml must not reference ROCKSERVER_ONNX variables"
+    );
+    assert!(
+        !compose.contains("ORT_DYLIB_PATH"),
+        "compose.yaml must not reference ORT_DYLIB_PATH"
+    );
+    assert!(
+        !compose.contains("ROCKSERVER_SEMANTIC_PROVIDER"),
+        "compose.yaml must not reference ROCKSERVER_SEMANTIC_PROVIDER"
+    );
+    assert!(
+        !compose_local.contains("ROCKSERVER_SEMANTIC_PROVIDER"),
+        "compose.local.yaml must not reference ROCKSERVER_SEMANTIC_PROVIDER"
+    );
+}

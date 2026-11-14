@@ -1,6 +1,6 @@
 //! Semantic-mode helpers of the E0 evaluator: measurement metrics, the
 //! pinned E0 baselines with the regression assertion, table-fill helpers for
-//! the gRPC-embedder and local-ONNX modes, and the ANN-vs-exact recall and
+//! the gRPC-embedder mode, and the ANN-vs-exact recall and
 //! EXPLAIN evidence collection.
 
 use std::collections::BTreeSet;
@@ -14,10 +14,6 @@ use rockserver::persistence::{
     EMBEDDINGS_DIMENSION, EMBEDDINGS_MODEL, EMBEDDINGS_VERSION, EmbeddingVersionStore,
     MAX_BATCH_STATIONS,
 };
-#[cfg(feature = "onnx-local")]
-use rockserver::persistence::{WrittenStationEmbedding, station_fields_hash};
-#[cfg(feature = "onnx-local")]
-use sqlx::Row as _;
 
 use super::e0_full_catalog::E0Fixture;
 
@@ -259,83 +255,6 @@ pub(super) async fn e0_embedder_fill(database_url: &str) -> (Arc<dyn EmbeddingPr
     (
         Arc::new(ServiceEmbeddingProvider::new(client)) as Arc<dyn EmbeddingProvider>,
         label,
-    )
-}
-
-/// Fills the versioned table from the local ONNX model (bit-identical to the
-/// service) so both semantic modes share one storage path.
-#[cfg(feature = "onnx-local")]
-pub(super) async fn e0_onnx_fill(database_url: &str) -> (Arc<dyn EmbeddingProvider>, String) {
-    use rockserver::providers::onnx_e5::{OnnxE5Config, OnnxE5EmbeddingProvider};
-
-    let config = OnnxE5Config::from_env().expect("local ONNX assets configured");
-    let provider = Arc::new(OnnxE5EmbeddingProvider::load(&config).expect("local E5 model"));
-    let mut store = EmbeddingVersionStore::connect(database_url)
-        .await
-        .expect("versioned embedding store");
-    store
-        .acquire_advisory_lock(EMBEDDINGS_VERSION)
-        .await
-        .expect("backfill lock");
-    store
-        .ensure_table(EMBEDDINGS_VERSION, EMBEDDINGS_DIMENSION)
-        .await
-        .expect("versioned table");
-    let pool = PgPool::connect(database_url)
-        .await
-        .expect("station read pool");
-    let rows = sqlx::query(
-        "SELECT id, name, tags, language, country_code, searchable_text \
-         FROM stations WHERE retired_at IS NULL ORDER BY id",
-    )
-    .fetch_all(&pool)
-    .await
-    .expect("station rows");
-    assert_eq!(rows.len(), 16_825);
-    let started = Instant::now();
-    let mut batch = Vec::with_capacity(500);
-    for row in &rows {
-        let name: String = row.get("name");
-        let tags: Vec<String> = row.get("tags");
-        let language: Option<String> = row.get("language");
-        let country_code: Option<String> = row.get("country_code");
-        let text: String = row.get("searchable_text");
-        let embedding = provider
-            .embed_document(&text)
-            .await
-            .expect("station embedding");
-        batch.push(WrittenStationEmbedding {
-            station_id: row.get("id"),
-            fields_hash: station_fields_hash(
-                &name,
-                &tags,
-                language.as_deref(),
-                country_code.as_deref(),
-            ),
-            values: embedding.values().to_vec(),
-        });
-        if batch.len() == 500 {
-            store
-                .write_embeddings(EMBEDDINGS_VERSION, &batch)
-                .await
-                .expect("persist station embeddings");
-            batch.clear();
-        }
-    }
-    if !batch.is_empty() {
-        store
-            .write_embeddings(EMBEDDINGS_VERSION, &batch)
-            .await
-            .expect("persist station embeddings");
-    }
-    println!(
-        "e0 onnx backfill embedded 16825 stations in {:.0}s",
-        started.elapsed().as_secs_f64()
-    );
-    pool.close().await;
-    (
-        provider as Arc<dyn EmbeddingProvider>,
-        "onnx-e5-local".to_owned(),
     )
 }
 

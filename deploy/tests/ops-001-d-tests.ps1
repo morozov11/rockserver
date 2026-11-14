@@ -32,15 +32,12 @@ try {
 
     $catalog = [pscustomobject]@{ Version = 'v1-test'; Count = 41; Sha256 = ('a' * 64) }
     $ownerPath = Join-Path $temp 'owner.env'
-    Write-Ops001DOwnerEnvironmentFile -Path $ownerPath -Domain 'api.example.test' -Catalog $catalog -Yandex $env -OnnxEnabled $false
+    Write-Ops001DOwnerEnvironmentFile -Path $ownerPath -Domain 'api.example.test' -Catalog $catalog -Yandex $env
     $ownerLines = [IO.File]::ReadAllLines($ownerPath)
     if ($ownerLines.Count -ne 9 -or $ownerLines[0] -ne 'ROCKSERVER_DOMAIN=api.example.test' -or $ownerLines[1] -ne 'OPS001D_CATALOG_VERSION=v1-test' -or $ownerLines[2] -ne 'OPS001D_CATALOG_COUNT=41' -or $ownerLines[3] -ne ('OPS001D_CATALOG_SHA256=' + ('a' * 64)) -or $ownerLines -notcontains 'YANDEX_HOME_CLIENTID=home-client' -or $ownerLines -notcontains 'YANDEX_HOME_SECRET=home-secret') { throw 'owner.env entries were not serialized as distinct correct lines' }
-    if (($ownerLines -join "`n") -match 'UNRELATED_SECRET|nope') { throw 'owner.env included a non-allowlisted value' }
+    if (($ownerLines -join "`n") -match 'UNRELATED_SECRET|nope|ONNX|ORT_') { throw 'owner.env included a non-allowlisted or ONNX value' }
     $ownerBytes = [IO.File]::ReadAllBytes($ownerPath)
     if ($ownerBytes -contains [byte]13) { throw 'owner.env must use Linux LF line endings for remote shell parsing' }
-    Write-Ops001DOwnerEnvironmentFile -Path $ownerPath -Domain 'api.example.test' -Catalog $catalog -Yandex $env -OnnxEnabled $true
-    $ownerText = [IO.File]::ReadAllText($ownerPath)
-    if ($ownerText -notmatch 'ROCKSERVER_ONNX_ASSET_DIR=/opt/rockserver/assets/onnx' -or $ownerText -match "[`r`0]") { throw 'ONNX owner.env entries are not safe for remote parsing' }
 
     $commit = '0123456789012345678901234567890123456789'
     $imageId = 'sha256:' + ('a' * 64)
@@ -60,10 +57,6 @@ try {
     if ($launcherScript -notmatch 'StdinNull=yes' -or $launcherScript -notmatch 'ServerAliveCountMax=3') { throw 'staging SSH is not protected from an unbounded stdin wait' }
     if ($launcherScript -notmatch '\$nonInteractiveScpOptions' -or $launcherScript -match '& scp -i \$key @nonInteractiveSshOptions' -or $launcherScript -match '\$nonInteractiveScpOptions = @\([^\r\n]*StdinNull=yes') { throw 'SCP has incompatible SSH stdin options' }
 
-    '{"enabled":true,"assetDirectory":"/opt/rockserver/assets/onnx","assets":[{"name":"model.onnx","url":"REQUIRED_OFFICIAL_HTTPS_URL","sha256":"REQUIRED_64_HEX_SHA256"}]}' | Set-Content "$temp/onnx.json"
-    Assert-Throws { Test-Ops001DOnnxManifest "$temp/onnx.json" | Out-Null } 'incomplete ONNX lock was accepted'
-    $onnxLock = Test-Ops001DOnnxManifest "$root/deploy/onnx-assets.lock.json"
-    if (-not $onnxLock.enabled -or @($onnxLock.assets).Count -ne 3) { throw 'committed automatic ONNX lock is invalid' }
     $catalogActual = Get-Ops001DFullCatalogMetadata "$root/release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.manifest.json" "$root/release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.sqlite"
     $catalogAgain = Get-Ops001DFullCatalogMetadata "$root/release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.manifest.json" "$root/release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.sqlite"
     if ($catalogActual.Count -lt 16000 -or $catalogActual.Version -ne $catalogAgain.Version -or $catalogActual.Sha256 -ne $catalogAgain.Sha256) { throw 'pinned complete catalog seed input is not stable' }
@@ -84,43 +77,30 @@ try {
     if ($remote -notmatch 'transferred image artifact checksum mismatch' -or $remote -notmatch 'revision label binds that verified artifact to commit' -or $remote -match 'loaded image ID does not match') { throw 'cross-engine image artifact verification is not portable' }
     if ($remote -notmatch 'Accept the former five-argument form' -or $remote -notmatch 'deploy requires stage, image, commit, and artifact hash') { throw 'operator-script upgrade compatibility is missing' }
     if ($remote -notmatch 'ROCKSERVER_IMAGE="\$image".*\$compose config' -or $remote -notmatch 'ROCKSERVER_IMAGE="\$image".*\$compose up') { throw 'Compose interpolation environment is not preserved for deployment commands' }
-    if ($remote -notmatch 'os\.chmod\(path, 0o755 if name == .libonnxruntime\.so. else 0o644\)') { throw 'ONNX runtime executable permissions are not repaired after download' }
-    if ($remote -notmatch 'os\.chmod\(root, 0o755\)') { throw 'ONNX asset directory is not traversable by the container user' }
-    if (($remote -notmatch 'tarfile\.open') -or ($remote -notmatch 'for _ in range\(8\)') -or ($remote -notmatch 'member\.issym\(\)') -or ($remote -notmatch 'member\.islnk\(\)')) { throw 'ONNX runtime symlink archive extraction is not safe' }
-    if ($remote -notmatch 'ensure_low_memory_swap' -or $remote -notmatch 'fallocate -l 2G /swapfile' -or $remote -notmatch '/swapfile none swap sw 0 0') { throw 'low-memory ONNX swap provisioning is missing' }
+    if ($remote -match 'download_onnx' -or $remote -match 'onnx-assets\.json') { throw 'ONNX download function or asset reference still present in remote operator script' }
+    if ($launcher -match 'onnx-assets' -or $launcher -match 'Test-Ops001DOnnxManifest') { throw 'ONNX asset references still present in launcher script' }
+    if ($remote -notmatch 'ensure_low_memory_swap' -or $remote -notmatch 'fallocate -l 2G /swapfile' -or $remote -notmatch '/swapfile none swap sw 0 0') { throw 'low-memory swap provisioning is missing' }
     if ($remote -notmatch 'nohup.*deploy-worker' -or $remote -notmatch 'write_deploy_status.*running' -or $remote -notmatch 'write_deploy_status.*succeeded' -or $remote -notmatch 'write_deploy_status.*failed' -or $remote -notmatch 'reattached=true') { throw 'remote deploy worker is not resilient to a lost SSH session' }
     if ($remote -notmatch 'Activate the validated operator script before starting the worker' -or $remote -notmatch 'install -m 0750.*remote-ops-001-d\.sh.*release_root/remote-ops-001-d\.sh') { throw 'normal deploy does not activate its operator script before starting the worker' }
     if ($remote -notmatch 'status \*' -or $launcher -notmatch 'statusCommand' -or $launcher -notmatch 'connection-retrying' -or $launcher -notmatch 'AddMinutes\(90\)') { throw 'launcher cannot reconnect to a detached remote deploy worker' }
-    if ($remote -notmatch 'catalog_seed_is_current' -or $remote -notmatch 'catalog seed skipped' -or $remote -notmatch 'OPS001D_CATALOG_SHA256' -or $remote -notmatch 'station_embeddings') { throw 'unchanged full catalog cannot skip redundant ONNX backfill' }
-    $skipCheck = [regex]::Match($remote, '(?s)catalog_seed_is_current\(\) \{(?<body>.*?)\n\}').Groups['body'].Value
-    foreach ($predicate in @(
-        'stations WHERE retired_at IS NULL',
-        'JOIN stations AS s ON s.id = e.station_id',
-        's.retired_at IS NULL',
-        "e.model = 'intfloat/multilingual-e5-small'",
-        "e.version = 'onnx-v1'",
-        'e.dimension = 384',
-        "e.source_text_sha256 = encode(sha256(convert_to(s.searchable_text, 'UTF8')), 'hex')"
-    )) {
-        if (-not $skipCheck.Contains($predicate)) { throw "catalog skip check is missing $predicate" }
-    }
+    if ($remote -notmatch 'catalog_seed_is_current' -or $remote -notmatch 'catalog seed skipped' -or $remote -notmatch 'OPS001D_CATALOG_SHA256' -or $remote -notmatch 'SELECT count\(\*\) FROM stations WHERE retired_at IS NULL') { throw 'unchanged full catalog cannot skip redundant seed' }
     if ($remote -match 'pg_dump --format=custom' -or $remote -match 'prune_backups') { throw 'deploy-time pg_dump must stay disabled by operator decision' }
     if ($remote -notmatch "backup_hash='-'") { throw 'deploy summary backup continuity marker is missing' }
     $seedAt = $remote.IndexOf('run --rm catalog_seed')
-    $backfillAt = $remote.IndexOf('run --rm embedding_backfill')
     $readyAt = $remote.IndexOf('/health/ready')
-    if ($seedAt -lt 0 -or $backfillAt -le $seedAt -or $readyAt -le $backfillAt -or $remote -match 'fixture') { throw 'seed/backfill/readiness fail-closed ordering changed' }
-    if ($remote -notmatch 'applies embedded migrations' -or $remote -notmatch 'exact HTTPS URLs and SHA-256' -or $launcher -notmatch 'onnx-assets.lock.json') { throw 'migration or automatic ONNX safeguards are missing' }
+    if ($seedAt -lt 0 -or $readyAt -le $seedAt -or $remote -match 'run --rm embedding_backfill' -or $remote -match 'fixture') { throw 'seed/readiness fail-closed ordering changed or backfill remains' }
+    if ($remote -notmatch 'applies embedded migrations') { throw 'migration safeguards are missing' }
     if ($remote -notmatch '\[\^\[:cntrl:\]\]\*\$') { throw 'owner.env control-character validation is missing' }
-    if ($compose -notmatch 'catalog_seed:' -or $compose -notmatch 'embedding_backfill:' -or $compose -notmatch 'import_full_catalog' -or $compose -notmatch 'backfill_embeddings' -or $compose -notmatch 'ROCKSERVER_LOG_DIR: /var/log/rockserver' -or $compose -notmatch 'ROCKSERVER_SEMANTIC_PROVIDER: onnx-e5-local' -or $compose -notmatch 'ORT_DYLIB_PATH') { throw 'separate catalog import and ONNX backfill are not wired' }
+    if ($compose -notmatch 'catalog_seed:' -or $compose -notmatch 'import_full_catalog' -or $compose -notmatch 'ROCKSERVER_LOG_DIR: /var/log/rockserver') { throw 'catalog import is not wired' }
+    if ($compose -match 'embedding_backfill:' -or $compose -match 'ROCKSERVER_SEMANTIC_PROVIDER' -or $compose -match 'ORT_DYLIB_PATH' -or $compose -match 'ROCKSERVER_ONNX_') { throw 'compose still contains legacy ONNX or backfill configuration' }
     if ($compose -notmatch 'ROCKSERVER_LOG_RETENTION_DAYS: \$\{ROCKSERVER_LOG_RETENTION_DAYS:-14\}') { throw 'RockServer log retention is not configured for production' }
     $ownerValidation = (($remote -split "`n" | Where-Object { $_ -match 'grep -Ev' }) -join "`n")
     if ($compose -notmatch 'YANDEX_HOME_CLIENTID: \$\{YANDEX_HOME_CLIENTID:-\}' -or $compose -notmatch 'YANDEX_HOME_SECRET: \$\{YANDEX_HOME_SECRET:-\}' -or $ownerValidation -notmatch 'YANDEX_HOME_CLIENTID' -or $ownerValidation -notmatch 'YANDEX_HOME_SECRET') { throw 'Yandex Home OAuth environment is not deployed safely' }
-    if ($compose -notmatch 'ROCKSERVER_ONNX_INTRA_THREADS: \$\{ROCKSERVER_ONNX_INTRA_THREADS:-2\}') { throw 'ONNX CPU thread default must be a positive integer' }
+    if ($ownerValidation -match 'ONNX|ORT_') { throw 'owner.env allowlist still accepts ONNX variables' }
     if ($productionCompose -notmatch '/home/rockserver/logs:/var/log/rockserver' -or $remote -notmatch 'host_log_dir="/home/rockserver/logs"' -or $remote -notmatch 'ensure_host_log_dir') { throw 'persistent host log directory is not wired for production' }
     if ($compose -notmatch 'ROCKSERVER_STATION_ICON_DIR: /var/lib/rockserver/station-icons' -or $productionCompose -notmatch '/home/rockserver/station-icons:/var/lib/rockserver/station-icons' -or $remote -notmatch 'host_station_icon_dir="/home/rockserver/station-icons"' -or $remote -notmatch 'ensure_host_station_icon_dir') { throw 'persistent station-icon directory is not wired for production' }
 
-    Write-Host 'OPS-001-D local tests passed: registry-free artifact identity, password-free inventory, secret-safe env/summary, TTY/sudo construction, seed, and automatic pinned ONNX safeguards.'
+    Write-Host 'OPS-001-D local tests passed: registry-free artifact identity, password-free inventory, secret-safe env/summary, TTY/sudo construction, and seed safeguards.'
 } finally {
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
 }

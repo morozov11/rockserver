@@ -41,7 +41,7 @@ async fn lifecycle_fills_pending_stations_and_enables_vector_search() {
         gateway.provenance().unwrap(),
         EmbeddingProvenance {
             model: EMBEDDINGS_MODEL.to_owned(),
-            version: "onnx-v1".to_owned(),
+            version: "v1".to_owned(),
             dimension: EMBEDDINGS_DIMENSION,
         }
     );

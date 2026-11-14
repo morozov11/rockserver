@@ -72,20 +72,19 @@ write_or_keep_secret() {
 }
 install_owner_files() {
   local stage="$1" clean
-  for file in compose.yaml compose.production.yaml Caddyfile.production.template owner.env onnx-assets.json; do
+  for file in compose.yaml compose.production.yaml Caddyfile.production.template owner.env; do
     [ -f "$stage/$file" ] && [ ! -L "$stage/$file" ] || fail "deployment bundle is missing $file"
   done
-  if grep -Ev '^(ROCKSERVER_DOMAIN|OPS001D_CATALOG_VERSION|OPS001D_CATALOG_COUNT|OPS001D_CATALOG_SHA256|ROCKSERVER_SEMANTIC_PROVIDER|ROCKSERVER_ONNX_ASSET_DIR|ROCKSERVER_ONNX_MODEL_PATH|ROCKSERVER_ONNX_TOKENIZER_PATH|ORT_DYLIB_PATH|YANDEX_AI_API_KEY|YANDEX_FOLDER_ID|YANDEX_LLM_MODEL|YANDEX_LLM_MODEL_VERSION|YANDEX_LLM_TIMEOUT_MS|YANDEX_SPEECHKIT_API_KEY|YANDEX_SPEECHKIT_FOLDER_ID|YANDEX_HOME_CLIENTID|YANDEX_HOME_SECRET)=[^[:cntrl:]]*$' "$stage/owner.env" | grep -q .; then
+  if grep -Ev '^(ROCKSERVER_DOMAIN|OPS001D_CATALOG_VERSION|OPS001D_CATALOG_COUNT|OPS001D_CATALOG_SHA256|YANDEX_AI_API_KEY|YANDEX_FOLDER_ID|YANDEX_LLM_MODEL|YANDEX_LLM_MODEL_VERSION|YANDEX_LLM_TIMEOUT_MS|YANDEX_SPEECHKIT_API_KEY|YANDEX_SPEECHKIT_FOLDER_ID|YANDEX_HOME_CLIENTID|YANDEX_HOME_SECRET)=[^[:cntrl:]]*$' "$stage/owner.env" | grep -q .; then
     fail 'owner.env contains a non-allowlisted or malformed entry'
   fi
   [ "$(wc -l < "$stage/owner.env")" -ge 3 ] || fail 'owner.env entries are not newline-separated'
   install -m 0640 "$stage/compose.yaml" "$release_root/compose.yaml"
   install -m 0640 "$stage/compose.production.yaml" "$release_root/compose.production.yaml"
   install -m 0640 "$stage/Caddyfile.production.template" "$release_root/Caddyfile.production.template"
-  install -m 0600 "$stage/onnx-assets.json" "$release_root/onnx-assets.json"
   touch "$env_file"; chmod 0600 "$env_file"
   clean="$(mktemp "$release_root/.release.env.XXXXXX")"
-  awk -F= '!/^(ROCKSERVER_DOMAIN|OPS001D_CATALOG_VERSION|OPS001D_CATALOG_COUNT|OPS001D_CATALOG_SHA256|ROCKSERVER_SEMANTIC_PROVIDER|ROCKSERVER_ONNX_ASSET_DIR|ROCKSERVER_ONNX_MODEL_PATH|ROCKSERVER_ONNX_TOKENIZER_PATH|ORT_DYLIB_PATH|YANDEX_AI_API_KEY|YANDEX_FOLDER_ID|YANDEX_LLM_MODEL|YANDEX_LLM_MODEL_VERSION|YANDEX_LLM_TIMEOUT_MS|YANDEX_SPEECHKIT_API_KEY|YANDEX_SPEECHKIT_FOLDER_ID|YANDEX_HOME_CLIENTID|YANDEX_HOME_SECRET)=/' "$env_file" > "$clean"
+  awk -F= '!/^(ROCKSERVER_DOMAIN|OPS001D_CATALOG_VERSION|OPS001D_CATALOG_COUNT|OPS001D_CATALOG_SHA256|YANDEX_AI_API_KEY|YANDEX_FOLDER_ID|YANDEX_LLM_MODEL|YANDEX_LLM_MODEL_VERSION|YANDEX_LLM_TIMEOUT_MS|YANDEX_SPEECHKIT_API_KEY|YANDEX_SPEECHKIT_FOLDER_ID|YANDEX_HOME_CLIENTID|YANDEX_HOME_SECRET)=/' "$env_file" > "$clean"
   cat "$stage/owner.env" >> "$clean"
   chmod 0600 "$clean"; mv "$clean" "$env_file"
 }
@@ -95,7 +94,7 @@ bootstrap() {
   [[ "$deploy_user" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || fail 'unsafe deploy user'
   install_docker_if_requested
   ensure_low_memory_swap
-  install -d -m 0750 "$release_root" "$release_root/backups" "$release_root/releases" "$release_root/assets/onnx"
+  install -d -m 0750 "$release_root" "$release_root/backups" "$release_root/releases"
   ensure_host_log_dir
   ensure_host_station_icon_dir
   install_owner_files "$stage"
@@ -151,75 +150,6 @@ validate_caddy_artifact() {
   [[ "$loaded_id" =~ ^sha256:[0-9a-f]{64}$ ]] || fail 'loaded Caddy image ID is invalid'
   [ "$label" = "$commit" ] || fail 'loaded Caddy image revision label does not match the current commit'
 }
-download_onnx() {
-  local manifest="$release_root/onnx-assets.json"
-  [ -f "$manifest" ] || fail 'ONNX manifest is missing'
-  python3 - "$manifest" <<'PY'
-import hashlib, json, os, pathlib, posixpath, subprocess, tarfile, sys
-manifest = json.load(open(sys.argv[1], encoding='utf-8'))
-if not manifest.get('enabled', False):
-    raise SystemExit(0)
-if manifest.get('assetDirectory') != '/opt/rockserver/assets/onnx':
-    raise SystemExit('enabled ONNX manifest has an unsafe asset directory')
-assets = manifest.get('assets', [])
-if not assets:
-    raise SystemExit('enabled ONNX manifest has no assets')
-root = pathlib.Path(manifest['assetDirectory'])
-root.mkdir(parents=True, exist_ok=True)
-# The service runs as UID 10001 inside the container. The host-side bootstrap
-# may leave this bind-mounted directory owned by root, but it must remain
-# traversable by the container user.
-os.chmod(root, 0o755)
-for item in assets:
-    name, url, expected = item.get('name',''), item.get('url',''), item.get('sha256','').lower()
-    archive_member = item.get('archiveMember')
-    if '/' in name or '\\' in name or not url.startswith('https://') or len(expected) != 64 or any(c not in '0123456789abcdef' for c in expected):
-        raise SystemExit('ONNX manifest requires exact HTTPS URLs and SHA-256 values')
-    path = root / name
-    if path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() == expected:
-        os.chmod(path, 0o755 if name == 'libonnxruntime.so' else 0o644)
-        continue
-    temp = path.with_suffix(path.suffix + '.download')
-    subprocess.run(['curl', '--fail', '--location', '--proto', '=https', '--silent', '--show-error', '--output', str(temp), url], check=True)
-    if hashlib.sha256(temp.read_bytes()).hexdigest() != expected:
-        temp.unlink(missing_ok=True)
-        raise SystemExit('ONNX SHA-256 mismatch; refusing asset')
-    if archive_member:
-        expected_member = 'onnxruntime-linux-x64-1.23.2/lib/libonnxruntime.so'
-        if name != 'libonnxruntime.so' or archive_member != expected_member:
-            temp.unlink(missing_ok=True)
-            raise SystemExit('ONNX runtime archive member is invalid')
-        extracted = path.with_suffix(path.suffix + '.partial')
-        with tarfile.open(temp, 'r:gz') as archive:
-            member = archive.getmember(archive_member)
-            for _ in range(8):
-                if not (member.issym() or member.islnk()):
-                    break
-                if posixpath.isabs(member.linkname):
-                    raise SystemExit('ONNX runtime archive member has an unsafe absolute symlink')
-                target = posixpath.normpath(posixpath.join(posixpath.dirname(member.name), member.linkname))
-                if target == '..' or target.startswith('../'):
-                    raise SystemExit('ONNX runtime archive member escapes its archive directory')
-                member = archive.getmember(target)
-            else:
-                raise SystemExit('ONNX runtime archive has too many symlink levels')
-            if not member.isfile():
-                raise SystemExit('ONNX runtime archive member is not a regular file')
-            source = archive.extractfile(member)
-            if source is None:
-                raise SystemExit('ONNX runtime archive member could not be read')
-            with source, open(extracted, 'wb') as output:
-                output.write(source.read())
-        if extracted.stat().st_size == 0:
-            extracted.unlink(missing_ok=True)
-            raise SystemExit('ONNX runtime archive member is empty')
-        temp.unlink(missing_ok=True)
-        os.replace(extracted, path)
-    else:
-        os.replace(temp, path)
-    os.chmod(path, 0o755 if name == 'libonnxruntime.so' else 0o644)
-PY
-}
 catalog_marker_metadata() {
   local version count checksum
   version="$(sed -n 's/^OPS001D_CATALOG_VERSION=//p' "$env_file" | head -n1)"
@@ -244,18 +174,10 @@ catalog_seed_is_current() {
   grep -Fx "catalog_count=$count" "$marker" >/dev/null || return 1
   grep -Fx "catalog_sha256=$checksum" "$marker" >/dev/null || return 1
   actual_counts="$(ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose exec -T postgres sh -c 'psql -Atq -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null <<'SQL'
-SELECT (SELECT count(*) FROM stations WHERE retired_at IS NULL),
-       (SELECT count(*)
-        FROM station_embeddings AS e
-        JOIN stations AS s ON s.id = e.station_id
-        WHERE s.retired_at IS NULL
-          AND e.model = 'intfloat/multilingual-e5-small'
-          AND e.version = 'onnx-v1'
-          AND e.dimension = 384
-          AND e.source_text_sha256 = encode(sha256(convert_to(s.searchable_text, 'UTF8')), 'hex'));
+SELECT count(*) FROM stations WHERE retired_at IS NULL;
 SQL
 )"
-  [ "$actual_counts" = "$count|$count" ]
+  [ "$actual_counts" = "$count" ]
 }
 write_catalog_marker() {
   local metadata version count checksum marker
@@ -278,7 +200,6 @@ deploy_internal() {
   else
     validate_caddy_artifact "$stage" "$caddy_image" "$commit" "$caddy_archive_hash"
   fi
-  download_onnx
   compose="docker compose --project-name rockserver --env-file $env_file --file $release_root/compose.yaml --file $release_root/compose.production.yaml"
   ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose config >/dev/null
   ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose up --detach --wait postgres
@@ -286,14 +207,13 @@ deploy_internal() {
   # afford a full dump on every release, and backups are a separate owner-
   # managed duty. The summary keeps the field only for format continuity.
   backup_hash='-'
-  # Skip completed pinned releases; new releases run import and incremental
-  # backfill as separate fail-closed jobs before readiness is checked.
+  # Skip completed pinned releases; new releases run import
+  # as a separate fail-closed job before readiness is checked.
   if catalog_seed_is_current "$compose" "$image" "$caddy_image"; then
-    printf '%s\n' 'catalog seed skipped: exact pinned catalog and embeddings are already ready'
+    printf '%s\n' 'catalog seed skipped: exact pinned catalog is already ready'
   else
     # The pinned importer first applies embedded migrations, then transactionally activates the full catalog.
     ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose run --rm catalog_seed >/dev/null
-    ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose run --rm embedding_backfill >/dev/null
     write_catalog_marker
   fi
   ROCKSERVER_IMAGE="$image" ROCKSERVER_CADDY_IMAGE="$caddy_image" $compose up --detach --no-build --wait rockserver caddy
@@ -307,7 +227,7 @@ deploy_internal() {
   printf 'deployed commit=%s image_id=%s catalog=%s count=%s readiness=passed\n' "$commit" "$loaded_id" "$catalog_version" "$catalog_count"
 }
 
-# The initial ONNX backfill can take many minutes on a small VPS.  It must not
+# The deployment can take several minutes on a small VPS. It must not
 # be tied to a caller's SSH session: a lost laptop/network connection must not
 # leave a loaded image and seeded database without starting the web service.
 submit_deploy() {

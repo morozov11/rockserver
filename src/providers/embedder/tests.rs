@@ -117,7 +117,7 @@ impl Embedder for FakeEmbedder {
             model: EMBEDDINGS_MODEL.to_owned(),
             model_revision: "test-revision".to_owned(),
             dim: DIM as u32,
-            vector_version: "onnx-v1".to_owned(),
+            vector_version: "v1".to_owned(),
             image_digest: "sha256:test".to_owned(),
         }))
     }
@@ -227,7 +227,7 @@ async fn query_embedding_requires_bearer_token_and_maps_provenance() {
         provenance,
         EmbeddingProvenance {
             model: EMBEDDINGS_MODEL.to_owned(),
-            version: "onnx-v1".to_owned(),
+            version: "v1".to_owned(),
             dimension: DIM,
         }
     );
@@ -364,7 +364,7 @@ impl crate::providers::embedder::EmbedderService for FakeService {
     fn provenance(&self) -> Option<EmbeddingProvenance> {
         Some(EmbeddingProvenance {
             model: EMBEDDINGS_MODEL.to_owned(),
-            version: "onnx-v1".to_owned(),
+            version: "v1".to_owned(),
             dimension: DIM,
         })
     }
@@ -374,7 +374,7 @@ impl crate::providers::embedder::EmbedderService for FakeService {
     }
 
     async fn embed_query(&self, _text: &str) -> Result<Embedding, EmbeddingProviderError> {
-        Ok(Embedding::new(EMBEDDINGS_MODEL, "onnx-v1", DIM, FakeEmbedder::vector()).unwrap())
+        Ok(Embedding::new(EMBEDDINGS_MODEL, "v1", DIM, FakeEmbedder::vector()).unwrap())
     }
 
     async fn embed_stations(
@@ -383,9 +383,8 @@ impl crate::providers::embedder::EmbedderService for FakeService {
     ) -> Result<Vec<Embedding>, EmbeddingProviderError> {
         let mut embeddings = Vec::with_capacity(batch.len());
         for _ in batch {
-            embeddings.push(
-                Embedding::new(EMBEDDINGS_MODEL, "onnx-v1", DIM, FakeEmbedder::vector()).unwrap(),
-            );
+            embeddings
+                .push(Embedding::new(EMBEDDINGS_MODEL, "v1", DIM, FakeEmbedder::vector()).unwrap());
         }
         Ok(embeddings)
     }

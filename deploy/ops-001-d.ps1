@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [ValidateSet('bootstrap', 'deploy')][string]$Action = 'deploy',
     [string]$InventoryPath = '',
@@ -29,8 +29,6 @@ $inventory = Import-PowerShellDataFile -LiteralPath $inventoryFile
 Test-Ops001DInventoryValues -Inventory $inventory | Out-Null
 $catalog = Get-Ops001DFullCatalogMetadata -ManifestPath (Join-Path $repoRoot 'release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.manifest.json') -CatalogPath (Join-Path $repoRoot 'release/mobile-catalog/rockmobile-extended-2026.08.2-mobile.1.sqlite')
 $yandex = Get-Ops001DAllowedYandexEnvironment -Path (Join-Path $repoRoot '.env')
-$onnxLock = Join-Path $PSScriptRoot 'onnx-assets.lock.json'
-$onnx = Test-Ops001DOnnxManifest -Path $onnxLock
 $commit = Get-Ops001DCurrentCommit -RepositoryRoot $repoRoot -AllowDirty:$DryRun
 $image = "rockserver:sha-$commit"
 $caddyImage = "rockserver-caddy:sha-$commit"
@@ -75,8 +73,7 @@ $nonInteractiveScpOptions = @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', 
 New-Item -ItemType Directory -Path $stage | Out-Null
 try {
     Copy-Item (Join-Path $PSScriptRoot 'compose.yaml'), (Join-Path $PSScriptRoot 'compose.production.yaml'), (Join-Path $PSScriptRoot 'Caddyfile.production.template'), (Join-Path $PSScriptRoot 'remote-ops-001-d.sh') -Destination $stage
-    Write-Ops001DOwnerEnvironmentFile -Path (Join-Path $stage 'owner.env') -Domain $inventory.Domain -Catalog $catalog -Yandex $yandex -OnnxEnabled ([bool]$onnx.enabled)
-    Copy-Item $onnxLock (Join-Path $stage 'onnx-assets.json')
+    Write-Ops001DOwnerEnvironmentFile -Path (Join-Path $stage 'owner.env') -Domain $inventory.Domain -Catalog $catalog -Yandex $yandex
 
     $imageId = ''
     $archiveHash = ''
@@ -129,8 +126,7 @@ try {
         (Join-Path $stage 'compose.production.yaml'),
         (Join-Path $stage 'Caddyfile.production.template'),
         (Join-Path $stage 'remote-ops-001-d.sh'),
-        (Join-Path $stage 'owner.env'),
-        (Join-Path $stage 'onnx-assets.json')
+        (Join-Path $stage 'owner.env')
     )
     if ($Action -eq 'deploy') { $uploadFiles += (Join-Path $stage 'rockserver-image.tar'), (Join-Path $stage 'rockserver-caddy-image.tar') }
     & scp -i $key @nonInteractiveScpOptions @uploadFiles "${target}:$remoteStage/"
@@ -145,9 +141,9 @@ try {
             throw 'Remote bootstrap failed.'
         }
     } else {
-        # The VPS immediately acknowledges a detached worker.  The worker is
+        # The VPS immediately acknowledges a detached worker. The worker is
         # independent of this SSH connection, so losing Wi-Fi or closing this
-        # PowerShell window cannot interrupt a long first-run ONNX backfill.
+        # PowerShell window cannot interrupt a deploy or catalog seeding job.
         $remoteCommand = "sudo -n /opt/rockserver/remote-ops-001-d.sh deploy '$remoteStage' '$image' '$caddyImage' '$commit' '$archiveHash' '$caddyArchiveHash'"
         $sshArgs = Get-Ops001DSshCommand -Action deploy -KeyPath $key -Target $target -RemoteCommand $remoteCommand
         $submitOutput = @(& ssh @sshArgs 2>&1)

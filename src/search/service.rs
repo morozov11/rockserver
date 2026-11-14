@@ -13,7 +13,6 @@ use super::{
         DeterministicQueryParser, QueryParser, QueryParserInput, tokenize,
         validate_intent_with_taxonomy,
     },
-    semantic_filters::SemanticLanguageClassifier,
     taxonomy::{GenreTaxonomy, GenreTaxonomySource},
 };
 
@@ -23,7 +22,6 @@ pub struct SearchService {
     repository: Arc<dyn StationRepository + Send + Sync>,
     query_parser: Arc<dyn QueryParser>,
     embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
-    language_classifier: Option<Arc<SemanticLanguageClassifier>>,
     taxonomy_source: Option<Arc<dyn GenreTaxonomySource>>,
 }
 
@@ -34,7 +32,6 @@ impl SearchService {
             repository,
             query_parser: Arc::new(DeterministicQueryParser),
             embedding_provider: None,
-            language_classifier: None,
             taxonomy_source: None,
         }
     }
@@ -47,29 +44,10 @@ impl SearchService {
         query_parser: Arc<dyn QueryParser>,
         embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
     ) -> Self {
-        Self::with_providers_and_language_classifier(
-            repository,
-            query_parser,
-            embedding_provider,
-            None,
-        )
-    }
-
-    /// Creates search with an optional semantic language diagnostic.
-    ///
-    /// The classifier is separate from the station ranking embedding; its suggestion
-    /// cannot become a hard filter without an explicit language request.
-    pub fn with_providers_and_language_classifier(
-        repository: Arc<dyn StationRepository + Send + Sync>,
-        query_parser: Arc<dyn QueryParser>,
-        embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
-        language_classifier: Option<Arc<SemanticLanguageClassifier>>,
-    ) -> Self {
         Self {
             repository,
             query_parser,
             embedding_provider,
-            language_classifier,
             taxonomy_source: None,
         }
     }
@@ -277,13 +255,6 @@ impl SearchService {
 
         let request_terms = tokenize(&input.query);
         let explicit_language = explicit_language_code(&request_terms).map(str::to_owned);
-        if let (Some(requested), Some(classifier), Some(embedding)) =
-            (&explicit_language, &self.language_classifier, &embedding)
-        {
-            let suggestion = classifier.classify(embedding);
-            tracing::debug!(requested_language = %requested, suggestion = ?suggestion,
-                "explicit language classifier diagnostic");
-        }
         intent.language = explicit_language;
 
         let query = SearchQuery::from_intent(input.query, input.locale, intent);

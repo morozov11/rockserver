@@ -42,9 +42,6 @@ mod search_ann;
 #[path = "postgres_integration/search_taxonomy.rs"]
 mod search_taxonomy;
 
-#[path = "postgres_integration/embedding_backfill.rs"]
-mod embedding_backfill;
-
 #[path = "postgres_integration/embedding_lifecycle.rs"]
 mod embedding_lifecycle;
 

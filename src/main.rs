@@ -8,14 +8,11 @@ use rockserver::{
         repository_from_env,
     },
     providers::embedder::{EmbedderClient, EmbedderConfig, EmbedderGateway, EmbedderLifecycle},
+    providers::yandex_home::YandexHomeClient,
     providers::yandex_llm::YandexLlmProvider,
     providers::yandex_speechkit::YandexSpeechKitRecognizer,
     providers::yandex_speechkit_streaming::YandexSpeechKitStreamingRecognizer,
-    providers::{embedding_provider_from_env, yandex_home::YandexHomeClient},
-    search::{
-        DeterministicQueryParser, LlmProvider, LlmQueryParser, QueryParser, SearchService,
-        SemanticLanguageClassifier, semantic_language_filters_enabled,
-    },
+    search::{DeterministicQueryParser, LlmProvider, LlmQueryParser, QueryParser, SearchService},
     serve, shutdown_signal, telemetry,
     voice::{CommandInterpreter, DeterministicCommandInterpreter, LlmCommandInterpreter},
 };
@@ -34,20 +31,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let account_store = PostgresAccountStore::connect(&database_url).await?;
     rockserver::http::recover_station_icon_imports(&account_store).await;
     let admin_store = PostgresAdminStore::connect(&database_url).await?;
-    // The embedding service client takes precedence over the legacy local
-    // providers (onnx-local remains available until roadmap stage E3, and the
-    // old release-readiness startup gate is superseded by the E2 lifecycle:
-    // the process starts in the no-vectors mode and the background task
-    // enables the vector branch after Info and schema verification).
+    // The embedding service client configures vector search (without an address,
+    // the process starts in the no-vectors mode; when configured, the background
+    // task enables the vector branch after Info and schema verification).
     let embedder_config = EmbedderConfig::from_env()?;
     let (embedding_provider, embedder_lifecycle) = match embedder_config {
         Some(embedder) => {
-            if env::var("ROCKSERVER_SEMANTIC_PROVIDER").is_ok_and(|value| !value.trim().is_empty())
-            {
-                tracing::warn!(
-                    "ROCKSERVER_SEMANTIC_PROVIDER is ignored while ROCKSERVER_EMBEDDER_ADDR is set"
-                );
-            }
             let service = Arc::new(EmbedderClient::lazy(embedder)?);
             let gateway = Arc::new(EmbedderGateway::disabled());
             let lifecycle = EmbedderLifecycle::new(
@@ -60,30 +49,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 Some(lifecycle),
             )
         }
-        None => (embedding_provider_from_env()?, None),
-    };
-    let language_classifier = match (&embedding_provider, semantic_language_filters_enabled()?) {
-        (Some(provider), true) if provider.supports_semantic_intent_filters() => {
-            match SemanticLanguageClassifier::load(provider.clone()).await {
-                Ok(classifier) => {
-                    tracing::info!("semantic language diagnostics enabled");
-                    Some(Arc::new(classifier))
-                }
-                Err(error) => {
-                    tracing::warn!(%error, "semantic language diagnostics unavailable; continuing without them");
-                    None
-                }
-            }
-        }
-        (_, false) => {
-            tracing::info!("semantic language diagnostics disabled by configuration");
-            None
-        }
-        (Some(_), true) => {
-            tracing::info!("semantic language diagnostics require a semantic embedding provider");
-            None
-        }
-        (None, true) => None,
+        None => (None, None),
     };
     let structured_provider = YandexLlmProvider::optional_from_env()?
         .map(|provider| Arc::new(provider) as Arc<dyn LlmProvider>);
@@ -96,12 +62,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Some(provider) => Arc::new(LlmCommandInterpreter::new(provider)),
         None => Arc::new(DeterministicCommandInterpreter),
     };
-    let mut search_service = SearchService::with_providers_and_language_classifier(
-        repository,
-        query_parser,
-        embedding_provider,
-        language_classifier,
-    );
+    let mut search_service =
+        SearchService::with_providers(repository, query_parser, embedding_provider);
     if has_structured_provider {
         let taxonomy_pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(2)

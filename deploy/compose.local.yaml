@@ -2,7 +2,6 @@ services:
   rockserver:
     environment:
       ROCKSERVER_LOCAL_ADMIN_ORIGIN: ${ROCKSERVER_LOCAL_ADMIN_ORIGIN:-http://localhost}
-      ROCKSERVER_SEMANTIC_PROVIDER: ${ROCKSERVER_SEMANTIC_PROVIDER:-deterministic-dev}
   caddy:
     build:
       context: ..

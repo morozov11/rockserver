@@ -5,14 +5,12 @@
 //! PostgreSQL search path on the checksum-pinned 16 825-station snapshot.
 //! Reports Top-1/3/5, Recall@5/10, MRR, empty answers and latency per language
 //! and category, and asserts a second pass returns identical ordering
-//! (determinism). Semantic modes fill `station_embeddings_v1`: locally with
-//! ONNX (`ROCKSERVER_SEARCH_EVAL_WITH_ONNX=1`) or through the gRPC embedder
-//! (`ROCKSERVER_SEARCH_EVAL_WITH_EMBEDDER=1`); both must reproduce the E0
-//! semantic baseline (the service is bit-identical to `onnx-v1`) and also
-//! report ANN recall versus exact kNN plus an EXPLAIN proof of the HNSW scan.
-//! The regular test validates labels against the pinned release without a
-//! database; the ignored evaluation additionally requires an explicitly
-//! disposable PostgreSQL.
+//! (determinism). Semantic mode fills `station_embeddings_v1` through the gRPC embedder
+//! (`ROCKSERVER_SEARCH_EVAL_WITH_EMBEDDER=1`); it must reproduce the E0
+//! semantic baseline and also report ANN recall versus exact kNN plus an
+//! EXPLAIN proof of the HNSW scan. The regular test validates labels against
+//! the pinned release without a database; the ignored evaluation additionally
+//! requires an explicitly disposable PostgreSQL.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -36,7 +34,6 @@ use super::e0_semantic::{self, Metrics};
 
 const FIXTURE: &str = include_str!("../fixtures/search_eval_e0_full_catalog.json");
 const DISPOSABLE_ENV: &str = "ROCKSERVER_SEARCH_EVAL_DISPOSABLE";
-const ONNX_ENV: &str = "ROCKSERVER_SEARCH_EVAL_WITH_ONNX";
 const EMBEDDER_ENV: &str = "ROCKSERVER_SEARCH_EVAL_WITH_EMBEDDER";
 const CATALOG_SHA256: &str = "ad469d405f177d7e476cf9b3d9985497d0e2c6132ac0f3ce14485f4eab402073";
 /// The `rockcast/src/voice/rank.rs` regression cases must stay in the ru set (RC2 gate).
@@ -180,17 +177,7 @@ async fn e0_evaluates_full_catalog_through_postgres_search() {
     );
     let database_url = env::var("TEST_DATABASE_URL").expect("set TEST_DATABASE_URL");
     let (fixture, _station_ids) = validated_fixture().await;
-    let with_onnx = env::var(ONNX_ENV).ok().as_deref() == Some("1");
     let with_embedder = env::var(EMBEDDER_ENV).ok().as_deref() == Some("1");
-    assert!(
-        !with_onnx || !with_embedder,
-        "enable at most one of {ONNX_ENV} and {EMBEDDER_ENV}"
-    );
-    #[cfg(not(feature = "onnx-local"))]
-    assert!(
-        !with_onnx,
-        "enable the onnx-local Cargo feature for {ONNX_ENV}=1"
-    );
 
     let repository = PostgresStationRepository::connect(&database_url)
         .await
@@ -229,21 +216,14 @@ async fn e0_evaluates_full_catalog_through_postgres_search() {
             .expect("count active stations");
     assert_eq!(active_count, 16_825);
 
-    // Provider selection: embedder gRPC client, local ONNX (bit-identical
-    // vectors), or metadata-only. Semantic modes fill station_embeddings_v1.
+    // Provider selection: embedder gRPC client or metadata-only.
+    // The semantic mode fills station_embeddings_v1.
     let mut provenance = "none (metadata-only)".to_owned();
     let mut embedding_provider: Option<Arc<dyn EmbeddingProvider>> = None;
     if with_embedder {
         let (provider, label) = e0_semantic::e0_embedder_fill(&database_url).await;
         embedding_provider = Some(provider);
         provenance = label;
-    } else if with_onnx {
-        #[cfg(feature = "onnx-local")]
-        {
-            let (provider, label) = e0_semantic::e0_onnx_fill(&database_url).await;
-            embedding_provider = Some(provider);
-            provenance = label;
-        }
     }
     let semantic_enabled = embedding_provider.is_some();
     if semantic_enabled {

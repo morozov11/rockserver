@@ -9,8 +9,18 @@ use crate::search::{
     SearchQuery, Station, StationHealth, StationRepository,
 };
 
-use super::embedding_postgres::vector_literal;
 use super::embedding_version::{EMBEDDINGS_DIMENSION, EMBEDDINGS_MODEL};
+
+/// Formats already-validated finite values as a pgvector input literal.
+fn vector_literal(embedding: &Embedding) -> String {
+    let values = embedding
+        .values()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("[{values}]")
+}
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 

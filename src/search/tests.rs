@@ -12,7 +12,7 @@ use super::{
     DeterministicQueryParser, Embedding, EmbeddingProvider, EmbeddingProviderError,
     InMemoryStationRepository, QueryIntent, QueryParser, QueryParserError, QueryParserInput,
     RankedStation, RepositoryError, SearchAction, SearchConstraints, SearchQuery, SearchService,
-    SemanticLanguageClassifier, StationRepository, UnavailableStationRepository, normalize_query,
+    StationRepository, UnavailableStationRepository, normalize_query,
 };
 
 #[path = "tests/taxonomy.rs"]
@@ -410,65 +410,6 @@ async fn deterministic_fake_embedding_crosses_only_the_repository_boundary() {
             .model,
         "fake"
     );
-}
-
-#[tokio::test]
-async fn explicit_language_request_overrides_classifier_suggestion() {
-    let classifier = SemanticLanguageClassifier::from_embeddings(vec![
-        (
-            "en",
-            Embedding::new("fake", "1", 2, vec![1.0, 0.0]).unwrap(),
-        ),
-        (
-            "es",
-            Embedding::new("fake", "1", 2, vec![0.0, 1.0]).unwrap(),
-        ),
-    ]);
-    let service = SearchService::with_providers_and_language_classifier(
-        Arc::new(InMemoryStationRepository::with_builtin_catalog().unwrap()),
-        Arc::new(DeterministicQueryParser),
-        Some(Arc::new(FixedEmbeddingProvider)),
-        Some(Arc::new(classifier)),
-    );
-
-    let outcome = service
-        .interpret_and_search(
-            QueryParserInput {
-                query: "Включи рок на английском".to_owned(),
-                locale: "ru-RU".to_owned(),
-            },
-            &SearchConstraints {
-                limit: 10,
-                offset: 0,
-                excluded_station_ids: BTreeSet::new(),
-            },
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(outcome.query.language.as_deref(), Some("en"));
-    assert!(
-        outcome
-            .stations
-            .iter()
-            .all(|station| station.station.language.as_deref() == Some("en"))
-    );
-
-    let unmarked = service
-        .interpret_and_search(
-            QueryParserInput {
-                query: "Включи английский рок".to_owned(),
-                locale: "ru-RU".to_owned(),
-            },
-            &SearchConstraints {
-                limit: 10,
-                offset: 0,
-                excluded_station_ids: BTreeSet::new(),
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(unmarked.query.language, None);
 }
 
 #[tokio::test]

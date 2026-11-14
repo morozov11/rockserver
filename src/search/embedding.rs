@@ -168,17 +168,6 @@ pub trait EmbeddingProvider: Send + Sync {
     }
 }
 
-/// One station document read by the controlled embedding workflow.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StationEmbeddingDocument {
-    /// Stable station identifier used by persistence.
-    pub station_id: String,
-    /// Provider input assembled from this station only.
-    pub text: String,
-    /// SHA-256 of the exact UTF-8 source text read from storage.
-    pub source_text_sha256: String,
-}
-
 /// Persistence failure returned by the embedding workflow.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EmbeddingStoreError {
@@ -201,108 +190,6 @@ impl fmt::Display for EmbeddingStoreError {
 }
 
 impl Error for EmbeddingStoreError {}
-
-/// Storage boundary used only by the controlled embedding backfill/update workflow.
-#[async_trait]
-pub trait EmbeddingStore: Send + Sync {
-    /// Returns the next stable-ID-ordered page missing the requested provenance or source hash.
-    async fn station_documents(
-        &self,
-        provenance: &EmbeddingProvenance,
-        after_station_id: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<StationEmbeddingDocument>, EmbeddingStoreError>;
-
-    /// Inserts or replaces one station embedding for its exact provenance.
-    async fn upsert_embedding(
-        &self,
-        station_id: &str,
-        embedding: &Embedding,
-    ) -> Result<(), EmbeddingStoreError>;
-
-    /// Persists a generated vector only while its source document is still current.
-    async fn upsert_document_embedding(
-        &self,
-        document: &StationEmbeddingDocument,
-        embedding: &Embedding,
-    ) -> Result<bool, EmbeddingStoreError>;
-}
-
-/// Counts produced by one controlled embedding backfill/update run.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct EmbeddingBackfillResult {
-    /// Station documents read from persistence.
-    pub processed: usize,
-    /// Embeddings inserted or updated successfully.
-    pub updated: usize,
-}
-
-/// Runs station embedding generation outside HTTP startup and request paths.
-pub struct EmbeddingBackfill<P, S> {
-    provider: P,
-    store: S,
-    page_size: usize,
-}
-
-impl<P, S> EmbeddingBackfill<P, S>
-where
-    P: EmbeddingProvider,
-    S: EmbeddingStore,
-{
-    /// Creates a controlled backfill with a positive bounded page size.
-    pub fn new(provider: P, store: S, page_size: usize) -> Self {
-        Self {
-            provider,
-            store,
-            page_size: page_size.max(1),
-        }
-    }
-
-    /// Embeds only missing or stale stations in stable ID order.
-    pub async fn run(&self) -> Result<EmbeddingBackfillResult, Box<dyn Error + Send + Sync>> {
-        let mut result = EmbeddingBackfillResult::default();
-        let mut cursor = None::<String>;
-        let provenance = self.provider.provenance().ok_or_else(|| {
-            EmbeddingProviderError::safe("embedding provider does not declare stable provenance")
-        })?;
-
-        loop {
-            let documents = self
-                .store
-                .station_documents(&provenance, cursor.as_deref(), self.page_size)
-                .await?;
-            if documents.is_empty() {
-                break;
-            }
-            let page_len = documents.len();
-            for document in documents {
-                let embedding = self.provider.embed_document(&document.text).await?;
-                if embedding.provenance() != &provenance {
-                    return Err(Box::new(EmbeddingStoreError::safe(
-                        "embedding provider changed provenance during backfill",
-                    )));
-                }
-                let updated = self
-                    .store
-                    .upsert_document_embedding(&document, &embedding)
-                    .await?;
-                if !updated {
-                    return Err(Box::new(EmbeddingStoreError::safe(
-                        "station document changed during embedding; rerun backfill",
-                    )));
-                }
-                cursor = Some(document.station_id);
-                result.processed += 1;
-                result.updated += 1;
-            }
-            if page_len < self.page_size {
-                break;
-            }
-        }
-
-        Ok(result)
-    }
-}
 
 #[cfg(test)]
 #[path = "embedding/tests.rs"]

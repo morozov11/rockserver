@@ -89,7 +89,6 @@ Production values находятся вне Git: например, в root-owned
 | `RUST_LOG` | non-secret | безопасный уровень без request body, credentials или personal data |
 | `YANDEX_AI_API_KEY`, `YANDEX_FOLDER_ID` | optional secret/restricted configuration | отсутствуют, пока провайдер не утверждён; оба задаются вместе |
 | `YANDEX_HOME_CLIENTID`, `YANDEX_HOME_SECRET` | optional OAuth client configuration | задаются вместе для пользовательского read-only подключения Яндекс Дома; не выводятся и не хранятся в Git |
-| `ROCKSERVER_ONNX_*`, `ORT_DYLIB_PATH` | restricted paths/settings | только локально смонтированные, проверенные runtime assets; не URL для download |
 
 The service now requires `ROCKSERVER_API_BEARER_TOKEN` and `DATABASE_URL` at startup. It does not
 select the in-memory catalog when `DATABASE_URL` is absent; that repository remains available only
@@ -223,25 +222,14 @@ release metadata. Deploy-time `pg_dump` is disabled by operator decision
 backups remain a separate owner-managed duty. The VPS runs embedded migrations
 and then imports the bundled checksum-pinned complete SQLite catalog after
 PostgreSQL is healthy, before the service starts. The current pinned release contains 16,825 active playable stations and deployment refuses
-a release below the 16,000-station gate. Deployment then runs the checksum-pinned
-ONNX E5 backfill as a separate job after catalog import; the service starts only after both catalog and vector
-steps succeed. The backfill infers only missing or stale model/version/text-hash rows, so repeating it
-with an unchanged catalog makes no ONNX inference. Repeating the importer and backfill is idempotent by stable station and stream
-identities and cannot substitute the 41-station development fixture. The only release
+a release below the 16,000-station gate. The only release
 output/record fields are commit, image ID, artifact checksum, catalog version/count and readiness;
 the release record keeps a `backup_sha256` continuity field with the value `-` while deploy-time
 backups are disabled.
 
-ONNX semantic search is enabled automatically. The committed
-`deploy/onnx-assets.lock.json` pins the exact `intfloat/multilingual-e5-small` ONNX graph,
-matching tokenizer, and the Linux x64 ONNX Runtime archive to official HTTPS sources plus
-SHA-256 values. On the first deployment the VPS downloads them only when absent or invalid,
-checks every archive/download before atomically placing the files, then starts RockServer with
-semantic search enabled. Subsequent deployments use the verified cache. No ONNX URL, hash, or
-local asset path is entered by the owner. Updating the model/runtime is a normal reviewed Git
-change to this lock file, never an unpinned automatic update.
+### Embedding service and versioned vector tables (E2 / E3)
 
-### Embedding service and versioned vector tables (E2)
+> **Примечание (E3):** После удаления локального ONNX-рантайма в E3 деплой на прод БЕЗ поднятого эмбеддера (rockmodules) означает, что сервер работает в режиме без векторов (metadata-only); это осознанное переходное состояние до деплоя сервиса эмбеддера.
 
 Query/station embeddings come from the `embed.v1` gRPC service of the modules repository
 (`rock-llm-service`, fragment `deploy/compose.embedder.yaml`; pool 1 fits the shared 2 GiB

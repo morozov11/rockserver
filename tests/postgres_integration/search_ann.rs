@@ -62,7 +62,7 @@ async fn vector_only_station_is_retrieved_and_other_provenances_fall_back() {
     );
     let wrong_e5_dimension = Embedding::new(
         "intfloat/multilingual-e5-small",
-        "onnx-v1",
+        "v1",
         3,
         vec![1.0, 0.0, 0.0],
     )
@@ -353,7 +353,7 @@ fn e5(x: f32, y: f32) -> Embedding {
     let mut values = vec![0.0; EMBEDDINGS_DIMENSION];
     values[0] = x;
     values[1] = y;
-    Embedding::new(EMBEDDINGS_MODEL, "onnx-v1", EMBEDDINGS_DIMENSION, values).unwrap()
+    Embedding::new(EMBEDDINGS_MODEL, "v1", EMBEDDINGS_DIMENSION, values).unwrap()
 }
 
 fn query() -> SearchQuery {
@@ -387,7 +387,7 @@ impl EmbeddingProvider for FixedE5 {
     fn provenance(&self) -> Option<EmbeddingProvenance> {
         Some(EmbeddingProvenance {
             model: EMBEDDINGS_MODEL.to_owned(),
-            version: "onnx-v1".to_owned(),
+            version: "v1".to_owned(),
             dimension: EMBEDDINGS_DIMENSION,
         })
     }

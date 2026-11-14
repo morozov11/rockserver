@@ -13,13 +13,11 @@ use rockserver::catalog::{CatalogImporter, ImportLimits};
 use rockserver::http::{
     HealthResponse, HealthStatus, router_with_repository, router_with_search_service,
 };
-use rockserver::persistence::{
-    PostgresEmbeddingStore, PostgresImportStore, PostgresStationRepository,
-};
+use rockserver::persistence::{PostgresImportStore, PostgresStationRepository};
 use rockserver::providers::radio_browser::SOURCE;
 use rockserver::search::{
-    DeterministicQueryParser, Embedding, EmbeddingProvider, EmbeddingProviderError, EmbeddingStore,
-    SearchAction, SearchConstraints, SearchQuery, SearchService, normalize_query,
+    DeterministicQueryParser, Embedding, EmbeddingProvider, EmbeddingProviderError, SearchAction,
+    SearchConstraints, SearchQuery, SearchService, normalize_query,
 };
 use serde_json::Value;
 use sqlx::PgPool;
@@ -116,37 +114,6 @@ async fn postgres_migrations_seed_search_and_readiness() {
         .expect("excluded search must succeed");
     assert!(!station_ids(&exclusion_results).contains(&"somafm-metal-detector"));
 
-    let embedding_store = PostgresEmbeddingStore::connect(&database_url)
-        .await
-        .expect("embedding store migrations must succeed");
-    embedding_store
-        .upsert_embedding(
-            "rock-antenne",
-            &Embedding::new("integration-model", "1", 3, vec![0.0, 1.0, 0.0]).unwrap(),
-        )
-        .await
-        .expect("first embedding insert must succeed");
-    embedding_store
-        .upsert_embedding(
-            "rock-antenne",
-            &Embedding::new("integration-model", "1", 3, vec![1.0, 0.0, 0.0]).unwrap(),
-        )
-        .await
-        .expect("repeat embedding update must succeed");
-    for (station_id, values) in [
-        ("radio-record-rock", vec![0.0, 1.0, 0.0]),
-        ("gotradio-punk-rock", vec![0.0, 0.0, 1.0]),
-        ("rock-antenne-alternative", vec![0.0, 0.0, 1.0]),
-    ] {
-        embedding_store
-            .upsert_embedding(
-                station_id,
-                &Embedding::new("integration-model", "1", 3, values).unwrap(),
-            )
-            .await
-            .expect("station embedding insert must succeed");
-    }
-
     let semantic_service = SearchService::with_providers(
         Arc::new(repository.clone()),
         Arc::new(DeterministicQueryParser),
@@ -231,38 +198,6 @@ async fn postgres_migrations_seed_search_and_readiness() {
         .await
         .expect("provider failure must retain metadata search");
     assert!(!station_ids(&fallback_results).is_empty());
-
-    let embedding_pool = repository_pool(&database_url).await;
-    let persisted_count = sqlx::query_scalar::<_, i64>(
-        r#"
-SELECT COUNT(*)
-FROM station_embeddings
-WHERE station_id = 'rock-antenne'
-  AND model = 'integration-model'
-  AND version = '1'
-"#,
-    )
-    .fetch_one(&embedding_pool)
-    .await
-    .expect("embedding count must be inspectable");
-    let persisted = sqlx::query_as::<_, (i32, f64, bool)>(
-        r#"
-SELECT dimension, embedding <=> '[1,0,0]'::vector, updated_at >= created_at
-FROM station_embeddings
-WHERE station_id = 'rock-antenne'
-  AND model = 'integration-model'
-  AND version = '1'
-"#,
-    )
-    .fetch_one(&embedding_pool)
-    .await
-    .expect("embedding persistence must be inspectable");
-    assert_eq!(persisted_count, 1);
-    assert_eq!(persisted.0, 3);
-    assert!(persisted.1.abs() < 0.000_001);
-    assert!(persisted.2);
-    embedding_pool.close().await;
-    embedding_store.close().await;
 
     let import_store = PostgresImportStore::connect(&database_url)
         .await

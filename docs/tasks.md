@@ -1,5 +1,20 @@
 # Task log
 
+## E3 removal of local ONNX embedding path and classifier — 2026-11-14
+
+- Goal/scope: roadmap stage E3 — completely remove local ONNX Runtime embedding path, `onnx-local` Cargo feature, ORT dependencies, `SemanticLanguageClassifier`, legacy `PostgresEmbeddingStore`/`station_embeddings` table interactions, and deployment ONNX assets/scripts/variables from rockserver, closing audits #4 and #5.
+- Result:
+  - Deleted `src/providers/onnx_e5.rs`, `src/providers/deterministic_embedding.rs`, `src/search/semantic_filters.rs`, `src/persistence/embedding_postgres.rs` (+ `tests.rs`), `src/search/embedding_release.rs` (+ `tests.rs`), `tests/search_language_eval.rs`, `tests/onnx_e5_live.rs`, `tests/search_eval/format_experiment.rs`, `tests/postgres_integration/embedding_backfill.rs`, `deploy/onnx-assets.lock.json`.
+  - `Cargo.toml`: removed feature `onnx-local`, dependencies `ort`, `ndarray`, `tokenizers`.
+  - Search domain and service: removed `SemanticLanguageClassifier`, simplified constructors to `with_providers`, preserved public search contracts.
+  - Storage: removed legacy `PostgresEmbeddingStore`, `station_documents`, `upsert_embedding`, `EmbeddingBackfill`; preserved migrations 0004/0005/0027/0028 in sqlx history.
+  - Configuration & env: removed `ROCKSERVER_SEMANTIC_PROVIDER`, `ROCKSERVER_ONNX_*`, `ORT_DYLIB_PATH`.
+  - E0 Evaluator: removed ONNX evaluator mode (`ROCKSERVER_SEARCH_EVAL_WITH_ONNX`, `e0_onnx_fill`, local SHA-256 helpers). Semantic E0 mode operates solely via gRPC embedder service (`e0_semantic.rs`).
+  - Deploy chain: removed `embedding_backfill` service and ONNX mounts from `deploy/compose.yaml`; removed `download_onnx`, `onnx-assets.json` requirement, and ONNX variables from `deploy/remote-ops-001-d.sh`; removed ONNX bundling and checks from `deploy/ops-001-d.ps1`/`psm1`; updated `deploy/tests/ops-001-d-tests.ps1` and added invariant tests in `tests/deploy_security.rs` (9 passed).
+  - Roadmap: row E3 marked "Выполнено", audits #4 and #5 closed.
+- Checks/status: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, full `cargo test` passing. Local deploy script tests passing. Grep verification for ONNX/ORT symbols clean. Implemented locally, nothing committed.
+- Next steps: Stage E4 (taxonomy from DB).
+
 ## E2 embedder client, station_embeddings_v1, ANN, backfill — 2026-11-14
 
 - Release note: committed as `2100538` and pushed together with `c993741` (Dockerfile fix: the builder image did not COPY `build.rs`/`proto/`, so `env!("OUT_DIR")` failed in-container while host builds stayed green — reproduced locally, fixed, image rebuilt). GitHub Actions on `c993741`: `success` (fmt, strict Clippy, 333 tests, image build, sequential compose smoke with catalog import and readiness through Caddy).

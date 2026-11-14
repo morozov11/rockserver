@@ -60,21 +60,13 @@ function Write-Ops001DOwnerEnvironmentFile {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Domain,
         [Parameter(Mandatory)]$Catalog,
-        [Parameter(Mandatory)][System.Collections.IDictionary]$Yandex,
-        [Parameter(Mandatory)][bool]$OnnxEnabled
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Yandex
     )
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("ROCKSERVER_DOMAIN=$Domain")
     $lines.Add("OPS001D_CATALOG_VERSION=$($Catalog.Version)")
     $lines.Add("OPS001D_CATALOG_COUNT=$($Catalog.Count)")
     $lines.Add("OPS001D_CATALOG_SHA256=$($Catalog.Sha256)")
-    if ($OnnxEnabled) {
-        $lines.Add('ROCKSERVER_SEMANTIC_PROVIDER=onnx-e5-local')
-        $lines.Add('ROCKSERVER_ONNX_ASSET_DIR=/opt/rockserver/assets/onnx')
-        $lines.Add('ROCKSERVER_ONNX_MODEL_PATH=/opt/rockserver/assets/onnx/model.onnx')
-        $lines.Add('ROCKSERVER_ONNX_TOKENIZER_PATH=/opt/rockserver/assets/onnx/tokenizer.json')
-        $lines.Add('ORT_DYLIB_PATH=/opt/rockserver/assets/onnx/libonnxruntime.so')
-    }
     foreach ($key in $Yandex.Keys) { $lines.Add("$key=$($Yandex[$key])") }
     # This file is consumed by a Linux shell over SCP.  Write LF explicitly:
     # WriteAllLines uses the Windows CRLF convention on the deployment host,
@@ -122,30 +114,6 @@ function Get-Ops001DSshCommand {
     return ,$args.ToArray()
 }
 
-function Test-Ops001DOnnxManifest {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Path)
-    $manifest = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    if (-not $manifest.enabled) { Stop-Ops001D 'The committed ONNX lock must enable the required production assets.' }
-    if ($manifest.assetDirectory -ne '/opt/rockserver/assets/onnx') { Stop-Ops001D 'Enabled ONNX manifest requires the protected /opt/rockserver/assets/onnx directory.' }
-    $assets = @($manifest.assets)
-    if ($assets.Count -ne 3) { Stop-Ops001D 'The committed ONNX lock requires exactly model, tokenizer, and runtime assets.' }
-    $expectedNames = @('model.onnx', 'tokenizer.json', 'libonnxruntime.so')
-    $seen = @{}
-    foreach ($asset in $assets) {
-        $archiveMember = if ($null -ne $asset.PSObject.Properties['archiveMember']) { [string]$asset.archiveMember } else { '' }
-        if ([string]::IsNullOrWhiteSpace($asset.name) -or $asset.name -match '[\\/]') { Stop-Ops001D 'ONNX asset name is unsafe.' }
-        if ($asset.url -notmatch '^https://') { Stop-Ops001D "ONNX asset $($asset.name) requires an exact HTTPS URL." }
-        if ($asset.sha256 -notmatch '^[0-9a-fA-F]{64}$') { Stop-Ops001D "ONNX asset $($asset.name) requires a verified SHA-256." }
-        if ($expectedNames -notcontains [string]$asset.name -or $seen.ContainsKey([string]$asset.name)) { Stop-Ops001D 'ONNX lock contains an unexpected or duplicate asset name.' }
-        $seen[[string]$asset.name] = $true
-        if ($asset.name -eq 'libonnxruntime.so') {
-            if ($archiveMember -ne 'onnxruntime-linux-x64-1.23.2/lib/libonnxruntime.so') { Stop-Ops001D 'ONNX runtime archive member is not the pinned Linux x64 library.' }
-        } elseif (-not [string]::IsNullOrWhiteSpace($archiveMember)) { Stop-Ops001D "ONNX asset $($asset.name) must not use archive extraction." }
-    }
-    return $manifest
-}
-
 function Get-Ops001DCatalogMetadata {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ManifestPath, [Parameter(Mandatory)][string]$CatalogPath)
@@ -173,4 +141,4 @@ function Format-Ops001DSafeSummary {
     return "commit=$Commit image_id=$ImageId yandex_keys=$($Environment.Keys.Count) readiness=$Readiness"
 }
 
-Export-ModuleMember -Function Test-Ops001DPrivateInventory, Test-Ops001DInventoryValues, Get-Ops001DAllowedYandexEnvironment, Write-Ops001DOwnerEnvironmentFile, Get-Ops001DCurrentCommit, Test-Ops001DArtifactIdentity, Get-Ops001DSshCommand, Test-Ops001DOnnxManifest, Get-Ops001DCatalogMetadata, Get-Ops001DFullCatalogMetadata, Format-Ops001DSafeSummary
+Export-ModuleMember -Function Test-Ops001DPrivateInventory, Test-Ops001DInventoryValues, Get-Ops001DAllowedYandexEnvironment, Write-Ops001DOwnerEnvironmentFile, Get-Ops001DCurrentCommit, Test-Ops001DArtifactIdentity, Get-Ops001DSshCommand, Get-Ops001DCatalogMetadata, Get-Ops001DFullCatalogMetadata, Format-Ops001DSafeSummary
