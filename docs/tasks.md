@@ -2,6 +2,7 @@
 
 ## E4 database taxonomy with contract versioning and cache — 2026-11-15
 
+- Release note: committed as `a834be1` (plus a documented `ROCKSERVER_TAXONOMY_TTL_SECS` line in `.env.example`) and pushed; GitHub Actions on `a834be1` is green (fmt, strict Clippy, 341 tests, image build, sequential compose smoke). Independently re-verified before the release: the §5.1 hash vector recomputed bit-exact, taxonomy integration suite 2/2 on a fresh disposable pg18.
 - Goal/scope: roadmap stage E4 — load controlled genre taxonomy from PostgreSQL (`genre_hierarchy`, migration 0006) with canonical SHA-256 versioning according to contract §5.1, eliminate per-query database reads via TTL caching, define a deterministic prompt tag subset rule (≤ 150 tags), keep `CANONICAL_TAGS` strictly as fallback, and close audit #10 with integration divergence tests on disposable PostgreSQL.
 - Result:
   - Contract §5.1 hashing: `src/search/taxonomy/version.rs` implements `taxonomy_version(tags)` (UTF-8 byte sort, compact JSON array, SHA-256, `"sha256:<hex>"`). Golden contract test vector `["rock", "jazz", "blues"]` matches `sha256:9ce0dd764d87a64be0c744d49c8c7fb39c059603649e1b0b42fc4f184d90a436` exactly. `GenreTaxonomy` calculates and exposes version via `.version()`.
