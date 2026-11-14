@@ -4,6 +4,11 @@ FROM rust:1.100.0-bookworm@sha256:ade39a710ef85f3506cffcfec3e8a24ba090badef1dff2
 
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
+# build.rs and the vendored proto schemas must be present for `cargo build`:
+# the generated tonic/prost code is included through `env!("OUT_DIR")`, which
+# only exists when this build script runs in the same container.
+COPY build.rs ./
+COPY proto ./proto
 COPY src ./src
 COPY migrations ./migrations
 COPY catalog ./catalog
