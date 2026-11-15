@@ -1,5 +1,18 @@
 # Task log
 
+## E5 language modules, languages list API, and communication language chain — 2026-11-15
+
+- Goal/scope: roadmap stage E5 — schema and language modules `languages/<code\>.yaml` (ru/en) authored in `rockmodules` and vendored into `rockserver`, strictly validated startup loading without hot reloading, lexical rules and command dictionary transfer with exact behavioral equivalence, `GET /api/v1/languages` API with 3-party contract intersection (`rockserver ∩ LLM ∩ STT`) and `en`-exception, communication language resolution chain with account setting (DB migration 0031, `GET/PUT /api/v1/account/language`), and OpenAPI contract updates.
+- Result:
+  - Strict schema & files: `languages/schema.json` created (JSON Schema draft 2020-12) validating format_version, code, display_name, lexical rules, commands dictionary. Authored `C:\repos\rockmodules\languages\ru.yaml` and `en.yaml` with all strings quoted to avoid YAML 1.1 pitfalls. Vendored into `languages/ru.yaml`, `languages/en.yaml`, and `languages/README.md` with SHA-256 digests. Configurable via `ROCKSERVER_LANGUAGES_DIR`.
+  - Module architecture (`src/languages/`): strictly decoupled into `schema.rs`, `loader.rs`, `translit.rs`, `registry.rs`, `intersection.rs`, `resolution.rs`, `mod.rs`, `tests.rs` (all < 400 lines). Reads strictly once at startup (`LanguageRegistry::load_from_dir`). Invalid modules disable that specific language with an error log; base language `en` must be valid.
+  - Lexical & command equivalence: `src/search/query.rs` (~360 lines) and `src/search/language.rs` delegate stop-words, transliteration, countries, and explicit station language markers to `LanguageRegistry`. `src/voice/command.rs` modularized into `deterministic.rs` and `tests.rs` (main file 347 lines), delegating command parsing to `CommandDictionary`. All unit and integration tests for search query parsing, broadcast language detection, and voice commands pass with zero expectation changes.
+  - Languages list API & intersection: `GET /api/v1/languages` returns sorted available communication languages. Intersects rockserver valid languages with LLM and STT sources. Implements `en` exception (valid English is always published even when services are disconnected or fail). Implements retry pause polling when service status is unknown.
+  - Communication language chain & account setting: migration `0031_add_account_language.sql` adds `language varchar(8)` to `users`. Implemented `GET /api/v1/account/language` and `PUT /api/v1/account/language` (validates language against `published_languages()` or clears to null). Resolution chain: account setting → request language / request locale mapping → `en`. Communication language strictly isolated from station filtering.
+  - OpenAPI & contract: updated `api/openapi.yaml` and `tests/openapi_contract/surface.rs` (17 tests passing).
+- Checks/status: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, full `cargo test` (265 lib unit tests + integration test suites) passed. Implemented locally; nothing committed (awaiting owner instruction).
+- Next steps: Stage E6 (LLM service, client, fallbacks).
+
 ## Complete production vector fill and deadline overrides — 2026-11-15
 
 - Goal/scope: finish the production `station_embeddings_v1` backfill that stalled at 16 384/16 825 and stop the batch-cancellation/breaker cycling on the single-core VPS.

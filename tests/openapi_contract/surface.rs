@@ -36,12 +36,14 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         "/api/v1/auth/browser-logout",
         "/api/v1/browser/account",
         "/api/v1/account/profile",
+        "/api/v1/account/language",
         "/api/v1/account",
         "/api/v1/devices",
         "/api/v1/devices/{device_id}",
         "/api/v1/sync",
         "/api/v1/browser/devices/{device_id}",
         "/api/v1/search",
+        "/api/v1/languages",
         "/api/v1/voice/command",
         "/api/v1/voice/stream",
     ] {
@@ -226,6 +228,10 @@ fn openapi_contract_is_parseable_and_has_required_surface() {
         "PersonalSyncResponse",
         "PersonalFavouriteRecord",
         "PersonalHistoryRecord",
+        "LanguageList",
+        "LanguageSummary",
+        "AccountLanguage",
+        "UpdateAccountLanguage",
     ] {
         assert!(
             schemas.contains_key(Value::String(schema.to_owned())),
@@ -302,4 +308,44 @@ async fn search_endpoint_is_registered() {
         .unwrap();
 
     assert_ne!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn languages_endpoint_is_registered_and_returns_valid_languages() {
+    let response = rockserver::http::router()
+        .oneshot(
+            Request::get("/api/v1/languages")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let languages = body["languages"].as_array().expect("must be an array");
+    let codes: Vec<&str> = languages
+        .iter()
+        .map(|l| l["code"].as_str().unwrap())
+        .collect();
+    assert!(codes.contains(&"en"));
+    assert!(codes.contains(&"ru"));
+}
+
+#[tokio::test]
+async fn account_language_endpoint_is_registered() {
+    let response = rockserver::http::router()
+        .oneshot(
+            Request::get("/api/v1/account/language")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Requires auth -> 401 Unauthorized, never 404 Not Found
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }

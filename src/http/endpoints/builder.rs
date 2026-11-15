@@ -62,6 +62,7 @@ pub struct RouterBuilder {
     icon_import: Option<Arc<IconImportCoordinator>>,
     yandex_home: Option<Arc<YandexHomeClient>>,
     ha_bridge: Option<Arc<dyn BridgeStore>>,
+    language_intersection: Option<Arc<crate::languages::LanguageIntersectionService>>,
     control_timing: ControlTiming,
     relay: super::relay::RelayState,
 }
@@ -88,6 +89,7 @@ impl Default for RouterBuilder {
             icon_import: None,
             yandex_home: None,
             ha_bridge: None,
+            language_intersection: None,
             control_timing: ControlTiming::default(),
             relay: super::relay::RelayState::default(),
         }
@@ -252,6 +254,15 @@ impl RouterBuilder {
         self
     }
 
+    /// Sets the language intersection coordinator, primarily for deterministic tests.
+    pub fn with_language_intersection(
+        mut self,
+        service: Arc<crate::languages::LanguageIntersectionService>,
+    ) -> Self {
+        self.language_intersection = Some(service);
+        self
+    }
+
     /// Sets server-owned timing policies for device-control connections.
     #[cfg(test)]
     pub(crate) fn with_control_timing(mut self, timing: ControlTiming) -> Self {
@@ -281,6 +292,12 @@ impl RouterBuilder {
         let public_limits = self
             .public_limits
             .unwrap_or_else(|| Arc::new(Mutex::new(PublicLimitState::default())));
+        let language_intersection = self.language_intersection.unwrap_or_else(|| {
+            let registry = crate::languages::bundled_registry_arc();
+            Arc::new(
+                crate::languages::LanguageIntersectionService::with_unconnected_sources(registry),
+            )
+        });
 
         AppState {
             search_service,
@@ -302,6 +319,7 @@ impl RouterBuilder {
             icon_import: self.icon_import,
             yandex_home: self.yandex_home,
             ha_bridge: self.ha_bridge,
+            language_intersection,
             control_timing: self.control_timing,
             relay: self.relay,
         }

@@ -58,6 +58,8 @@ struct AccountProfileDto {
     device_created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     last_seen_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -447,6 +449,7 @@ pub(super) async fn account_profile(State(state): State<AppState>, headers: Head
             device_type: projection.device_type,
             device_created_at: projection.device_created_at,
             last_seen_at: projection.last_seen_at,
+            language: projection.language,
         })
         .into_response(),
         &request_id,

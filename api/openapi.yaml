@@ -604,6 +604,41 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AccountProfile" }
         "401": { $ref: "#/components/responses/AuthenticationRequired" }
+  /api/v1/account/language:
+    get:
+      operationId: getAccountLanguage
+      summary: Read the preferred communication language for the account
+      security:
+        - RockserverBearer: []
+      responses:
+        "200":
+          description: Preferred communication language code or null if not configured.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountLanguage" }
+        "401": { $ref: "#/components/responses/AuthenticationRequired" }
+    put:
+      operationId: updateAccountLanguage
+      summary: Set or clear the preferred communication language for the account
+      security:
+        - RockserverBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateAccountLanguage" }
+      responses:
+        "200":
+          description: Updated communication language.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountLanguage" }
+        "401": { $ref: "#/components/responses/AuthenticationRequired" }
+        "422":
+          description: Specified language is not valid or supported.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /api/v1/account:
     delete:
       operationId: deleteAccount
@@ -1681,6 +1716,17 @@ paths:
           - $ref: "#/components/schemas/VoiceStreamResult"
           - $ref: "#/components/schemas/VoiceDeviceCommandResult"
           - $ref: "#/components/schemas/VoiceStreamError"
+  /api/v1/languages:
+    get:
+      operationId: getAvailableLanguages
+      summary: List available communication languages
+      description: Returns the sorted list of communication languages supported across the server and AI services.
+      responses:
+        "200":
+          description: Available communication languages.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LanguageList" }
 components:
   parameters:
     DeviceId:
@@ -2069,6 +2115,36 @@ components:
         device_type: { type: string, minLength: 1, maxLength: 64 }
         device_created_at: { type: string, format: date-time }
         last_seen_at: { type: [string, "null"], format: date-time }
+        language: { type: [string, "null"], minLength: 2, maxLength: 8 }
+    LanguageList:
+      type: object
+      additionalProperties: false
+      required: [languages]
+      properties:
+        languages:
+          type: array
+          items:
+            $ref: "#/components/schemas/LanguageSummary"
+    LanguageSummary:
+      type: object
+      additionalProperties: false
+      required: [code, name, display_name]
+      properties:
+        code: { type: string, minLength: 2, maxLength: 8, example: "ru" }
+        name: { type: string, minLength: 1, maxLength: 64, example: "Русский" }
+        display_name: { type: string, minLength: 1, maxLength: 64, example: "Русский" }
+    AccountLanguage:
+      type: object
+      additionalProperties: false
+      required: [language]
+      properties:
+        language: { type: [string, "null"], minLength: 2, maxLength: 8, example: "ru" }
+    UpdateAccountLanguage:
+      type: object
+      additionalProperties: false
+      required: [language]
+      properties:
+        language: { type: [string, "null"], minLength: 2, maxLength: 8, example: "ru" }
     Device:
       type: object
       additionalProperties: false

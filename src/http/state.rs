@@ -90,6 +90,8 @@ pub(crate) struct AppState {
     pub(crate) yandex_home: Option<Arc<YandexHomeClient>>,
     /// Owner-bound Home Assistant integration ingress and weather read store.
     pub(crate) ha_bridge: Option<Arc<dyn BridgeStore>>,
+    /// Dynamic language intersection coordinator across local and remote neural services.
+    pub(crate) language_intersection: Arc<crate::languages::LanguageIntersectionService>,
     pub(crate) control_timing: ControlTiming,
     pub(crate) relay: super::relay::RelayState,
 }

@@ -32,6 +32,8 @@ pub mod grpc;
 pub mod ha_bridge;
 /// HTTP routes and transport types.
 pub mod http;
+/// Language definition modules and communication language resolution.
+pub mod languages;
 /// Deterministic prebuilt SQLite export for RockMobile's extended offline catalog.
 pub mod mobile_export;
 /// Persistent station-catalog backends and startup selection.

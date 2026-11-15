@@ -48,7 +48,7 @@
 | E2 | Клиент эмбеддера, таблица `station_embeddings_v{N}`, ANN-ветка, backfill | rockserver | E1 | Выполнено локально 2026-11-14 (gRPC-клиент `embed.v1`, `station_embeddings_v1`+`fields_hash`, lifecycle-задача, детерминированный ANN; см. результат ниже) |
 | E3 | Удаление ONNX и классификатора из rockserver | rockserver | E2 | Выполнено 2026-11-14 (ONNX, ort/ndarray/tokenizers, классификатор, старый PostgresEmbeddingStore и deploy-ассеты удалены; сборка и тесты зелёные) |
 | E4 | Таксономия из БД с версией | rockserver | — (до E6) | Выполнено локально 2026-11-15 (хеш по контракту §5.1, TTL-кэш, детерминированный отбор промпт-тегов, аудит 10 закрыт) |
-| E5 | Языковые модули, API списка языков, язык общения | rockserver | — (до E6/E7/E8) | Не начат |
+| E5 | Языковые модули, API списка языков, язык общения | rockserver | — (до E6/E7/E8) | Выполнено локально 2026-11-15 (схема, ru/en модули, API /api/v1/languages, цепочка языка общения, миграция 0031, OpenAPI; см. результат ниже) |
 | E6 | Сервис LLM (поиск + команды), клиент, фолбэки, фикс фильтров | модули + rockserver | E4, E5 | Не начат |
 | E7 | Сервис распознавания (gRPC), голосовой прокси, три формы входа | модули + rockserver | E5 | Не начат |
 | E8a | RockMobile: убрать зашитые `ru-RU`/`en-US` | rockmobile | E5, E6, E7 | Не начат |
@@ -227,6 +227,41 @@ builder-образа обновлён).
 Приёмка: язык без модуля не существует в системе; тесты парсера и валидации модулей; OpenAPI обновлён.
 
 Откат: revert релиза (горячей перезагрузки нет; смена языка = согласованный релиз).
+
+### Результат выполнения E5 — 2026-11-15
+
+- **Строгая схема и формат модулей (`languages/<код>.yaml`):**
+  - Создана JSON Schema draft 2020-12 (`languages/schema.json` в репозитории rockserver). Описывает: `format_version`, `code` (= имя файла без `.yaml`), `display_name`, `lexical` (стоп-слова, отрицания, явные формы языка эфира с кодами станций, названия стран с падежами, модификаторы национальности, основы названий радиостанций для цитирования), `commands` (словарь действий детерминированного интерпретатора: `unsupported`, `set_volume`, `stop`, `resume`, `add_favorite`, `volume_up`, `volume_down`, `play_genre`).
+  - Все строки строго в кавычках (исключены YAML 1.1 boolean/number ловушки вроде `no`, `on`, `yes`).
+  - Секции внешних провайдеров (STT/LLM) вынесены в `providers/<код>.yaml` (E5-S) и rockserver-ом игнорируются (`deny_unknown_fields` на уровне модуля rockserver).
+  - Сформированы модули `ru.yaml` и `en.yaml` в `C:\repos\rockmodules\languages\` и вендорированы в `languages/` rockserver (`README.md` с sha256-хешами: ru `2032dfa9...`, en `7f1e7399...`).
+  - Переменная `ROCKSERVER_LANGUAGES_DIR` позволяет переопределить путь к каталогу модулей при деплое (по умолчанию — вендорная копия `"languages"`).
+- **Загрузчик и валидация (`src/languages/`):**
+  - Чтение выполняется строго один раз при старте (`LanguageRegistry::load_from_dir`). Горячей перезагрузки нет (смена языка = релиз).
+  - Валидация схемы и семантики: невалидный файл (несовпадение `code` с именем файла, дубликаты, неизвестные секции, повреждённый YAML) отключает данный язык с логированием ошибки `error!("Failed to load language module '{file_name}': {err}")`; остальные валидные модули продолжают работать. Обязательный инвариант: базовый язык `en` должен быть валидным.
+  - Декомпозиция по AGENTS.md: `schema.rs`, `loader.rs`, `translit.rs`, `registry.rs`, `intersection.rs`, `resolution.rs`, `mod.rs`, `tests.rs` (все файлы < 400 строк).
+- **Лексическая и командная эквивалентность:**
+  - `src/search/query.rs` (~360 строк) и `src/search/language.rs`: статические константы стоп-слов, транслитерации, стран и склонений перенесены в вызовы `LanguageRegistry`.
+  - `src/voice/command.rs`: вынесены `deterministic.rs` и `tests.rs` (основной файл сократился до 347 строк). `DeterministicCommandInterpreter` и `basic_command_candidate` используют `CommandDictionary` соответствующего языкового модуля.
+  - Все существующие тесты разбора запросов, маркеров языка эфира и голосовых команд проходят без изменения эталонных ожиданий.
+- **API списка языков и пересечение (`GET /api/v1/languages`):**
+  - Эндпоинт возвращает отсортированный по коду список `{languages: [{code, display_name}]}`.
+  - Пересечение по контракту §2: `rockserver ∩ LLM ∩ STT`.
+  - Исключение `en`: валидный в rockserver английский язык публикуется даже до подключения сервисов или при их отказе.
+  - До этапов E6/E7 сервисы LLM/STT не подключены (`UnconnectedServiceLanguageSource`), их вклад не блокирует публикацию доступных rockserver языков.
+  - Реализован механизм периодического опроса с паузой при статусе «сервис неизвестен/не ответил» (`ServiceLanguageStatus::Unknown`, `retry_pause`).
+- **Цепочка языка общения и аккаунт:**
+  - Миграция `0031_add_account_language.sql`: колонка `language varchar(8)` в таблице `users`.
+  - Эндпоинты `GET /api/v1/account/language` и `PUT /api/v1/account/language` (Bearer-авторизация пользователя). Валидация: разрешены только языки из опубликованного списка `published_languages()`, либо сброс в `null`.
+  - Цепочка резолюции (`resolve_communication_language`):
+    1. Язык из профиля аккаунта (если пользователь авторизован и язык задан).
+    2. Язык из запроса (поле `language` или маппинг из `locale`).
+    3. Фолбэк на базовый `en`.
+  - Язык общения управляет выбором модуля лексики и команд, но **не является фильтром станций** (язык вещания определяется только явными маркерами в запросе).
+- **Контракт и проверки:**
+  - `api/openapi.yaml` дополнен эндпоинтами `/api/v1/languages`, `/api/v1/account/language` и схемами `LanguageList`, `LanguageSummary`, `AccountLanguage`, `UpdateAccountLanguage`, `AccountProfile.language`.
+  - Контрактные тесты `tests/openapi_contract.rs` (17 тестов) и все юнит-тесты (265 тестов) зелёные.
+  - `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` чистые.
 
 ## E6 — сервис LLM, клиент, фолбэки
 

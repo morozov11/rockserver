@@ -40,6 +40,8 @@ mod directory;
 mod ha_bridge;
 #[path = "health.rs"]
 mod health;
+#[path = "languages.rs"]
+mod languages;
 #[path = "pairing.rs"]
 mod pairing;
 #[path = "relay.rs"]

@@ -624,3 +624,58 @@ async fn postgres_browser_session_sliding_window_and_absolute_cap() {
     );
     store.close().await;
 }
+
+/// Covers preferred communication language persistence and projection on accounts.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL pointing to a disposable PostgreSQL database"]
+async fn postgres_account_language_setting_and_projection() {
+    let database_url = env::var("TEST_DATABASE_URL")
+        .expect("set TEST_DATABASE_URL to an isolated PostgreSQL database");
+    let store = PostgresAccountStore::connect(&database_url)
+        .await
+        .expect("account migrations must succeed");
+    let user_id = Uuid::new_v4();
+    store.create_user(user_id).await.unwrap();
+
+    // Initially no preferred language
+    assert_eq!(store.user_language(user_id).await.unwrap(), None);
+
+    // Set communication language to "ru"
+    assert!(store.set_user_language(user_id, Some("ru")).await.unwrap());
+    assert_eq!(
+        store.user_language(user_id).await.unwrap(),
+        Some("ru".to_owned())
+    );
+
+    // Create device to test account_projection
+    let device_id = Uuid::new_v4();
+    let device = OwnedDevice {
+        id: device_id,
+        user_id,
+        device_display_name: "Test device".to_owned(),
+        device_type: "windows".to_owned(),
+        created_at: "2026-01-01T00:00:00Z".to_owned(),
+        last_seen_at: None,
+    };
+    assert!(store.create_device(&device).await.unwrap());
+
+    let projection = store
+        .account_projection(user_id, device_id)
+        .await
+        .unwrap()
+        .expect("projection exists");
+    assert_eq!(projection.language, Some("ru".to_owned()));
+
+    // Clear communication language
+    assert!(store.set_user_language(user_id, None).await.unwrap());
+    assert_eq!(store.user_language(user_id).await.unwrap(), None);
+
+    let projection_cleared = store
+        .account_projection(user_id, device_id)
+        .await
+        .unwrap()
+        .expect("projection exists");
+    assert_eq!(projection_cleared.language, None);
+
+    store.close().await;
+}

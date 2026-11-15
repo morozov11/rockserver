@@ -91,7 +91,8 @@ impl PostgresAccountStore {
     ) -> Result<Option<AccountProjection>, sqlx::Error> {
         sqlx::query_as::<_, AccountProjectionRow>(
             "SELECT u.account_display_name, to_char(u.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, d.device_display_name, d.device_type, \
-             to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS device_created_at, to_char(d.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS last_seen_at \
+             to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS device_created_at, to_char(d.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS last_seen_at, \
+             u.language \
              FROM users u JOIN devices d ON d.user_id = u.id \
              WHERE u.id = $1 AND d.id = $2 AND u.status = 'active' AND d.revoked_at IS NULL",
         )
@@ -142,6 +143,32 @@ impl PostgresAccountStore {
         .bind(user_id)
         .fetch_optional(&self.pool)
         .await
+    }
+
+    /// Returns the preferred communication language for an active account.
+    pub async fn user_language(&self, user_id: Uuid) -> Result<Option<String>, sqlx::Error> {
+        let row: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT language FROM users WHERE id = $1 AND status = 'active'")
+                .bind(user_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.and_then(|(lang,)| lang))
+    }
+
+    /// Sets or clears the preferred communication language for an active account.
+    pub async fn set_user_language(
+        &self,
+        user_id: Uuid,
+        language: Option<&str>,
+    ) -> Result<bool, sqlx::Error> {
+        let result = sqlx::query(
+            "UPDATE users SET language = $2, updated_at = now() WHERE id = $1 AND status = 'active'",
+        )
+        .bind(user_id)
+        .bind(language)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
     }
 
     /// Lists only active devices owned by the requested account.

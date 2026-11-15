@@ -158,6 +158,7 @@ pub(super) struct AccountProjectionRow {
     pub(super) device_type: String,
     pub(super) device_created_at: String,
     pub(super) last_seen_at: Option<String>,
+    pub(super) language: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -218,6 +219,7 @@ impl From<AccountProjectionRow> for AccountProjection {
             device_type: row.device_type,
             device_created_at: row.device_created_at,
             last_seen_at: row.last_seen_at,
+            language: row.language,
         }
     }
 }

@@ -1,0 +1,1150 @@
+"format_version": 1
+"code": "ru"
+"display_name": "Русский"
+"lexical":
+  "stop_words":
+  - "включи"
+  - "включить"
+  - "поставь"
+  - "поставить"
+  - "найди"
+  - "найти"
+  - "играй"
+  - "играть"
+  - "запусти"
+  - "запустить"
+  - "переключи"
+  - "переключить"
+  - "открой"
+  - "открыть"
+  - "покажи"
+  - "показать"
+  - "давай"
+  - "хочу"
+  "negations":
+  - "не"
+  - "нет"
+  - "без"
+  "explicit_languages":
+    "prepositions":
+    - "на"
+    "language_suffixes":
+    - "язык"
+    - "языке"
+    "phrases":
+    - "code": "ru"
+      "phrase":
+      - "по"
+      - "русски"
+    "standalone":
+    - "code": "ru"
+      "terms":
+      - "русскоязычный"
+      - "русскоязычная"
+    - "code": "en"
+      "terms":
+      - "англоязычный"
+      - "англоязычная"
+    "style_exclusions": []
+    "languages":
+    - "code": "ar"
+      "forms":
+      - "арабском"
+      - "арабский"
+    - "code": "cs"
+      "forms":
+      - "чешском"
+      - "чешский"
+    - "code": "da"
+      "forms":
+      - "датском"
+      - "датский"
+    - "code": "de"
+      "forms":
+      - "немецком"
+      - "немецкий"
+    - "code": "el"
+      "forms":
+      - "греческом"
+      - "греческий"
+    - "code": "en"
+      "forms":
+      - "английском"
+      - "английский"
+    - "code": "es"
+      "forms":
+      - "испанском"
+      - "испанский"
+    - "code": "fi"
+      "forms":
+      - "финском"
+      - "финский"
+    - "code": "fr"
+      "forms":
+      - "французском"
+      - "французский"
+    - "code": "he"
+      "forms":
+      - "иврите"
+      - "иврит"
+    - "code": "hi"
+      "forms":
+      - "хинди"
+    - "code": "hu"
+      "forms":
+      - "венгерском"
+      - "венгерский"
+    - "code": "id"
+      "forms":
+      - "индонезийском"
+      - "индонезийский"
+    - "code": "it"
+      "forms":
+      - "итальянском"
+      - "итальянский"
+    - "code": "ja"
+      "forms":
+      - "японском"
+      - "японский"
+    - "code": "ko"
+      "forms":
+      - "корейском"
+      - "корейский"
+    - "code": "nl"
+      "forms":
+      - "нидерландском"
+      - "нидерландский"
+    - "code": "no"
+      "forms":
+      - "норвежском"
+      - "норвежский"
+    - "code": "pl"
+      "forms":
+      - "польском"
+      - "польский"
+    - "code": "pt"
+      "forms":
+      - "португальском"
+      - "португальский"
+    - "code": "ro"
+      "forms":
+      - "румынском"
+      - "румынский"
+    - "code": "ru"
+      "forms":
+      - "русском"
+      - "русский"
+    - "code": "sv"
+      "forms":
+      - "шведском"
+      - "шведский"
+    - "code": "th"
+      "forms":
+      - "тайском"
+      - "тайский"
+    - "code": "tr"
+      "forms":
+      - "турецком"
+      - "турецкий"
+    - "code": "uk"
+      "forms":
+      - "украинском"
+      - "украинский"
+    - "code": "vi"
+      "forms":
+      - "вьетнамском"
+      - "вьетнамский"
+    - "code": "zh"
+      "forms":
+      - "китайском"
+      - "китайский"
+  "countries":
+    "prepositions":
+    - "из"
+    "country_names":
+    - "code": "AF"
+      "names":
+      - "афганистан"
+    - "code": "AL"
+      "names":
+      - "албания"
+    - "code": "DZ"
+      "names":
+      - "алжир"
+    - "code": "AD"
+      "names":
+      - "андорра"
+    - "code": "AO"
+      "names":
+      - "ангола"
+    - "code": "AG"
+      "names":
+      - "антигуа и барбуда"
+    - "code": "AR"
+      "names":
+      - "аргентина"
+    - "code": "AM"
+      "names":
+      - "армения"
+    - "code": "AU"
+      "names":
+      - "австралия"
+    - "code": "AT"
+      "names":
+      - "австрия"
+    - "code": "AZ"
+      "names":
+      - "азербайджан"
+    - "code": "BS"
+      "names":
+      - "багамы"
+    - "code": "BH"
+      "names":
+      - "бахрейн"
+    - "code": "BD"
+      "names":
+      - "бангладеш"
+    - "code": "BB"
+      "names":
+      - "барбадос"
+    - "code": "BY"
+      "names":
+      - "беларусь"
+      - "белоруссия"
+    - "code": "BE"
+      "names":
+      - "бельгия"
+    - "code": "BZ"
+      "names":
+      - "белиз"
+    - "code": "BJ"
+      "names":
+      - "бенин"
+    - "code": "BT"
+      "names":
+      - "бутан"
+    - "code": "BO"
+      "names":
+      - "боливия"
+    - "code": "BA"
+      "names":
+      - "босния и герцеговина"
+    - "code": "BW"
+      "names":
+      - "ботсвана"
+    - "code": "BR"
+      "names":
+      - "бразилия"
+    - "code": "BN"
+      "names":
+      - "бруней"
+    - "code": "BG"
+      "names":
+      - "болгария"
+    - "code": "BF"
+      "names":
+      - "буркина фасо"
+    - "code": "BI"
+      "names":
+      - "бурунди"
+    - "code": "CV"
+      "names":
+      - "кабо верде"
+    - "code": "KH"
+      "names":
+      - "камбоджа"
+    - "code": "CM"
+      "names":
+      - "камерун"
+    - "code": "CA"
+      "names":
+      - "канада"
+    - "code": "CF"
+      "names":
+      - "центральноафриканская республика"
+    - "code": "TD"
+      "names":
+      - "чад"
+    - "code": "CL"
+      "names":
+      - "чили"
+    - "code": "CN"
+      "names":
+      - "китай"
+    - "code": "CO"
+      "names":
+      - "колумбия"
+    - "code": "KM"
+      "names":
+      - "коморы"
+    - "code": "CG"
+      "names":
+      - "республика конго"
+    - "code": "CD"
+      "names":
+      - "демократическая республика конго"
+    - "code": "CR"
+      "names":
+      - "коста рика"
+    - "code": "CI"
+      "names":
+      - "кот д ивуар"
+    - "code": "HR"
+      "names":
+      - "хорватия"
+    - "code": "CU"
+      "names":
+      - "куба"
+    - "code": "CY"
+      "names":
+      - "кипр"
+    - "code": "CZ"
+      "names":
+      - "чехия"
+    - "code": "DK"
+      "names":
+      - "дания"
+    - "code": "DJ"
+      "names":
+      - "джибути"
+    - "code": "DM"
+      "names":
+      - "доминика"
+    - "code": "DO"
+      "names":
+      - "доминиканская республика"
+    - "code": "EC"
+      "names":
+      - "эквадор"
+    - "code": "EG"
+      "names":
+      - "египет"
+    - "code": "SV"
+      "names":
+      - "сальвадор"
+    - "code": "GQ"
+      "names":
+      - "экваториальная гвинея"
+    - "code": "ER"
+      "names":
+      - "эритрея"
+    - "code": "EE"
+      "names":
+      - "эстония"
+    - "code": "SZ"
+      "names":
+      - "свазиленд"
+      - "эсватини"
+    - "code": "ET"
+      "names":
+      - "эфиопия"
+    - "code": "FJ"
+      "names":
+      - "фиджи"
+    - "code": "FI"
+      "names":
+      - "финляндия"
+    - "code": "FR"
+      "names":
+      - "франция"
+    - "code": "GA"
+      "names":
+      - "габон"
+    - "code": "GM"
+      "names":
+      - "гамбия"
+    - "code": "GE"
+      "names":
+      - "грузия"
+    - "code": "DE"
+      "names":
+      - "германия"
+      - "немецкий"
+      - "немецкая"
+      - "немецкое"
+      - "немецкие"
+    - "code": "GH"
+      "names":
+      - "гана"
+    - "code": "GR"
+      "names":
+      - "греция"
+    - "code": "GD"
+      "names":
+      - "гренада"
+    - "code": "GT"
+      "names":
+      - "гватемала"
+    - "code": "GN"
+      "names":
+      - "гвинея"
+    - "code": "GW"
+      "names":
+      - "гвинея бисау"
+    - "code": "GY"
+      "names":
+      - "гайана"
+    - "code": "HT"
+      "names":
+      - "гаити"
+    - "code": "VA"
+      "names":
+      - "ватикан"
+    - "code": "HN"
+      "names":
+      - "гондурас"
+    - "code": "HU"
+      "names":
+      - "венгрия"
+    - "code": "IS"
+      "names":
+      - "исландия"
+    - "code": "IN"
+      "names":
+      - "индия"
+    - "code": "ID"
+      "names":
+      - "индонезия"
+    - "code": "IR"
+      "names":
+      - "иран"
+    - "code": "IQ"
+      "names":
+      - "ирак"
+    - "code": "IE"
+      "names":
+      - "ирландия"
+    - "code": "IL"
+      "names":
+      - "израиль"
+    - "code": "IT"
+      "names":
+      - "италия"
+    - "code": "JM"
+      "names":
+      - "ямайка"
+    - "code": "JP"
+      "names":
+      - "япония"
+    - "code": "JO"
+      "names":
+      - "иордания"
+    - "code": "KZ"
+      "names":
+      - "казахстан"
+    - "code": "KE"
+      "names":
+      - "кения"
+    - "code": "KI"
+      "names":
+      - "кирибати"
+    - "code": "KP"
+      "names":
+      - "северная корея"
+    - "code": "KR"
+      "names":
+      - "южная корея"
+    - "code": "KW"
+      "names":
+      - "кувейт"
+    - "code": "KG"
+      "names":
+      - "киргизия"
+      - "кыргызстан"
+    - "code": "LA"
+      "names":
+      - "лаос"
+    - "code": "LV"
+      "names":
+      - "латвия"
+    - "code": "LB"
+      "names":
+      - "ливан"
+    - "code": "LS"
+      "names":
+      - "лесото"
+    - "code": "LR"
+      "names":
+      - "либерия"
+    - "code": "LY"
+      "names":
+      - "ливия"
+    - "code": "LI"
+      "names":
+      - "лихтенштейн"
+    - "code": "LT"
+      "names":
+      - "литва"
+    - "code": "LU"
+      "names":
+      - "люксембург"
+    - "code": "MG"
+      "names":
+      - "мадагаскар"
+    - "code": "MW"
+      "names":
+      - "малави"
+    - "code": "MY"
+      "names":
+      - "малайзия"
+    - "code": "MV"
+      "names":
+      - "мальдивы"
+    - "code": "ML"
+      "names":
+      - "мали"
+    - "code": "MT"
+      "names":
+      - "мальта"
+    - "code": "MH"
+      "names":
+      - "маршалловы острова"
+    - "code": "MR"
+      "names":
+      - "мавритания"
+    - "code": "MU"
+      "names":
+      - "маврикий"
+    - "code": "MX"
+      "names":
+      - "мексика"
+    - "code": "FM"
+      "names":
+      - "микронезия"
+    - "code": "MD"
+      "names":
+      - "молдова"
+    - "code": "MC"
+      "names":
+      - "монако"
+    - "code": "MN"
+      "names":
+      - "монголия"
+    - "code": "ME"
+      "names":
+      - "черногория"
+    - "code": "MA"
+      "names":
+      - "марокко"
+    - "code": "MZ"
+      "names":
+      - "мозамбик"
+    - "code": "MM"
+      "names":
+      - "мьянма"
+      - "бирма"
+    - "code": "NA"
+      "names":
+      - "намибия"
+    - "code": "NR"
+      "names":
+      - "науру"
+    - "code": "NP"
+      "names":
+      - "непал"
+    - "code": "NL"
+      "names":
+      - "нидерланды"
+      - "голландия"
+    - "code": "NZ"
+      "names":
+      - "новая зеландия"
+    - "code": "NI"
+      "names":
+      - "никарагуа"
+    - "code": "NE"
+      "names":
+      - "нигер"
+    - "code": "NG"
+      "names":
+      - "нигерия"
+    - "code": "MK"
+      "names":
+      - "северная македония"
+    - "code": "NO"
+      "names":
+      - "норвегия"
+    - "code": "OM"
+      "names":
+      - "оман"
+    - "code": "PK"
+      "names":
+      - "пакистан"
+    - "code": "PW"
+      "names":
+      - "палау"
+    - "code": "PS"
+      "names":
+      - "палестина"
+    - "code": "PA"
+      "names":
+      - "панама"
+    - "code": "PG"
+      "names":
+      - "папуа новая гвинея"
+    - "code": "PY"
+      "names":
+      - "парагвай"
+    - "code": "PE"
+      "names":
+      - "перу"
+    - "code": "PH"
+      "names":
+      - "филиппины"
+    - "code": "PL"
+      "names":
+      - "польша"
+    - "code": "PT"
+      "names":
+      - "португалия"
+    - "code": "QA"
+      "names":
+      - "катар"
+    - "code": "RO"
+      "names":
+      - "румыния"
+    - "code": "RU"
+      "names":
+      - "россия"
+      - "россии"
+    - "code": "RW"
+      "names":
+      - "руанда"
+    - "code": "KN"
+      "names":
+      - "сент китс и невис"
+    - "code": "LC"
+      "names":
+      - "сент люсия"
+    - "code": "VC"
+      "names":
+      - "сент винсент и гренадины"
+    - "code": "WS"
+      "names":
+      - "самоа"
+    - "code": "SM"
+      "names":
+      - "сан марино"
+    - "code": "ST"
+      "names":
+      - "сан томе и принсипи"
+    - "code": "SA"
+      "names":
+      - "саудовская аравия"
+    - "code": "SN"
+      "names":
+      - "сенегал"
+    - "code": "RS"
+      "names":
+      - "сербия"
+    - "code": "SC"
+      "names":
+      - "сейшелы"
+    - "code": "SL"
+      "names":
+      - "сьерра леоне"
+    - "code": "SG"
+      "names":
+      - "сингапур"
+    - "code": "SK"
+      "names":
+      - "словакия"
+    - "code": "SI"
+      "names":
+      - "словения"
+    - "code": "SB"
+      "names":
+      - "соломоновы острова"
+    - "code": "SO"
+      "names":
+      - "сомали"
+    - "code": "ZA"
+      "names":
+      - "южная африка"
+    - "code": "SS"
+      "names":
+      - "южный судан"
+    - "code": "ES"
+      "names":
+      - "испания"
+    - "code": "LK"
+      "names":
+      - "шри ланка"
+    - "code": "SD"
+      "names":
+      - "судан"
+    - "code": "SR"
+      "names":
+      - "суринам"
+    - "code": "SE"
+      "names":
+      - "швеция"
+    - "code": "CH"
+      "names":
+      - "швейцария"
+    - "code": "SY"
+      "names":
+      - "сирия"
+    - "code": "TJ"
+      "names":
+      - "таджикистан"
+    - "code": "TZ"
+      "names":
+      - "танзания"
+    - "code": "TH"
+      "names":
+      - "таиланд"
+      - "тайланд"
+    - "code": "TL"
+      "names":
+      - "восточный тимор"
+    - "code": "TG"
+      "names":
+      - "того"
+    - "code": "TO"
+      "names":
+      - "тонга"
+    - "code": "TT"
+      "names":
+      - "тринидад и тобаго"
+    - "code": "TN"
+      "names":
+      - "тунис"
+    - "code": "TR"
+      "names":
+      - "турция"
+      - "турецкий"
+    - "code": "TM"
+      "names":
+      - "туркменистан"
+    - "code": "TV"
+      "names":
+      - "тувалу"
+    - "code": "UG"
+      "names":
+      - "уганда"
+    - "code": "UA"
+      "names":
+      - "украина"
+    - "code": "AE"
+      "names":
+      - "объединенные арабские эмираты"
+      - "эмираты"
+    - "code": "GB"
+      "names":
+      - "великобритания"
+      - "британия"
+      - "соединенное королевство"
+      - "англия"
+    - "code": "US"
+      "names":
+      - "сша"
+      - "соединенные штаты"
+      - "америка"
+    - "code": "UY"
+      "names":
+      - "уругвай"
+    - "code": "UZ"
+      "names":
+      - "узбекистан"
+    - "code": "VU"
+      "names":
+      - "вануату"
+    - "code": "VE"
+      "names":
+      - "венесуэла"
+    - "code": "VN"
+      "names":
+      - "вьетнам"
+    - "code": "YE"
+      "names":
+      - "йемен"
+    - "code": "ZM"
+      "names":
+      - "замбия"
+    - "code": "ZW"
+      "names":
+      - "зимбабве"
+    "inflections":
+    - "code": "GB"
+      "forms":
+      - "англии"
+    - "code": "DE"
+      "forms":
+      - "германии"
+      - "германию"
+      - "германией"
+  "demonyms":
+  - "code": "AF"
+    "demonyms":
+    - "афганский"
+  - "code": "AL"
+    "demonyms":
+    - "албанский"
+  - "code": "DZ"
+    "demonyms":
+    - "алжирский"
+  - "code": "AR"
+    "demonyms":
+    - "аргентинский"
+  - "code": "AM"
+    "demonyms":
+    - "армянский"
+  - "code": "AU"
+    "demonyms":
+    - "австралийский"
+  - "code": "AT"
+    "demonyms":
+    - "австрийский"
+  - "code": "AZ"
+    "demonyms":
+    - "азербайджанский"
+  - "code": "BY"
+    "demonyms":
+    - "белорусский"
+  - "code": "BE"
+    "demonyms":
+    - "бельгийский"
+  - "code": "BR"
+    "demonyms":
+    - "бразильский"
+  - "code": "BG"
+    "demonyms":
+    - "болгарский"
+  - "code": "CA"
+    "demonyms":
+    - "канадский"
+  - "code": "CN"
+    "demonyms":
+    - "китайский"
+  - "code": "DK"
+    "demonyms":
+    - "данский"
+  - "code": "EG"
+    "demonyms":
+    - "египетский"
+  - "code": "EE"
+    "demonyms":
+    - "эстонский"
+  - "code": "FI"
+    "demonyms":
+    - "финский"
+  - "code": "FR"
+    "demonyms":
+    - "французский"
+  - "code": "GE"
+    "demonyms":
+    - "грузинский"
+  - "code": "GR"
+    "demonyms":
+    - "греческий"
+  - "code": "HU"
+    "demonyms":
+    - "венгерский"
+  - "code": "IN"
+    "demonyms":
+    - "индийский"
+  - "code": "IT"
+    "demonyms":
+    - "итальянский"
+  - "code": "JP"
+    "demonyms":
+    - "японский"
+  - "code": "KZ"
+    "demonyms":
+    - "казахский"
+  - "code": "KP"
+    "demonyms":
+    - "северокорейский"
+  - "code": "KR"
+    "demonyms":
+    - "южнокорейский"
+  - "code": "MX"
+    "demonyms":
+    - "мексиканский"
+  - "code": "NO"
+    "demonyms":
+    - "норвежский"
+  - "code": "PL"
+    "demonyms":
+    - "польский"
+  - "code": "PT"
+    "demonyms":
+    - "португальский"
+  - "code": "RO"
+    "demonyms":
+    - "румынский"
+  - "code": "RU"
+    "demonyms":
+    - "российский"
+    - "российская"
+    - "русский"
+  - "code": "RS"
+    "demonyms":
+    - "сербский"
+  - "code": "ZA"
+    "demonyms":
+    - "южноафриканский"
+  - "code": "ES"
+    "demonyms":
+    - "испанский"
+  - "code": "SE"
+    "demonyms":
+    - "шведский"
+  - "code": "CH"
+    "demonyms":
+    - "швейцарский"
+  - "code": "TH"
+    "demonyms":
+    - "тайский"
+  - "code": "UA"
+    "demonyms":
+    - "украинский"
+  - "code": "GB"
+    "demonyms":
+    - "британский"
+  - "code": "US"
+    "demonyms":
+    - "американский"
+  - "code": "UZ"
+    "demonyms":
+    - "узбекский"
+  - "code": "VN"
+    "demonyms":
+    - "вьетнамский"
+  "name_bases":
+    "station_prefixes":
+    - - "включи"
+      - "радио"
+    - - "включить"
+      - "радио"
+    - - "поставь"
+      - "радио"
+    - - "поставить"
+      - "радио"
+    "word_transliterations":
+    - "source": "радио"
+      "target": "radio"
+    - "source": "диджей"
+      "target": "dj"
+    - "source": "фм"
+      "target": "fm"
+    - "source": "рок"
+      "target": "rock"
+    - "source": "ультра"
+      "target": "ultra"
+    - "source": "джаз"
+      "target": "jazz"
+    - "source": "поп"
+      "target": "pop"
+    - "source": "хит"
+      "target": "hit"
+    - "source": "микс"
+      "target": "mix"
+    - "source": "лав"
+      "target": "love"
+    - "source": "классик"
+      "target": "classic"
+    - "source": "классика"
+      "target": "classic"
+    - "source": "блюз"
+      "target": "blues"
+    - "source": "кантри"
+      "target": "country"
+    - "source": "фанк"
+      "target": "funk"
+    - "source": "соул"
+      "target": "soul"
+    - "source": "метал"
+      "target": "metal"
+    - "source": "металл"
+      "target": "metal"
+    - "source": "панк"
+      "target": "punk"
+    - "source": "техно"
+      "target": "techno"
+    - "source": "транс"
+      "target": "trance"
+    - "source": "хаус"
+      "target": "house"
+    - "source": "драм"
+      "target": "drum"
+    - "source": "бас"
+      "target": "bass"
+    - "source": "лайф"
+      "target": "life"
+    - "source": "лайв"
+      "target": "live"
+    - "source": "стайл"
+      "target": "style"
+    - "source": "бест"
+      "target": "best"
+    - "source": "топ"
+      "target": "top"
+    - "source": "голд"
+      "target": "gold"
+    - "source": "сити"
+      "target": "city"
+    - "source": "клуб"
+      "target": "club"
+    - "source": "чилл"
+      "target": "chill"
+    - "source": "чиллаут"
+      "target": "chillout"
+    - "source": "энерджи"
+      "target": "energy"
+    - "source": "ритм"
+      "target": "rhythm"
+    - "source": "саунд"
+      "target": "sound"
+    - "source": "мьюзик"
+      "target": "music"
+    - "source": "музыка"
+      "target": "music"
+    - "source": "релакс"
+      "target": "relax"
+    - "source": "дип"
+      "target": "deep"
+    - "source": "нью"
+      "target": "new"
+    - "source": "олд"
+      "target": "old"
+    - "source": "супер"
+      "target": "super"
+    - "source": "мега"
+      "target": "mega"
+    - "source": "максимум"
+      "target": "maximum"
+    - "source": "европа"
+      "target": "europa"
+    - "source": "плюс"
+      "target": "plus"
+    - "source": "блэк"
+      "target": "black"
+    - "source": "дэт"
+      "target": "death"
+    - "source": "хэви"
+      "target": "heavy"
+    - "source": "хард"
+      "target": "hard"
+    - "source": "прогрессив"
+      "target": "progressive"
+    - "source": "альтернатив"
+      "target": "alternative"
+    - "source": "инди"
+      "target": "indie"
+    - "source": "гранж"
+      "target": "grunge"
+    - "source": "диско"
+      "target": "disco"
+    - "source": "реггей"
+      "target": "reggae"
+    - "source": "регги"
+      "target": "reggae"
+    - "source": "латин"
+      "target": "latin"
+    - "source": "эмбиент"
+      "target": "ambient"
+    - "source": "амбиент"
+      "target": "ambient"
+    - "source": "даунтемпо"
+      "target": "downtempo"
+    - "source": "трип"
+      "target": "trip"
+    - "source": "хоп"
+      "target": "hop"
+    - "source": "хип"
+      "target": "hip"
+    - "source": "рэп"
+      "target": "rap"
+    - "source": "электро"
+      "target": "electro"
+    - "source": "синт"
+      "target": "synth"
+    - "source": "вейв"
+      "target": "wave"
+    - "source": "лаунж"
+      "target": "lounge"
+    - "source": "госпел"
+      "target": "gospel"
+    - "source": "фолк"
+      "target": "folk"
+    - "source": "кавер"
+      "target": "cover"
+    - "source": "акустик"
+      "target": "acoustic"
+    - "source": "акустика"
+      "target": "acoustic"
+    - "source": "пауэр"
+      "target": "power"
+    - "source": "треш"
+      "target": "thrash"
+    - "source": "спид"
+      "target": "speed"
+    - "source": "дум"
+      "target": "doom"
+    - "source": "нойз"
+      "target": "noise"
+    - "source": "пост"
+      "target": "post"
+    - "source": "кор"
+      "target": "core"
+    - "source": "скрим"
+      "target": "scream"
+    - "source": "свинг"
+      "target": "swing"
+    - "source": "биг"
+      "target": "big"
+    - "source": "бэнд"
+      "target": "band"
+    - "source": "стейшн"
+      "target": "station"
+    - "source": "станция"
+      "target": "station"
+    - "source": "ультра"
+      "target": "ultra"
+    - "source": "рокс"
+      "target": "roks"
+    - "source": "викер"
+      "target": "viker"
+"commands":
+  "unsupported":
+  - "датчик"
+  - "датчики"
+  - "температура"
+  - "лампа"
+  - "реле"
+  "stop":
+  - "стоп"
+  - "останови"
+  - "остановить"
+  - "выключи"
+  "resume":
+  - "старт"
+  - "продолжи"
+  - "продолжить"
+  "next_station":
+  - "следующая"
+  - "следующую"
+  - "дальше"
+  "previous_station":
+  - "предыдущая"
+  - "предыдущую"
+  - "назад"
+  "volume_up":
+  - "громче"
+  "volume_down":
+  - "тише"
+  "set_volume":
+  - "громкость"
+  "add_favorite":
+  - "лайк"
+  - "избранное"
+  "genres":
+    "rock":
+    - "рок"
+    "jazz":
+    - "джаз"
+    "metal":
+    - "метал"
+    - "металл"

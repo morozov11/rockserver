@@ -2,6 +2,42 @@
 
 Last updated: 2026-11-15
 
+## E5 language modules, languages list API, and communication language chain — 2026-11-15
+
+- Stage E5 of the AI provider roadmap is implemented locally (nothing committed).
+- Key deliverables:
+  - **Schema and language files (`languages/<code\>.yaml`):**
+    - JSON Schema draft 2020-12 in `languages/schema.json` validating format_version, code (= file basename), display_name, lexical rules (stop_words, negations, explicit_station_languages, country_names, nationality_modifiers, citation_station_names), and commands dictionary (unsupported, set_volume, stop, resume, add_favorite, volume_up, volume_down, play_genre).
+    - Fully quoted YAML strings in `ru.yaml` and `en.yaml` preventing YAML 1.1 pitfalls.
+    - Modules authored in `C:\repos\rockmodules\languages\` and vendored in `languages/` (`README.md` with SHA-256 digests). Configurable at runtime via `ROCKSERVER_LANGUAGES_DIR`.
+  - **Loader and validation (`src/languages/`):**
+    - Read strictly once at startup (`LanguageRegistry::load_from_dir`), no hot reloading (language change = coordinated release).
+    - Strict validation: invalid module disables the language with an error log; other valid languages remain operational. Base language `en` must be valid.
+    - Code organized into bounded modules < 400 lines: `schema.rs`, `loader.rs`, `translit.rs`, `registry.rs`, `intersection.rs`, `resolution.rs`, `mod.rs`, `tests.rs`.
+  - **Lexical and command equivalence:**
+    - Hardcoded lexical rules in `src/search/query.rs` (reduced to ~360 lines) and explicit broadcast language markers in `src/search/language.rs` replaced with delegates to `LanguageRegistry`.
+    - `DeterministicCommandInterpreter` and basic command candidate checks in `src/voice/command.rs` (modularized into `deterministic.rs`, `tests.rs`, reducing `command.rs` to 347 lines) take command vocabulary from the language module.
+    - All existing search query and voice command tests pass without changing expectations.
+  - **Languages list API and intersection (`GET /api/v1/languages`):**
+    - Returns sorted list of available communication languages `{languages: [{code, display_name}]}`.
+    - Evaluates contract intersection: `rockserver ∩ LLM ∩ STT`.
+    - Implements `en` exception: valid English in rockserver is published even before neural services are connected or when they fail.
+    - Unconnected services (pre-E6/E7) do not block rockserver-valid languages.
+    - Polling retry pause logic implemented for unknown/unresponsive service status.
+  - **Communication language chain and account setting:**
+    - Migration `0031_add_account_language.sql`: added `language varchar(8)` column to `users`.
+    - Authenticated endpoints `GET /api/v1/account/language` and `PUT /api/v1/account/language`. Validates that language is in `published_languages()`, or resets to `null`.
+    - Resolution chain: account setting (if authenticated and present) → request language / request locale mapping → fallback to `en`.
+    - Explicit separation: communication language controls lexical parsing and command dictionary, and **does not filter stations** (station language filtering remains based on explicit query markers).
+  - **OpenAPI & Contract Verification:**
+    - Updated `api/openapi.yaml` with `/api/v1/languages`, `/api/v1/account/language`, and schemas.
+    - Updated contract tests in `tests/openapi_contract/surface.rs` (17 tests passing).
+- Verification:
+  - `cargo fmt --check` clean.
+  - `cargo clippy --all-targets --all-features -- -D warnings` clean.
+  - `cargo test` passing (265 lib unit tests + integration test suites).
+- Next steps: Stage E6 (LLM service, client, fallbacks).
+
 ## Production vector fill completed; slow-host deadline overrides — 2026-11-15
 
 - The first production fill of `station_embeddings_v1` stalled at 16 384/16 825 for two reasons found in the logs: 249 stations had `fields_hash IS NULL` (migration 0030 adds the column without a backfill and the E3 deploy skipped the catalog import via the current-release marker, so nothing ever wrote their hashes), and single-core batches of 64 stations were hitting the default 30 s batch deadline — the client cancelled them (`code=Cancelled`), the service breaker cycled, and the vector branch degraded intermittently on live queries. Fixes: one idempotent `catalog_seed` run backfilled every `fields_hash` (NULL count now 0); commit `d281ed5` passes `ROCKSERVER_EMBEDDER_QUERY/BATCH/INFO_TIMEOUT_MS` into the production service and `release.env` sets the batch deadline to 120 s for this host.

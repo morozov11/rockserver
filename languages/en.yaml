@@ -1,0 +1,1150 @@
+"format_version": 1
+"code": "en"
+"display_name": "English"
+"lexical":
+  "stop_words":
+  - "play"
+  - "find"
+  - "search"
+  - "show"
+  - "start"
+  - "open"
+  - "turn"
+  - "on"
+  - "put"
+  "negations":
+  - "not"
+  - "no"
+  - "without"
+  - "never"
+  "explicit_languages":
+    "prepositions":
+    - "in"
+    "language_suffixes":
+    - "language"
+    "phrases": []
+    "standalone": []
+    "style_exclusions":
+    - "style"
+    "languages":
+    - "code": "ar"
+      "forms":
+      - "arabic"
+    - "code": "cs"
+      "forms":
+      - "czech"
+    - "code": "da"
+      "forms":
+      - "danish"
+    - "code": "de"
+      "forms":
+      - "german"
+    - "code": "el"
+      "forms":
+      - "greek"
+    - "code": "en"
+      "forms":
+      - "english"
+    - "code": "es"
+      "forms":
+      - "spanish"
+    - "code": "fi"
+      "forms":
+      - "finnish"
+    - "code": "fr"
+      "forms":
+      - "french"
+    - "code": "he"
+      "forms":
+      - "hebrew"
+    - "code": "hi"
+      "forms":
+      - "hindi"
+    - "code": "hu"
+      "forms":
+      - "hungarian"
+    - "code": "id"
+      "forms":
+      - "indonesian"
+    - "code": "it"
+      "forms":
+      - "italian"
+    - "code": "ja"
+      "forms":
+      - "japanese"
+    - "code": "ko"
+      "forms":
+      - "korean"
+    - "code": "nl"
+      "forms":
+      - "dutch"
+    - "code": "no"
+      "forms":
+      - "norwegian"
+    - "code": "pl"
+      "forms":
+      - "polish"
+    - "code": "pt"
+      "forms":
+      - "portuguese"
+    - "code": "ro"
+      "forms":
+      - "romanian"
+    - "code": "ru"
+      "forms":
+      - "russian"
+    - "code": "sv"
+      "forms":
+      - "swedish"
+    - "code": "th"
+      "forms":
+      - "thai"
+    - "code": "tr"
+      "forms":
+      - "turkish"
+    - "code": "uk"
+      "forms":
+      - "ukrainian"
+    - "code": "vi"
+      "forms":
+      - "vietnamese"
+    - "code": "zh"
+      "forms":
+      - "chinese"
+  "countries":
+    "prepositions":
+    - "from"
+    "country_names":
+    - "code": "AF"
+      "names":
+      - "afghanistan"
+    - "code": "AL"
+      "names":
+      - "albania"
+    - "code": "DZ"
+      "names":
+      - "algeria"
+    - "code": "AD"
+      "names":
+      - "andorra"
+    - "code": "AO"
+      "names":
+      - "angola"
+    - "code": "AG"
+      "names":
+      - "antigua and barbuda"
+    - "code": "AR"
+      "names":
+      - "argentina"
+    - "code": "AM"
+      "names":
+      - "armenia"
+    - "code": "AU"
+      "names":
+      - "australia"
+    - "code": "AT"
+      "names":
+      - "austria"
+    - "code": "AZ"
+      "names":
+      - "azerbaijan"
+    - "code": "BS"
+      "names":
+      - "bahamas"
+    - "code": "BH"
+      "names":
+      - "bahrain"
+    - "code": "BD"
+      "names":
+      - "bangladesh"
+    - "code": "BB"
+      "names":
+      - "barbados"
+    - "code": "BY"
+      "names":
+      - "belarus"
+    - "code": "BE"
+      "names":
+      - "belgium"
+    - "code": "BZ"
+      "names":
+      - "belize"
+    - "code": "BJ"
+      "names":
+      - "benin"
+    - "code": "BT"
+      "names":
+      - "bhutan"
+    - "code": "BO"
+      "names":
+      - "bolivia"
+    - "code": "BA"
+      "names":
+      - "bosnia and herzegovina"
+    - "code": "BW"
+      "names":
+      - "botswana"
+    - "code": "BR"
+      "names":
+      - "brazil"
+    - "code": "BG"
+      "names":
+      - "bulgaria"
+    - "code": "BF"
+      "names":
+      - "burkina faso"
+    - "code": "CV"
+      "names":
+      - "cabo verde"
+      - "cape verde"
+    - "code": "KH"
+      "names":
+      - "cambodia"
+    - "code": "CM"
+      "names":
+      - "cameroon"
+    - "code": "CA"
+      "names":
+      - "canada"
+    - "code": "TD"
+      "names":
+      - "chad"
+    - "code": "CL"
+      "names":
+      - "chile"
+    - "code": "CN"
+      "names":
+      - "china"
+    - "code": "CO"
+      "names":
+      - "colombia"
+    - "code": "KM"
+      "names":
+      - "comoros"
+    - "code": "CG"
+      "names":
+      - "republic of congo"
+    - "code": "CD"
+      "names":
+      - "democratic republic of congo"
+    - "code": "CR"
+      "names":
+      - "costa rica"
+    - "code": "CI"
+      "names":
+      - "cote d ivoire"
+      - "ivory coast"
+    - "code": "HR"
+      "names":
+      - "croatia"
+    - "code": "CU"
+      "names":
+      - "cuba"
+    - "code": "CY"
+      "names":
+      - "cyprus"
+      - "cypriot"
+    - "code": "CZ"
+      "names":
+      - "czechia"
+    - "code": "DK"
+      "names":
+      - "denmark"
+    - "code": "DM"
+      "names":
+      - "dominica"
+    - "code": "EC"
+      "names":
+      - "ecuador"
+    - "code": "EG"
+      "names":
+      - "egypt"
+    - "code": "SV"
+      "names":
+      - "el salvador"
+    - "code": "GQ"
+      "names":
+      - "equatorial guinea"
+    - "code": "ER"
+      "names":
+      - "eritrea"
+    - "code": "EE"
+      "names":
+      - "estonia"
+    - "code": "ET"
+      "names":
+      - "ethiopia"
+    - "code": "FI"
+      "names":
+      - "finland"
+    - "code": "FR"
+      "names":
+      - "france"
+    - "code": "GA"
+      "names":
+      - "gabon"
+    - "code": "GM"
+      "names":
+      - "gambia"
+    - "code": "GE"
+      "names":
+      - "georgia"
+    - "code": "DE"
+      "names":
+      - "germany"
+    - "code": "GH"
+      "names":
+      - "ghana"
+    - "code": "GR"
+      "names":
+      - "greece"
+    - "code": "GD"
+      "names":
+      - "grenada"
+    - "code": "GT"
+      "names":
+      - "guatemala"
+    - "code": "GN"
+      "names":
+      - "guinea"
+    - "code": "GW"
+      "names":
+      - "guinea bissau"
+    - "code": "GY"
+      "names":
+      - "guyana"
+    - "code": "VA"
+      "names":
+      - "holy see"
+      - "vatican"
+    - "code": "HN"
+      "names":
+      - "honduras"
+    - "code": "HU"
+      "names":
+      - "hungary"
+    - "code": "IS"
+      "names":
+      - "iceland"
+    - "code": "IN"
+      "names":
+      - "india"
+    - "code": "ID"
+      "names":
+      - "indonesia"
+    - "code": "IR"
+      "names":
+      - "iran"
+    - "code": "IQ"
+      "names":
+      - "iraq"
+    - "code": "IE"
+      "names":
+      - "ireland"
+    - "code": "IL"
+      "names":
+      - "israel"
+    - "code": "IT"
+      "names":
+      - "italy"
+    - "code": "JM"
+      "names":
+      - "jamaica"
+    - "code": "JP"
+      "names":
+      - "japan"
+    - "code": "JO"
+      "names":
+      - "jordan"
+    - "code": "KZ"
+      "names":
+      - "kazakhstan"
+      - "kazakh"
+    - "code": "KE"
+      "names":
+      - "kenya"
+    - "code": "KP"
+      "names":
+      - "north korea"
+    - "code": "KR"
+      "names":
+      - "south korea"
+    - "code": "KW"
+      "names":
+      - "kuwait"
+    - "code": "KG"
+      "names":
+      - "kyrgyzstan"
+      - "kyrgyz"
+    - "code": "LA"
+      "names":
+      - "laos"
+    - "code": "LV"
+      "names":
+      - "latvia"
+    - "code": "LB"
+      "names":
+      - "lebanon"
+    - "code": "LS"
+      "names":
+      - "lesotho"
+    - "code": "LR"
+      "names":
+      - "liberia"
+    - "code": "LY"
+      "names":
+      - "libya"
+    - "code": "LI"
+      "names":
+      - "liechtenstein"
+    - "code": "LT"
+      "names":
+      - "lithuania"
+    - "code": "LU"
+      "names":
+      - "luxembourg"
+    - "code": "MG"
+      "names":
+      - "madagascar"
+      - "malagasy"
+    - "code": "MY"
+      "names":
+      - "malaysia"
+    - "code": "MV"
+      "names":
+      - "maldives"
+    - "code": "MT"
+      "names":
+      - "malta"
+    - "code": "MH"
+      "names":
+      - "marshall islands"
+    - "code": "MR"
+      "names":
+      - "mauritania"
+    - "code": "MU"
+      "names":
+      - "mauritius"
+    - "code": "MX"
+      "names":
+      - "mexico"
+    - "code": "FM"
+      "names":
+      - "micronesia"
+    - "code": "MD"
+      "names":
+      - "moldova"
+    - "code": "MC"
+      "names":
+      - "monaco"
+    - "code": "MN"
+      "names":
+      - "mongolia"
+    - "code": "ME"
+      "names":
+      - "montenegro"
+    - "code": "MA"
+      "names":
+      - "morocco"
+    - "code": "MZ"
+      "names":
+      - "mozambique"
+    - "code": "MM"
+      "names":
+      - "myanmar"
+    - "code": "NA"
+      "names":
+      - "namibia"
+    - "code": "NR"
+      "names":
+      - "nauru"
+    - "code": "NP"
+      "names":
+      - "nepal"
+    - "code": "NL"
+      "names":
+      - "netherlands"
+      - "holland"
+    - "code": "NZ"
+      "names":
+      - "new zealand"
+    - "code": "NI"
+      "names":
+      - "nicaragua"
+    - "code": "NE"
+      "names":
+      - "niger"
+      - "nigerien"
+    - "code": "NG"
+      "names":
+      - "nigeria"
+    - "code": "MK"
+      "names":
+      - "north macedonia"
+    - "code": "NO"
+      "names":
+      - "norway"
+    - "code": "OM"
+      "names":
+      - "oman"
+    - "code": "PK"
+      "names":
+      - "pakistan"
+    - "code": "PW"
+      "names":
+      - "palau"
+    - "code": "PS"
+      "names":
+      - "palestine"
+    - "code": "PA"
+      "names":
+      - "panama"
+    - "code": "PG"
+      "names":
+      - "papua new guinea"
+    - "code": "PY"
+      "names":
+      - "paraguay"
+    - "code": "PE"
+      "names":
+      - "peru"
+    - "code": "PH"
+      "names":
+      - "philippines"
+    - "code": "PL"
+      "names":
+      - "poland"
+    - "code": "PT"
+      "names":
+      - "portugal"
+    - "code": "QA"
+      "names":
+      - "qatar"
+    - "code": "RO"
+      "names":
+      - "romania"
+    - "code": "RU"
+      "names":
+      - "russia"
+    - "code": "RW"
+      "names":
+      - "rwanda"
+    - "code": "KN"
+      "names":
+      - "saint kitts and nevis"
+    - "code": "LC"
+      "names":
+      - "saint lucia"
+    - "code": "VC"
+      "names":
+      - "saint vincent and the grenadines"
+    - "code": "WS"
+      "names":
+      - "samoa"
+    - "code": "SM"
+      "names":
+      - "san marino"
+    - "code": "ST"
+      "names":
+      - "sao tome and principe"
+    - "code": "SA"
+      "names":
+      - "saudi arabia"
+    - "code": "SN"
+      "names":
+      - "senegal"
+    - "code": "RS"
+      "names":
+      - "serbia"
+    - "code": "SC"
+      "names":
+      - "seychelles"
+    - "code": "SL"
+      "names":
+      - "sierra leone"
+    - "code": "SG"
+      "names":
+      - "singapore"
+    - "code": "SK"
+      "names":
+      - "slovakia"
+      - "slovak"
+    - "code": "SI"
+      "names":
+      - "slovenia"
+    - "code": "SB"
+      "names":
+      - "solomon islands"
+    - "code": "SO"
+      "names":
+      - "somalia"
+    - "code": "ZA"
+      "names":
+      - "south africa"
+    - "code": "SS"
+      "names":
+      - "south sudan"
+    - "code": "ES"
+      "names":
+      - "spain"
+    - "code": "LK"
+      "names":
+      - "sri lanka"
+    - "code": "SD"
+      "names":
+      - "sudan"
+    - "code": "SR"
+      "names":
+      - "suriname"
+    - "code": "SE"
+      "names":
+      - "sweden"
+    - "code": "CH"
+      "names":
+      - "switzerland"
+    - "code": "SY"
+      "names":
+      - "syria"
+    - "code": "TJ"
+      "names":
+      - "tajikistan"
+      - "tajik"
+    - "code": "TZ"
+      "names":
+      - "tanzania"
+    - "code": "TH"
+      "names":
+      - "thailand"
+    - "code": "TL"
+      "names":
+      - "timor leste"
+      - "east timor"
+    - "code": "TG"
+      "names":
+      - "togo"
+    - "code": "TO"
+      "names":
+      - "tonga"
+    - "code": "TT"
+      "names":
+      - "trinidad and tobago"
+    - "code": "TN"
+      "names":
+      - "tunisia"
+    - "code": "TR"
+      "names":
+      - "turkey"
+      - "türkiye"
+    - "code": "TM"
+      "names":
+      - "turkmenistan"
+      - "turkmen"
+    - "code": "TV"
+      "names":
+      - "tuvalu"
+    - "code": "UG"
+      "names":
+      - "uganda"
+    - "code": "UA"
+      "names":
+      - "ukraine"
+    - "code": "AE"
+      "names":
+      - "united arab emirates"
+    - "code": "GB"
+      "names":
+      - "united kingdom"
+      - "great britain"
+      - "britain"
+      - "uk"
+    - "code": "US"
+      "names":
+      - "united states"
+      - "united states of america"
+      - "usa"
+    - "code": "UY"
+      "names":
+      - "uruguay"
+    - "code": "UZ"
+      "names":
+      - "uzbekistan"
+      - "uzbek"
+    - "code": "VU"
+      "names":
+      - "vanuatu"
+    - "code": "VE"
+      "names":
+      - "venezuela"
+    - "code": "VN"
+      "names":
+      - "vietnam"
+    - "code": "YE"
+      "names":
+      - "yemen"
+    - "code": "ZM"
+      "names":
+      - "zambia"
+    - "code": "ZW"
+      "names":
+      - "zimbabwe"
+    "inflections": []
+  "demonyms":
+  - "code": "AF"
+    "demonyms":
+    - "afghan"
+  - "code": "AL"
+    "demonyms":
+    - "albanian"
+  - "code": "DZ"
+    "demonyms":
+    - "algerian"
+  - "code": "AD"
+    "demonyms":
+    - "andorran"
+  - "code": "AO"
+    "demonyms":
+    - "angolan"
+  - "code": "AR"
+    "demonyms":
+    - "argentinian"
+  - "code": "AM"
+    "demonyms":
+    - "armenian"
+  - "code": "AU"
+    "demonyms":
+    - "australian"
+  - "code": "AT"
+    "demonyms":
+    - "austrian"
+  - "code": "BS"
+    "demonyms":
+    - "bahamian"
+  - "code": "BH"
+    "demonyms":
+    - "bahraini"
+  - "code": "BD"
+    "demonyms":
+    - "bangladeshi"
+  - "code": "BB"
+    "demonyms":
+    - "barbadian"
+  - "code": "BY"
+    "demonyms":
+    - "belarusian"
+  - "code": "BE"
+    "demonyms":
+    - "belgian"
+  - "code": "BZ"
+    "demonyms":
+    - "belizean"
+  - "code": "BJ"
+    "demonyms":
+    - "beninese"
+  - "code": "BT"
+    "demonyms":
+    - "bhutanese"
+  - "code": "BO"
+    "demonyms":
+    - "bolivian"
+  - "code": "BA"
+    "demonyms":
+    - "bosnian"
+  - "code": "BW"
+    "demonyms":
+    - "botswanan"
+  - "code": "BR"
+    "demonyms":
+    - "brazilian"
+  - "code": "BN"
+    "demonyms":
+    - "brunei"
+    - "bruneian"
+  - "code": "BG"
+    "demonyms":
+    - "bulgarian"
+  - "code": "BI"
+    "demonyms":
+    - "burundi"
+    - "burundian"
+  - "code": "KH"
+    "demonyms":
+    - "cambodian"
+  - "code": "CM"
+    "demonyms":
+    - "cameroonian"
+  - "code": "CA"
+    "demonyms":
+    - "canadian"
+  - "code": "CF"
+    "demonyms":
+    - "central african republic"
+  - "code": "TD"
+    "demonyms":
+    - "chadian"
+  - "code": "CL"
+    "demonyms":
+    - "chilean"
+  - "code": "CN"
+    "demonyms":
+    - "chinese"
+  - "code": "CO"
+    "demonyms":
+    - "colombian"
+  - "code": "KM"
+    "demonyms":
+    - "comorian"
+  - "code": "CR"
+    "demonyms":
+    - "costa rican"
+  - "code": "CI"
+    "demonyms":
+    - "ivorian"
+  - "code": "HR"
+    "demonyms":
+    - "croatian"
+  - "code": "CU"
+    "demonyms":
+    - "cuban"
+  - "code": "CZ"
+    "demonyms":
+    - "czech republic"
+    - "czech"
+  - "code": "DK"
+    "demonyms":
+    - "danish"
+  - "code": "DJ"
+    "demonyms":
+    - "djibouti"
+  - "code": "DO"
+    "demonyms":
+    - "dominican republic"
+  - "code": "EC"
+    "demonyms":
+    - "ecuadorian"
+  - "code": "EG"
+    "demonyms":
+    - "egyptian"
+  - "code": "SV"
+    "demonyms":
+    - "salvadoran"
+  - "code": "ER"
+    "demonyms":
+    - "eritrean"
+  - "code": "EE"
+    "demonyms":
+    - "estonian"
+  - "code": "SZ"
+    "demonyms":
+    - "eswatini"
+  - "code": "ET"
+    "demonyms":
+    - "ethiopian"
+  - "code": "FJ"
+    "demonyms":
+    - "fiji"
+    - "fijian"
+  - "code": "FI"
+    "demonyms":
+    - "finnish"
+  - "code": "FR"
+    "demonyms":
+    - "french"
+  - "code": "GA"
+    "demonyms":
+    - "gabonese"
+  - "code": "GM"
+    "demonyms":
+    - "gambian"
+  - "code": "GE"
+    "demonyms":
+    - "georgian"
+  - "code": "DE"
+    "demonyms":
+    - "german"
+  - "code": "GH"
+    "demonyms":
+    - "ghanaian"
+  - "code": "GR"
+    "demonyms":
+    - "greek"
+  - "code": "HT"
+    "demonyms":
+    - "haiti"
+    - "haitian"
+  - "code": "HN"
+    "demonyms":
+    - "honduran"
+  - "code": "HU"
+    "demonyms":
+    - "hungarian"
+  - "code": "IS"
+    "demonyms":
+    - "icelandic"
+  - "code": "IN"
+    "demonyms":
+    - "indian"
+  - "code": "ID"
+    "demonyms":
+    - "indonesian"
+  - "code": "IR"
+    "demonyms":
+    - "iranian"
+  - "code": "IQ"
+    "demonyms":
+    - "iraqi"
+  - "code": "IE"
+    "demonyms":
+    - "irish"
+  - "code": "IL"
+    "demonyms":
+    - "israeli"
+  - "code": "IT"
+    "demonyms":
+    - "italian"
+  - "code": "JM"
+    "demonyms":
+    - "jamaican"
+  - "code": "JP"
+    "demonyms":
+    - "japanese"
+  - "code": "JO"
+    "demonyms":
+    - "jordanian"
+  - "code": "KE"
+    "demonyms":
+    - "kenyan"
+  - "code": "KI"
+    "demonyms":
+    - "kiribati"
+  - "code": "KW"
+    "demonyms":
+    - "kuwaiti"
+  - "code": "LV"
+    "demonyms":
+    - "latvian"
+  - "code": "LB"
+    "demonyms":
+    - "lebanese"
+  - "code": "LR"
+    "demonyms":
+    - "liberian"
+  - "code": "LY"
+    "demonyms":
+    - "libyan"
+  - "code": "LT"
+    "demonyms":
+    - "lithuanian"
+  - "code": "MW"
+    "demonyms":
+    - "malawi"
+  - "code": "MY"
+    "demonyms":
+    - "malaysian"
+  - "code": "ML"
+    "demonyms":
+    - "mali"
+  - "code": "MT"
+    "demonyms":
+    - "maltese"
+  - "code": "MX"
+    "demonyms":
+    - "mexican"
+  - "code": "MD"
+    "demonyms":
+    - "moldovan"
+  - "code": "MN"
+    "demonyms":
+    - "mongolian"
+  - "code": "MA"
+    "demonyms":
+    - "moroccan"
+  - "code": "MM"
+    "demonyms":
+    - "burmese"
+  - "code": "NP"
+    "demonyms":
+    - "nepali"
+  - "code": "NL"
+    "demonyms":
+    - "dutch"
+  - "code": "NI"
+    "demonyms":
+    - "nicaraguan"
+  - "code": "NG"
+    "demonyms":
+    - "nigerian"
+  - "code": "MK"
+    "demonyms":
+    - "macedonian"
+  - "code": "NO"
+    "demonyms":
+    - "norwegian"
+  - "code": "OM"
+    "demonyms":
+    - "omani"
+  - "code": "PK"
+    "demonyms":
+    - "pakistani"
+  - "code": "PS"
+    "demonyms":
+    - "palestinian"
+  - "code": "PA"
+    "demonyms":
+    - "panamanian"
+  - "code": "PY"
+    "demonyms":
+    - "paraguayan"
+  - "code": "PE"
+    "demonyms":
+    - "peruvian"
+  - "code": "PH"
+    "demonyms":
+    - "filipino"
+  - "code": "PL"
+    "demonyms":
+    - "polish"
+  - "code": "PT"
+    "demonyms":
+    - "portuguese"
+  - "code": "QA"
+    "demonyms":
+    - "qatari"
+  - "code": "RO"
+    "demonyms":
+    - "romanian"
+  - "code": "RU"
+    "demonyms":
+    - "russian"
+  - "code": "RW"
+    "demonyms":
+    - "rwandan"
+  - "code": "WS"
+    "demonyms":
+    - "samoan"
+  - "code": "SA"
+    "demonyms":
+    - "saudi"
+  - "code": "SN"
+    "demonyms":
+    - "senegalese"
+  - "code": "RS"
+    "demonyms":
+    - "serbian"
+  - "code": "SG"
+    "demonyms":
+    - "singaporean"
+  - "code": "SI"
+    "demonyms":
+    - "slovenian"
+  - "code": "SO"
+    "demonyms":
+    - "somali"
+  - "code": "ZA"
+    "demonyms":
+    - "south african"
+  - "code": "ES"
+    "demonyms":
+    - "spanish"
+  - "code": "SD"
+    "demonyms":
+    - "sudanese"
+  - "code": "SE"
+    "demonyms":
+    - "swedish"
+  - "code": "CH"
+    "demonyms":
+    - "swiss"
+  - "code": "SY"
+    "demonyms":
+    - "syrian"
+  - "code": "TZ"
+    "demonyms":
+    - "tanzanian"
+  - "code": "TH"
+    "demonyms":
+    - "thai"
+  - "code": "TN"
+    "demonyms":
+    - "tunisian"
+  - "code": "TR"
+    "demonyms":
+    - "turkish"
+  - "code": "UG"
+    "demonyms":
+    - "ugandan"
+  - "code": "UA"
+    "demonyms":
+    - "ukrainian"
+  - "code": "AE"
+    "demonyms":
+    - "emirati"
+  - "code": "GB"
+    "demonyms":
+    - "british"
+  - "code": "US"
+    "demonyms":
+    - "american"
+  - "code": "UY"
+    "demonyms":
+    - "uruguayan"
+  - "code": "VE"
+    "demonyms":
+    - "venezuelan"
+  - "code": "VN"
+    "demonyms":
+    - "vietnamese"
+  - "code": "YE"
+    "demonyms":
+    - "yemeni"
+  - "code": "ZM"
+    "demonyms":
+    - "zambian"
+  - "code": "ZW"
+    "demonyms":
+    - "zimbabwean"
+  "name_bases":
+    "station_prefixes":
+    - - "play"
+      - "radio"
+    - - "start"
+      - "radio"
+    - - "turn"
+      - "on"
+      - "radio"
+    "word_transliterations": []
+"commands":
+  "unsupported":
+  - "sensor"
+  - "sensors"
+  - "temperature"
+  - "light"
+  - "relay"
+  "stop":
+  - "stop"
+  "resume":
+  - "start"
+  - "resume"
+  - "continue"
+  "next_station":
+  - "next"
+  - "skip"
+  "previous_station":
+  - "previous"
+  - "back"
+  "volume_up":
+  - "louder"
+  "volume_down":
+  - "quieter"
+  "set_volume":
+  - "volume"
+  "add_favorite":
+  - "like"
+  - "favorite"
+  - "favourite"
+  "genres":
+    "rock":
+    - "rock"
+    "jazz":
+    - "jazz"
+    "metal":
+    - "metal"

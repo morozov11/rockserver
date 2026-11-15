@@ -1,0 +1,328 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/morozov11/rockserver/languages/schema.json",
+  "title": "Файл языкового модуля rockserver",
+  "description": "Схема файлов languages/<код>.yaml: лингвистические правила (стоп-слова, отрицания, явные формы языка эфира, названия стран, модификаторы национальности, основы названий) и словарь детерминированных команд. Провайдеры STT/LLM живут в providers/<код>.yaml сервисов (rock-llm-service). Все строки в файлах должны быть в кавычках.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "code",
+    "display_name",
+    "lexical",
+    "commands"
+  ],
+  "properties": {
+    "format_version": {
+      "const": 1,
+      "description": "Версия формата файла; смена — согласованный релиз rockserver."
+    },
+    "code": {
+      "$ref": "#/$defs/languageCode",
+      "description": "Код языка; обязан совпадать с именем файла без расширения .yaml."
+    },
+    "display_name": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Отображаемое имя языка, например Русский или English."
+    },
+    "lexical": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stop_words",
+        "negations",
+        "explicit_languages",
+        "countries",
+        "demonyms",
+        "name_bases"
+      ],
+      "properties": {
+        "stop_words": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "description": "Командные глаголы и стоп-слова, исключаемые из сопоставления названий станций."
+        },
+        "negations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "description": "Отрицания (не, нет, без, not, without)."
+        },
+        "explicit_languages": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "prepositions",
+            "language_suffixes",
+            "phrases",
+            "standalone",
+            "style_exclusions",
+            "languages"
+          ],
+          "properties": {
+            "prepositions": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/nonEmptyString" },
+              "description": "Предлоги языка (например, 'на' в русском, 'in' в английском)."
+            },
+            "language_suffixes": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/nonEmptyString" },
+              "description": "Суффиксные маркеры (например, 'язык', 'языке', 'language')."
+            },
+            "phrases": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["code", "phrase"],
+                "properties": {
+                  "code": { "$ref": "#/$defs/languageCode" },
+                  "phrase": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/nonEmptyString" }
+                  }
+                }
+              },
+              "description": "Составные фразы явного языка (например, 'по-русски' -> ['по', 'русски'])."
+            },
+            "standalone": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["code", "terms"],
+                "properties": {
+                  "code": { "$ref": "#/$defs/languageCode" },
+                  "terms": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/nonEmptyString" }
+                  }
+                }
+              },
+              "description": "Одиночные маркеры языка эфира (например, 'русскоязычный', 'англоязычный')."
+            },
+            "style_exclusions": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/nonEmptyString" },
+              "description": "Слова-исключения стилей, отменяющие маркер языка (например, 'style' в 'in French style')."
+            },
+            "languages": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["code", "forms"],
+                "properties": {
+                  "code": { "$ref": "#/$defs/languageCode" },
+                  "forms": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/nonEmptyString" }
+                  }
+                }
+              },
+              "description": "Формы названий языков вещания на данном языке."
+            }
+          }
+        },
+        "countries": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "prepositions",
+            "country_names",
+            "inflections"
+          ],
+          "properties": {
+            "prepositions": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/nonEmptyString" },
+              "description": "Предлоги страны происхождения (например, 'из' в русском, 'from' в английском)."
+            },
+            "country_names": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["code", "names"],
+                "properties": {
+                  "code": { "$ref": "#/$defs/countryCode" },
+                  "names": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/nonEmptyString" }
+                  }
+                }
+              },
+              "description": "Названия стран на данном языке."
+            },
+            "inflections": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["code", "forms"],
+                "properties": {
+                  "code": { "$ref": "#/$defs/countryCode" },
+                  "forms": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/nonEmptyString" }
+                  }
+                }
+              },
+              "description": "Нестандартные падежные формы названий стран (например, 'англии', 'германии')."
+            }
+          }
+        },
+        "demonyms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "demonyms"],
+            "properties": {
+              "code": { "$ref": "#/$defs/countryCode" },
+              "demonyms": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/nonEmptyString" }
+              }
+            }
+          },
+          "description": "Модификаторы национальности и прилагательные стран (например, 'немецкий', 'german')."
+        },
+        "name_bases": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "station_prefixes",
+            "word_transliterations"
+          ],
+          "properties": {
+            "station_prefixes": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/nonEmptyString" }
+              },
+              "description": "Префиксы команд включения станций для выделения названия."
+            },
+            "word_transliterations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["source", "target"],
+                "properties": {
+                  "source": { "$ref": "#/$defs/nonEmptyString" },
+                  "target": { "$ref": "#/$defs/nonEmptyString" }
+                }
+              },
+              "description": "Словарные транслитерации радио-терминов."
+            }
+          }
+        }
+      }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unsupported",
+        "stop",
+        "resume",
+        "next_station",
+        "previous_station",
+        "volume_up",
+        "volume_down",
+        "set_volume",
+        "add_favorite",
+        "genres"
+      ],
+      "properties": {
+        "unsupported": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "description": "Слова неподдерживаемых команд (IoT/датчики)."
+        },
+        "stop": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "description": "Фразы остановки воспроизведения."
+        },
+        "resume": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "description": "Фразы продолжения воспроизведения."
+        },
+        "next_station": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "description": "Фразы перехода к следующей станции."
+        },
+        "previous_station": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "description": "Фразы перехода к предыдущей станции."
+        },
+        "volume_up": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "description": "Фразы увеличения громкости."
+        },
+        "volume_down": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "description": "Фразы уменьшения громкости."
+        },
+        "set_volume": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "description": "Фразы установки громкости."
+        },
+        "add_favorite": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "description": "Фразы добавления в избранное."
+        },
+        "genres": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "rock",
+            "jazz",
+            "metal"
+          ],
+          "properties": {
+            "rock": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/nonEmptyString" }
+            },
+            "jazz": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/nonEmptyString" }
+            },
+            "metal": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/nonEmptyString" }
+            }
+          },
+          "description": "Словарь базовых жанров для детерминированного фолбэка."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "languageCode": {
+      "type": "string",
+      "pattern": "^[a-z]{2,3}$",
+      "description": "2-3 строчные латинские буквы (ISO 639-1 / 639-2)."
+    },
+    "countryCode": {
+      "type": "string",
+      "pattern": "^[A-Z]{2}$",
+      "description": "2 заглавные латинские буквы (ISO 3166-1 alpha-2)."
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

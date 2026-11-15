@@ -107,123 +107,11 @@ pub trait CommandInterpreter: Send + Sync {
     ) -> Result<VoiceCommand, CommandInterpretationError>;
 }
 
-/// Conservative local classifier used when no structured-output interpreter is configured.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct DeterministicCommandInterpreter;
+#[path = "command/deterministic.rs"]
+mod deterministic;
 
-#[async_trait]
-impl CommandInterpreter for DeterministicCommandInterpreter {
-    async fn interpret(
-        &self,
-        transcript: &str,
-        locale: &str,
-    ) -> Result<VoiceCommand, CommandInterpretationError> {
-        validate_input(transcript, locale)?;
-        let tokens = crate::search::tokenize(transcript);
-        let unsupported = [
-            "sensor",
-            "sensors",
-            "датчик",
-            "датчики",
-            "температура",
-            "temperature",
-            "light",
-            "лампа",
-            "relay",
-            "реле",
-        ];
-        if tokens
-            .iter()
-            .any(|token| unsupported.contains(&token.as_str()))
-        {
-            return Ok(control_command(Intent::Unknown));
-        }
-        if tokens
-            .iter()
-            .any(|token| matches!(token.as_str(), "volume" | "громкость"))
-        {
-            return Ok(tokens
-                .iter()
-                .find_map(|token| token.parse::<u8>().ok().filter(|level| *level <= 100))
-                .map(|level| VoiceCommand {
-                    intent: Intent::SetVolume,
-                    query: None,
-                    volume_delta: None,
-                    volume_level: Some(level),
-                })
-                .unwrap_or_else(|| control_command(Intent::Unknown)));
-        }
-        if tokens.iter().any(|token| {
-            matches!(
-                token.as_str(),
-                "stop" | "стоп" | "останови" | "остановить" | "выключи"
-            )
-        }) {
-            return Ok(control_command(Intent::Stop));
-        }
-        if tokens
-            .iter()
-            .any(|token| matches!(token.as_str(), "старт" | "продолжи" | "продолжить"))
-        {
-            return Ok(control_command(Intent::Resume));
-        }
-        if tokens
-            .iter()
-            .any(|token| matches!(token.as_str(), "лайк" | "избранное"))
-        {
-            return Ok(control_command(Intent::AddFavorite));
-        }
-        if tokens
-            .iter()
-            .any(|token| matches!(token.as_str(), "громче"))
-        {
-            return Ok(VoiceCommand {
-                intent: Intent::VolumeChange,
-                query: None,
-                volume_delta: Some(5),
-                volume_level: None,
-            });
-        }
-        if tokens.iter().any(|token| matches!(token.as_str(), "тише")) {
-            return Ok(VoiceCommand {
-                intent: Intent::VolumeChange,
-                query: None,
-                volume_delta: Some(-5),
-                volume_level: None,
-            });
-        }
-        VoiceCommand {
-            intent: Intent::PlayRadio,
-            query: Some(RadioQuery {
-                genres: vec![
-                    if tokens
-                        .iter()
-                        .any(|token| matches!(token.as_str(), "рок" | "rock"))
-                    {
-                        "rock"
-                    } else if tokens
-                        .iter()
-                        .any(|token| matches!(token.as_str(), "джаз" | "jazz"))
-                    {
-                        "jazz"
-                    } else if tokens
-                        .iter()
-                        .any(|token| matches!(token.as_str(), "метал" | "металл" | "metal"))
-                    {
-                        "metal"
-                    } else {
-                        "radio"
-                    }
-                    .to_owned(),
-                ],
-                ..RadioQuery::default()
-            }),
-            volume_delta: None,
-            volume_level: None,
-        }
-        .validate()
-    }
-}
+pub use deterministic::DeterministicCommandInterpreter;
+use deterministic::{basic_command_candidate, is_play_metal_command};
 
 fn control_command(intent: Intent) -> VoiceCommand {
     VoiceCommand {
@@ -291,13 +179,7 @@ impl CommandInterpreter for LlmCommandInterpreter {
             }
             Ok(command) => Ok(command),
             Err(error) => {
-                // shortcut: expand this whitelist only when a new basic voice command is verified.
-                let play_metal = tokens
-                    .iter()
-                    .any(|token| matches!(token.as_str(), "включи" | "играй" | "поставь" | "play"))
-                    && tokens
-                        .iter()
-                        .any(|token| matches!(token.as_str(), "метал" | "металл" | "metal"));
+                let play_metal = is_play_metal_command(&tokens);
                 if !play_metal && !basic_command_candidate(&tokens) {
                     return Err(error);
                 }
@@ -308,37 +190,6 @@ impl CommandInterpreter for LlmCommandInterpreter {
             }
         }
     }
-}
-
-/// Tokens that signal one of the locally verified basic commands and allow the
-/// deterministic classifier to rescue an `unknown` verdict or a provider
-/// failure. Keep in sync with `DeterministicCommandInterpreter`.
-fn basic_command_candidate(tokens: &[String]) -> bool {
-    tokens.iter().any(|token| {
-        matches!(
-            token.as_str(),
-            "рок"
-                | "rock"
-                | "джаз"
-                | "jazz"
-                | "радио"
-                | "radio"
-                | "стоп"
-                | "stop"
-                | "останови"
-                | "остановить"
-                | "выключи"
-                | "громкость"
-                | "volume"
-                | "старт"
-                | "продолжи"
-                | "продолжить"
-                | "лайк"
-                | "избранное"
-                | "громче"
-                | "тише"
-        )
-    })
 }
 
 /// Builds the strict JSON-Schema request shared by production and live tests.
@@ -492,106 +343,5 @@ fn normalize_optional(value: Option<String>) -> Option<String> {
 mod fallback_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn serde_round_trip_and_schema_are_strict() {
-        let command: VoiceCommand = serde_json::from_str(r#"{"intent":"next_station"}"#).unwrap();
-        assert_eq!(command.intent, Intent::NextStation);
-        assert!(serde_json::from_str::<VoiceCommand>(r#"{"intent":"stop","extra":true}"#).is_err());
-        let schema = voice_command_request("Включи джаз", "ru-RU");
-        assert_eq!(schema.response_schema()["additionalProperties"], false);
-        assert!(
-            schema.response_schema()["properties"]["intent"]["enum"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("volume_change"))
-        );
-    }
-
-    #[test]
-    fn resume_and_add_favorite_round_trip_through_schema_and_serde() {
-        for (payload, expected) in [
-            (r#"{"intent":"resume"}"#, Intent::Resume),
-            (r#"{"intent":"add_favorite"}"#, Intent::AddFavorite),
-        ] {
-            let command: VoiceCommand = serde_json::from_str(payload).unwrap();
-            assert_eq!(command.intent, expected);
-            assert!(command.query.is_none() && command.volume_delta.is_none());
-        }
-        let schema = voice_command_request("play that again", "en-US");
-        let intents = schema.response_schema()["properties"]["intent"]["enum"]
-            .as_array()
-            .unwrap();
-        assert!(intents.contains(&json!("resume")));
-        assert!(intents.contains(&json!("add_favorite")));
-    }
-
-    #[test]
-    fn resume_and_add_favorite_reject_payload_fields() {
-        assert!(
-            VoiceCommand {
-                intent: Intent::Resume,
-                query: Some(RadioQuery {
-                    genres: vec!["rock".into()],
-                    ..RadioQuery::default()
-                }),
-                volume_delta: None,
-                volume_level: None,
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(
-            VoiceCommand {
-                intent: Intent::AddFavorite,
-                query: None,
-                volume_delta: Some(5),
-                volume_level: None,
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(control_command(Intent::Resume).validate().is_ok());
-        assert!(control_command(Intent::AddFavorite).validate().is_ok());
-    }
-
-    #[test]
-    fn semantic_validation_normalizes_play_and_rejects_invalid_combinations() {
-        let command = VoiceCommand {
-            intent: Intent::PlayRadio,
-            query: Some(RadioQuery {
-                genres: vec![" Jazz ".into(), "jazz".into()],
-                moods: vec![" Calm ".into()],
-                language: Some("RU".into()),
-                ..RadioQuery::default()
-            }),
-            volume_delta: None,
-            volume_level: None,
-        }
-        .validate()
-        .unwrap();
-        assert_eq!(command.query.unwrap().genres, ["jazz"]);
-        assert!(
-            VoiceCommand {
-                intent: Intent::NextStation,
-                query: Some(RadioQuery::default()),
-                volume_delta: None,
-                volume_level: None,
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(
-            VoiceCommand {
-                intent: Intent::VolumeChange,
-                query: None,
-                volume_delta: Some(0),
-                volume_level: None,
-            }
-            .validate()
-            .is_err()
-        );
-    }
-}
+#[path = "command/tests.rs"]
+mod tests;

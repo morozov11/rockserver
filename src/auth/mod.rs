@@ -363,6 +363,8 @@ pub struct AccountProjection {
     pub device_created_at: String,
     /// Current device last activity time in RFC 3339 UTC form, when recorded.
     pub last_seen_at: Option<String>,
+    /// Preferred communication language for the account, when configured.
+    pub language: Option<String>,
 }
 
 /// Recognizes the small audited security-event vocabulary allowed by this persistence stage.
