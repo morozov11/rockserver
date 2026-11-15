@@ -9,6 +9,9 @@ COPY Cargo.toml Cargo.lock ./
 # only exists when this build script runs in the same container.
 COPY build.rs ./
 COPY proto ./proto
+# The language loader embeds the schema at compile time (include_bytes!) and
+# reads the module files at startup from the copied directory.
+COPY languages ./languages
 COPY src ./src
 COPY migrations ./migrations
 COPY catalog ./catalog
@@ -34,6 +37,10 @@ COPY --from=builder /build/target/release/import_shared_catalog /usr/local/bin/i
 COPY --from=builder /build/target/release/import_full_catalog /usr/local/bin/import_full_catalog
 COPY --from=builder /build/target/release/backfill_embeddings /usr/local/bin/backfill_embeddings
 COPY --from=builder /build/release/mobile-catalog /opt/rockserver/release/mobile-catalog
+# Bundled communication-language modules; the loader's relative default is
+# anchored by an explicit env path because the runtime stage has no WORKDIR.
+COPY --from=builder /build/languages /opt/rockserver/languages
+ENV ROCKSERVER_LANGUAGES_DIR=/opt/rockserver/languages
 
 USER rockserver
 EXPOSE 3000
