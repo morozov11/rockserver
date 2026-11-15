@@ -2,6 +2,11 @@
 
 Last updated: 2026-11-15
 
+## E6 released; LLM service live on production — 2026-11-16
+
+- Stage E6 was committed as `0aabf43` (CI green) and deployed through OPS-001-D (`readiness=passed`, image `sha256:44b2d423…`). The `rock-llm` service (image `rock-llm:sha-6758e18`, 256 MiB) runs on the VPS attached to the internal `rockserver_database` network (alias `llm`) plus a separate egress-enabled network for the Yandex API — the first bring-up had it on the internal network only, which blocked provider calls (`providers_unavailable` in 12 ms); `release.env` carries `ROCKSERVER_LLM_ADDR=llm:8082` and the shared service token. A leftover runtime check in the service ("model must be pinned and cannot be 'latest'") contradicted the owner decision and crashed the first container; it was removed in rockmodules `6758e18` with two regression tests that build routes from the real provider files.
+- Verified live: search now runs through the gRPC LLM path end-to-end — «рок на немецком» returns Deutsch-Rock stations with hybrid scores (explicit de filter from the service parse), en hard-rock and ru voice-style queries answer; the fallback contract fired correctly during the egress incident (deterministic degradation, no breaker opening); `/api/v1/languages` publishes en+ru with the LLM `Languages` contribution; service logs contain zero request texts; memory headroom ~694 MiB. Superseded images removed (kept `0aabf43` current and `d281ed5` rollback pairs, LLM `6758e18`, embedder). Embedded YandexGPT is fully gone from rockserver.
+
 ## E6 LLM gRPC client, fallbacks, and embedded YandexGPT removal — 2026-11-15
 
 - Stage E6 of the AI provider roadmap is implemented locally (nothing committed). Audits #9 and #10 are closed.

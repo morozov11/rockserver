@@ -1,5 +1,10 @@
 # Task log
 
+## E6 release and production LLM bring-up — 2026-11-16
+
+- Release note: rockserver `0aabf43` (CI green) deployed via OPS-001-D, `readiness=passed`. rockmodules `6758e18` fixes a leftover runtime ban of the owner-accepted `latest` alias (the first service container crashed; schema allowed what the router rejected — covered by new route-from-real-files regression tests). Bring-up details: `rock-llm` (256 MiB) on `rockserver_database` alias `llm` plus a dedicated egress network (internal-only placement blocked Yandex calls — providers_unavailable degraded search to the deterministic parser exactly per the fallback contract, no breaker opening); `release.env` carries `ROCKSERVER_LLM_ADDR/TOKEN` (shared service token).
+- Live verification: ru/en/voice-style search queries through the gRPC LLM path (explicit de filter answered with Deutsch-Rock stations), `/api/v1/languages` en+ru, zero request texts in service logs, ~694 MiB memory headroom. Superseded images removed; rollback pair is `d281ed5`.
+
 ## E6 LLM gRPC client, fallbacks, and embedded YandexGPT removal — 2026-11-15
 
 - Goal/scope: roadmap stage E6 — implement gRPC client for the standalone neural LLM service (`llm.v1` from `rockmodules` commit `dfb9a76`), circuit breaker and retry semantics conforming to contract §1 and §5, deterministic search and command fallbacks, filter preservation fix (finding E0 #4), connect real `Languages` polling to `LanguageIntersectionService`, remove legacy embedded `yandex_llm.rs` and its environment configurations, and close audits #9 and #10.
