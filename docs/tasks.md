@@ -1,5 +1,13 @@
 # Task log
 
+## Complete production vector fill and deadline overrides — 2026-11-15
+
+- Goal/scope: finish the production `station_embeddings_v1` backfill that stalled at 16 384/16 825 and stop the batch-cancellation/breaker cycling on the single-core VPS.
+- Root causes: 249 stations kept `fields_hash IS NULL` (migration 0030 does not backfill; the E3 deploy skipped `catalog_seed` via the current marker, so no upsert ever wrote their hashes — those stations could never be embedded or counted as pending), and 64-station batches exceeded the default 30 s batch deadline under search load, surfacing as `Cancelled` errors that opened the service breaker and intermittently degraded the live vector branch.
+- Fixes: one manual idempotent `catalog_seed` run (fields_hash NULL → 0 across all 16 825 stations, vectors untouched); commit `d281ed5` (CI green) passes `ROCKSERVER_EMBEDDER_QUERY/BATCH/INFO_TIMEOUT_MS` through the production compose, and `release.env` sets `ROCKSERVER_EMBEDDER_BATCH_TIMEOUT_MS=120000` for this host; redeployed `d281ed5` via OPS-001-D.
+- Result: lifecycle full coverage in ~3 minutes after redeploy (`active=16825, covered=16825`, "embedding lifecycle completed"), no breaker cycles since; live semantic probes (en/ru/German) verified through Caddy; memory headroom ~700 MiB; superseded images removed (kept current `d281ed5` + rollback `d269e93` pairs and the embedder image).
+- Checks/status: released and verified live. Note for E9: ru voice-style queries still show the pre-normalization metadata scale (>1 scores) — expected until the unified ranking lands.
+
 ## E4 database taxonomy with contract versioning and cache — 2026-11-15
 
 - Release note: committed as `a834be1` (plus a documented `ROCKSERVER_TAXONOMY_TTL_SECS` line in `.env.example`) and pushed; GitHub Actions on `a834be1` is green (fmt, strict Clippy, 341 tests, image build, sequential compose smoke). Independently re-verified before the release: the §5.1 hash vector recomputed bit-exact, taxonomy integration suite 2/2 on a fresh disposable pg18.

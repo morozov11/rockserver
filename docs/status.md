@@ -2,6 +2,11 @@
 
 Last updated: 2026-11-15
 
+## Production vector fill completed; slow-host deadline overrides — 2026-11-15
+
+- The first production fill of `station_embeddings_v1` stalled at 16 384/16 825 for two reasons found in the logs: 249 stations had `fields_hash IS NULL` (migration 0030 adds the column without a backfill and the E3 deploy skipped the catalog import via the current-release marker, so nothing ever wrote their hashes), and single-core batches of 64 stations were hitting the default 30 s batch deadline — the client cancelled them (`code=Cancelled`), the service breaker cycled, and the vector branch degraded intermittently on live queries. Fixes: one idempotent `catalog_seed` run backfilled every `fields_hash` (NULL count now 0); commit `d281ed5` passes `ROCKSERVER_EMBEDDER_QUERY/BATCH/INFO_TIMEOUT_MS` into the production service and `release.env` sets the batch deadline to 120 s for this host.
+- After redeploying `d281ed5` (OPS-001-D, `readiness=passed`), the lifecycle reached full coverage in about three minutes — `active=16825, covered=16825`, "embedding lifecycle completed" — with no breaker cycles since. Live semantic search verified through Caddy: en hard-rock probes return hybrid scores, the German semantic probe answers, and the ru voice-style query works (its >1 scores are the pre-E9 metadata scale, not a regression). Superseded release images were removed (kept `d281ed5` current and `d269e93` rollback pairs plus the embedder image); ~8.9 GiB free on the VPS.
+
 ## E4 database taxonomy with contract versioning and cache — 2026-11-15
 
 - Stage E4 of the AI provider roadmap is implemented locally (nothing committed). Audit #10 is closed: the controlled genre taxonomy is loaded from PostgreSQL (`genre_hierarchy`, migration 0006) with in-memory TTL caching and contract versioning, and divergence with the static fallback is verified on a disposable database.
