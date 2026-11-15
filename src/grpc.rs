@@ -13,6 +13,14 @@ pub mod embed {
     }
 }
 
+/// LLM service contract (`llm.v1`): `Languages`, `ParseIntent`, `ParseCommand`.
+pub mod llm {
+    /// Version 1 of the LLM service contract.
+    pub mod v1 {
+        include!(concat!(env!("OUT_DIR"), "/llm.v1.rs"));
+    }
+}
+
 /// Reduced `google.rpc` rich-error schema used to decode `ErrorInfo` reasons.
 pub mod rpc {
     /// `google.rpc` messages (`Status`, `ErrorInfo`).

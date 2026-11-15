@@ -2,6 +2,38 @@
 
 Last updated: 2026-11-15
 
+## E6 LLM gRPC client, fallbacks, and embedded YandexGPT removal — 2026-11-15
+
+- Stage E6 of the AI provider roadmap is implemented locally (nothing committed). Audits #9 and #10 are closed.
+- Key deliverables:
+  - **Vendored Schema & Code Generation:**
+    - `proto/llm/v1/llm.proto` vendored from `rock-llm-service` commit `dfb9a76` (SHA-256 recorded in `proto/README.md`).
+    - `build.rs` compiles `llm/v1/llm.proto` alongside `embed/v1` and ErrorInfo.
+    - `src/grpc.rs` exposes generated Rust module `grpc::llm::v1`.
+  - **gRPC LLM Provider (`src/providers/llm/`):**
+    - Configured via `ROCKSERVER_LLM_ADDR`, `ROCKSERVER_LLM_TOKEN`, and optional timeout overrides (`ROCKSERVER_LLM_INTENT_TIMEOUT_MS`, `ROCKSERVER_LLM_COMMAND_TIMEOUT_MS`, `ROCKSERVER_LLM_INFO_TIMEOUT_MS`).
+    - Absence of address defaults cleanly to deterministic parsing without startup errors; address without token fails fast at startup.
+    - Modular design (< 400 lines per file): `config.rs`, `error.rs`, `traits.rs`, `mapping.rs`, `client.rs`, `provider.rs`, `language_source.rs`, `mod.rs`, `tests.rs`.
+    - Circuit breaker (`CircuitBreakerPolicy` 5 failures / 30s) strictly enforces contract rules: service transport/deadline failures trip the breaker, while provider-side degradation (`providers_unavailable`, `model_not_loaded`) and validation errors (`invalid_model_output`) do NOT trip the breaker.
+    - Taxonomy retry: on `unknown_taxonomy_version`, client retries exactly once with `taxonomy = prompt_tags()` if remaining deadline >= 500 ms. On `taxonomy_version_conflict`, fails immediately without retry.
+    - Language and country hint mapping: strictly enforces client rules (explicit language markers, quotes in query, preposition required for countries, negation rejection, multiple country/language veto, adjective veto).
+  - **Search & Voice Fallbacks:**
+    - `LlmQueryParser` delegates to `LlmService::parse_intent` and falls back cleanly to `DeterministicQueryParser` on failure or when unconfigured.
+    - Filter loss fix (finding E0 #4): in `src/search/service.rs`, when `terms` and `tags` are empty, accepted `country_code` is preserved upon deterministic substitution.
+    - `LlmCommandInterpreter` delegates to `LlmService::parse_command` and falls back to `DeterministicCommandInterpreter` with language-module dictionaries. Rescues local basic commands on `unknown` model verdicts. Volume phrases («громче», "set volume to 50") pass end-to-end through deterministic fallback.
+  - **Language Intersection Integration:**
+    - `LlmLanguageSource` connected to `LanguageIntersectionService` for real periodic polling of LLM loaded languages. STT remains unconnected stub until E7.
+  - **Embedded Provider Removal:**
+    - `src/providers/yandex_llm.rs`, `src/providers/yandex_llm/`, `tests/yandex_llm_live.rs`, `src/search/llm.rs` deleted.
+    - `YANDEX_LLM_*` variables removed from `.env.example`, `compose.yaml`, `deploy/ops-001-d.psm1`, and `deploy/remote-ops-001-d.sh`.
+    - `grep -ri yandex_llm src/ tests/` confirmed empty.
+    - Production startup order for LLM service documented in `deploy/README.md`.
+- Verification:
+  - `cargo fmt --check` clean.
+  - `cargo clippy --all-targets --all-features -- -D warnings` clean.
+  - `cargo test` passing (264 lib unit tests + all integration test suites; >350 tests green).
+- Next steps: Stage E7 (STT service & voice proxy).
+
 ## E5 language modules, languages list API, and communication language chain — 2026-11-15
 
 - Stage E5 of the AI provider roadmap is implemented locally (nothing committed).

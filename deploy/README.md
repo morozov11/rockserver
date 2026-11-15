@@ -259,6 +259,25 @@ reverted binary simply keeps reading the old table). Do not import a changed cat
 the window; imports never delete vectors, changed stations are re-embedded on the next
 lifecycle run or manual backfill.
 
+### Neural LLM service and intent/command parsing (E6)
+
+Intent parsing (`ParseIntent`), voice commands (`ParseCommand`), and loaded language discovery
+(`Languages`) are served by the `llm.v1` gRPC service of the modules repository
+(`rock-llm-service`, commit `dfb9a76`+, container footprint ~256 MiB).
+
+Enabling the LLM service in production:
+
+1. Start the `llm` container from `rockmodules` (configured with `YANDEX_AI_API_KEY`,
+   `YANDEX_FOLDER_ID`, and a shared bearer token).
+2. Point `rockserver` at it via `ROCKSERVER_LLM_ADDR` (`host:port`) and `ROCKSERVER_LLM_TOKEN`
+   in `/opt/rockserver/release.env`. Optional timeout overrides:
+   `ROCKSERVER_LLM_INTENT_TIMEOUT_MS` (default 5000), `ROCKSERVER_LLM_COMMAND_TIMEOUT_MS` (default 4500),
+   `ROCKSERVER_LLM_INFO_TIMEOUT_MS` (default 5000).
+3. When `ROCKSERVER_LLM_ADDR` is empty, `rockserver` operates cleanly with deterministic query and command
+   parsing without startup errors.
+4. If the LLM service or its upstream provider fails, `rockserver` degrades gracefully to deterministic
+   parsing and language-module dictionaries.
+
 Local validation, with no VPS or credential/network use:
 
 ```text

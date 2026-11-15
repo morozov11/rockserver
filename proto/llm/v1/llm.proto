@@ -1,0 +1,134 @@
+// Сервис LLM — контракт rockserver ↔ сервис (rock-llm-service).
+// Канонический текст: docs/contract.md, раздел 5. Статус: черновик вместе с
+// gRPC-редакцией контракта; финализируется и реализуется в E6-S.
+syntax = "proto3";
+
+package llm.v1;
+
+// Разбор поисковых запросов и голосовых команд.
+// Аутентификация: метаданные "authorization: Bearer <ROCK_MODULES_TOKEN>".
+service Llm {
+  // Коды загруженных языков, отсортированы.
+  rpc Languages(LanguagesRequest) returns (LanguagesResponse);
+
+  // Разбор поискового запроса по таксономии версии.
+  rpc ParseIntent(ParseIntentRequest) returns (ParseIntentResponse);
+
+  // Голосовая команда управления (инварианты VoiceCommand контракта, 5.2).
+  // Источник ответа — заголовок gRPC-ответа "x-model-source:
+  // <provider>/<model>[;fallback]".
+  rpc ParseCommand(ParseCommandRequest) returns (ParseCommandResponse);
+}
+
+message LanguagesRequest {}
+
+message LanguagesResponse {
+  // Двух-трёхбуквенные коды, отсортированы ("en", "ru").
+  repeated string languages = 1;
+}
+
+message ParseIntentRequest {
+  // 1-2000 символов.
+  string text = 1;
+  // Код загруженного сервисом языка.
+  string language = 2;
+  // "sha256:" + hex(SHA-256(канонический JSON таксономии)).
+  string taxonomy_version = 3;
+  // Полный список тегов версии; отправляется при повторе после
+  // unknown_taxonomy_version. Не задан = нет списка.
+  repeated string taxonomy = 4;
+}
+
+// Действие поискового запроса.
+enum Action {
+  ACTION_UNSPECIFIED = 0;
+  PLAY = 1;
+  SHOW = 2;
+}
+
+// Вид основания для фильтра по языку станции.
+enum LanguageHintKind {
+  LANGUAGE_HINT_KIND_UNSPECIFIED = 0;
+  LANGUAGE_EXPLICIT_LANGUAGE = 1;
+  LANGUAGE_NATIONALITY_ADJECTIVE = 2;
+  LANGUAGE_NONE = 3;
+}
+
+// Вид основания для фильтра по стране станции.
+enum CountryHintKind {
+  COUNTRY_HINT_KIND_UNSPECIFIED = 0;
+  COUNTRY_COUNTRY_NAME = 1;
+  COUNTRY_NATIONALITY_ADJECTIVE = 2;
+  COUNTRY_NONE = 3;
+}
+
+// Разбор модели: язык станции (rockserver применяет свои правила).
+message LanguageHint {
+  // Код или не задан (null в JSON-редакции контракта).
+  optional string code = 1;
+  LanguageHintKind kind = 2;
+  // Слова-основание из запроса; не логируются.
+  optional string evidence = 3;
+}
+
+message CountryHint {
+  optional string code = 1;
+  CountryHintKind kind = 2;
+  optional string evidence = 3;
+}
+
+message ResponseSource {
+  string provider = 1;
+  string model = 2;
+  bool fallback_used = 3;
+}
+
+message ParseIntentResponse {
+  Action action = 1;
+  repeated string terms = 2;
+  // Только теги таксономии версии; теги вне её сервис отбрасывает.
+  repeated string tags = 3;
+  LanguageHint station_language = 4;
+  CountryHint station_country = 5;
+  ResponseSource source = 6;
+}
+
+message ParseCommandRequest {
+  // 1-2000 символов.
+  string text = 1;
+  string language = 2;
+}
+
+// Распознанная команда; набор значений как в rockserver/src/voice/command.rs.
+enum VoiceIntent {
+  VOICE_INTENT_UNSPECIFIED = 0;
+  PLAY_RADIO = 1;
+  STOP = 2;
+  RESUME = 3;
+  NEXT_STATION = 4;
+  PREVIOUS_STATION = 5;
+  VOLUME_CHANGE = 6;
+  SET_VOLUME = 7;
+  ADD_FAVORITE = 8;
+  UNKNOWN = 9;
+}
+
+// Критерии включения радио; только для PLAY_RADIO, хотя бы один критерий.
+message SearchQuery {
+  // До 32 значений по <= 64 символа.
+  repeated string genres = 1;
+  repeated string moods = 2;
+  optional string similar_to = 3;
+  optional string language = 4;
+  optional string country_code = 5;
+}
+
+message ParseCommandResponse {
+  VoiceIntent intent = 1;
+  // Только PLAY_RADIO.
+  optional SearchQuery query = 2;
+  // Только VOLUME_CHANGE: ненулевое, -100..100 (процентные пункты).
+  optional int32 volume_delta = 3;
+  // Только SET_VOLUME: 0..100.
+  optional int32 volume_level = 4;
+}

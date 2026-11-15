@@ -35,9 +35,13 @@ services:
       RUST_LOG: ${RUST_LOG:-info}
       YANDEX_AI_API_KEY: ${YANDEX_AI_API_KEY:-}
       YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:-}
-      YANDEX_LLM_MODEL: ${YANDEX_LLM_MODEL:-}
-      YANDEX_LLM_MODEL_VERSION: ${YANDEX_LLM_MODEL_VERSION:-}
-      YANDEX_LLM_TIMEOUT_MS: ${YANDEX_LLM_TIMEOUT_MS:-}
+      # gRPC LLM service (rock-llm-service). An empty address keeps the
+      # deterministic parsing mode; a token is required whenever set.
+      ROCKSERVER_LLM_ADDR: ${ROCKSERVER_LLM_ADDR:-}
+      ROCKSERVER_LLM_TOKEN: ${ROCKSERVER_LLM_TOKEN:-}
+      ROCKSERVER_LLM_INTENT_TIMEOUT_MS: ${ROCKSERVER_LLM_INTENT_TIMEOUT_MS:-}
+      ROCKSERVER_LLM_COMMAND_TIMEOUT_MS: ${ROCKSERVER_LLM_COMMAND_TIMEOUT_MS:-}
+      ROCKSERVER_LLM_INFO_TIMEOUT_MS: ${ROCKSERVER_LLM_INFO_TIMEOUT_MS:-}
       YANDEX_HOME_CLIENTID: ${YANDEX_HOME_CLIENTID:-}
       YANDEX_HOME_SECRET: ${YANDEX_HOME_SECRET:-}
       # gRPC embedding service (rock-llm-service). An empty address keeps the

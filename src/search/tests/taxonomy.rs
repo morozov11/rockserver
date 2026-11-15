@@ -5,11 +5,13 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::providers::llm::{LlmClientError, LlmService};
 use crate::search::taxonomy::{GenreRow, GenreTaxonomy, GenreTaxonomySource};
 use crate::search::{
-    InMemoryStationRepository, LlmProvider, LlmProviderError, LlmQueryParser, LlmRequest,
-    QueryParserInput, SearchAction, SearchConstraints, SearchQuery, SearchService,
+    InMemoryStationRepository, LlmQueryParser, QueryIntent, QueryParserInput, SearchAction,
+    SearchConstraints, SearchQuery, SearchService,
 };
+use crate::voice::VoiceCommand;
 use async_trait::async_trait;
 
 struct MutableTaxonomy(Mutex<Result<GenreTaxonomy, String>>);
@@ -27,20 +29,40 @@ struct InspectingLlm {
 }
 
 #[async_trait]
-impl LlmProvider for InspectingLlm {
-    async fn generate_json(&self, request: &LlmRequest) -> Result<String, LlmProviderError> {
-        let tags = request.response_schema()["properties"]["tags"]["items"]["enum"]
-            .as_array()
-            .unwrap()
+impl LlmService for InspectingLlm {
+    async fn parse_intent(
+        &self,
+        _query: &str,
+        _locale: &str,
+        taxonomy: &GenreTaxonomy,
+    ) -> Result<QueryIntent, LlmClientError> {
+        let tags = taxonomy
+            .prompt_tags()
             .iter()
-            .map(|tag| tag.as_str().unwrap().to_owned())
+            .map(|t| t.to_string())
             .collect::<Vec<_>>();
-        assert!(request.system_instruction().contains(&tags.join(", ")));
         *self.tags_seen.lock().unwrap() = tags;
-        Ok(format!(
-            r#"{{"action":"play","terms":["rock"],"tags":["{}"],"language":null,"country_code":null}}"#,
-            self.response_tag
-        ))
+        Ok(QueryIntent {
+            action: SearchAction::Play,
+            terms: vec!["rock".into()],
+            tags: vec![self.response_tag.clone()],
+            language: None,
+            country_code: None,
+            core_term_count: 1,
+            raw_query: "rock".into(),
+        })
+    }
+
+    async fn parse_command(
+        &self,
+        _transcript: &str,
+        _locale: &str,
+    ) -> Result<VoiceCommand, LlmClientError> {
+        unimplemented!()
+    }
+
+    async fn languages(&self) -> Result<Vec<String>, LlmClientError> {
+        Ok(vec!["en".into(), "ru".into()])
     }
 }
 

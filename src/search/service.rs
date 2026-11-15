@@ -245,8 +245,17 @@ impl SearchService {
 
             if intent.tags.is_empty() {
                 parser_fallback = "empty_intent";
-                // Full fallback: provider returned nothing actionable.
+                // Full fallback for search terms/tags, but preserve any accepted hard filters
+                // (country_code, language) from the parsed intent (finding E0 #4).
+                let accepted_country = intent.country_code.take();
+                let accepted_language = intent.language.take();
                 intent = deterministic;
+                if accepted_country.is_some() {
+                    intent.country_code = accepted_country;
+                }
+                if accepted_language.is_some() {
+                    intent.language = accepted_language;
+                }
             } else {
                 parser_fallback = "missing_terms";
                 // Partial fallback: keep provider's hard genre tags, but use deterministic

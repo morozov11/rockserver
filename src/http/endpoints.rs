@@ -316,6 +316,34 @@ pub fn router_with_speech_recognizers_bearer_account_admin_store_proxy_and_voice
         .build()
 }
 
+/// Creates the production router with all external neural and storage services.
+#[allow(clippy::too_many_arguments)]
+pub fn router_with_all_services(
+    search_service: SearchService,
+    voice_services: (SpeechRecognizers, Arc<dyn CommandInterpreter>),
+    voice_command_timeout: Duration,
+    api_bearer_token: impl Into<String>,
+    account_store: PostgresAccountStore,
+    admin_store: PostgresAdminStore,
+    trusted_proxy_token: impl Into<String>,
+    yandex_home: Option<YandexHomeClient>,
+    language_intersection: Arc<crate::languages::LanguageIntersectionService>,
+) -> Router {
+    let (speech_recognizers, voice_command_interpreter) = voice_services;
+    RouterBuilder::default()
+        .with_search_service(search_service)
+        .with_speech_recognizers(speech_recognizers)
+        .with_voice_command_interpreter(voice_command_interpreter)
+        .with_voice_command_timeout(voice_command_timeout)
+        .with_api_bearer_token(api_bearer_token)
+        .with_postgres_account_stores(account_store)
+        .with_postgres_admin_store(admin_store)
+        .with_trusted_proxy_token(trusted_proxy_token)
+        .with_yandex_home(yandex_home)
+        .with_language_intersection(language_intersection)
+        .build()
+}
+
 /// Creates a deterministic device-voice harness over explicit control-plane dependencies.
 pub fn router_with_device_voice_services(
     search_service: SearchService,

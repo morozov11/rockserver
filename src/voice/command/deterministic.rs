@@ -122,33 +122,3 @@ impl CommandInterpreter for DeterministicCommandInterpreter {
         .validate()
     }
 }
-
-/// Tokens that signal one of the locally verified basic commands and allow the
-/// deterministic classifier to rescue an `unknown` verdict or a provider
-/// failure.
-pub(super) fn basic_command_candidate(tokens: &[String]) -> bool {
-    let registry = crate::languages::bundled_registry();
-    tokens
-        .iter()
-        .any(|token| registry.is_basic_command_token(token))
-}
-
-/// Checks whether tokens represent a play metal command across stop words and genre vocabulary.
-pub(super) fn is_play_metal_command(tokens: &[String]) -> bool {
-    let registry = crate::languages::bundled_registry();
-    let has_play_verb = tokens.iter().any(|token| {
-        registry
-            .valid_codes()
-            .iter()
-            .filter_map(|code| registry.get(code))
-            .any(|module| module.lexical.stop_words.iter().any(|sw| sw == token))
-    });
-    let has_metal = tokens.iter().any(|token| {
-        registry
-            .valid_codes()
-            .iter()
-            .filter_map(|code| registry.get(code))
-            .any(|module| module.commands.matches_genre(token, "metal"))
-    });
-    has_play_verb && has_metal
-}

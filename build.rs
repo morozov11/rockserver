@@ -7,7 +7,11 @@
 use std::{env, path::PathBuf};
 
 /// Vendored contract schemas, compiled in a stable order.
-const PROTO_FILES: &[&str] = &["embed/v1/embed.proto", "google/rpc/error_details.proto"];
+const PROTO_FILES: &[&str] = &[
+    "embed/v1/embed.proto",
+    "llm/v1/llm.proto",
+    "google/rpc/error_details.proto",
+];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);

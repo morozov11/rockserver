@@ -261,11 +261,6 @@ pub(super) fn infer_country_code(terms: &[String]) -> Option<String> {
     crate::languages::bundled_registry().infer_country_code(terms, "ru")
 }
 
-/// Returns whether a request explicitly asks for stations from a country.
-pub(super) fn has_explicit_country_request(terms: &[String]) -> bool {
-    crate::languages::bundled_registry().has_explicit_country_request(terms)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{

@@ -1,39 +1,110 @@
+use std::sync::Arc;
+
+use async_trait::async_trait;
+
 use super::*;
-use crate::search::LlmProviderError;
+use crate::providers::llm::{LlmClientError, LlmService};
+use crate::search::QueryIntent;
+use crate::search::taxonomy::GenreTaxonomy;
 
-struct FailingProvider;
+struct FailingService;
 
 #[async_trait]
-impl LlmProvider for FailingProvider {
-    async fn generate_json(&self, _request: &LlmRequest) -> Result<String, LlmProviderError> {
-        Err(LlmProviderError::safe("provider unavailable"))
+impl LlmService for FailingService {
+    async fn parse_intent(
+        &self,
+        _query: &str,
+        _locale: &str,
+        _taxonomy: &GenreTaxonomy,
+    ) -> Result<QueryIntent, LlmClientError> {
+        Err(LlmClientError::safe("provider unavailable"))
+    }
+
+    async fn parse_command(
+        &self,
+        _transcript: &str,
+        _locale: &str,
+    ) -> Result<VoiceCommand, LlmClientError> {
+        Err(LlmClientError::safe("provider unavailable"))
+    }
+
+    async fn languages(&self) -> Result<Vec<String>, LlmClientError> {
+        Err(LlmClientError::safe("provider unavailable"))
     }
 }
 
-struct MalformedProvider;
+struct MalformedService;
 
 #[async_trait]
-impl LlmProvider for MalformedProvider {
-    async fn generate_json(&self, _request: &LlmRequest) -> Result<String, LlmProviderError> {
-        Ok("{}".to_owned())
+impl LlmService for MalformedService {
+    async fn parse_intent(
+        &self,
+        _query: &str,
+        _locale: &str,
+        _taxonomy: &GenreTaxonomy,
+    ) -> Result<QueryIntent, LlmClientError> {
+        Err(LlmClientError::safe(
+            "invalid model output: schema mismatch",
+        ))
+    }
+
+    async fn parse_command(
+        &self,
+        _transcript: &str,
+        _locale: &str,
+    ) -> Result<VoiceCommand, LlmClientError> {
+        Err(LlmClientError::safe(
+            "invalid model output: schema mismatch",
+        ))
+    }
+
+    async fn languages(&self) -> Result<Vec<String>, LlmClientError> {
+        Ok(vec![])
     }
 }
 
-struct UnknownProvider;
+struct UnknownService;
 
 #[async_trait]
-impl LlmProvider for UnknownProvider {
-    async fn generate_json(&self, _request: &LlmRequest) -> Result<String, LlmProviderError> {
-        Ok(
-            r#"{"intent":"unknown","query":null,"volume_delta":null,"volume_level":null}"#
-                .to_owned(),
-        )
+impl LlmService for UnknownService {
+    async fn parse_intent(
+        &self,
+        _query: &str,
+        _locale: &str,
+        _taxonomy: &GenreTaxonomy,
+    ) -> Result<QueryIntent, LlmClientError> {
+        Ok(QueryIntent {
+            action: crate::search::SearchAction::Play,
+            terms: vec![],
+            tags: vec![],
+            language: None,
+            country_code: None,
+            core_term_count: 0,
+            raw_query: String::new(),
+        })
+    }
+
+    async fn parse_command(
+        &self,
+        _transcript: &str,
+        _locale: &str,
+    ) -> Result<VoiceCommand, LlmClientError> {
+        Ok(VoiceCommand {
+            intent: Intent::Unknown,
+            query: None,
+            volume_delta: None,
+            volume_level: None,
+        })
+    }
+
+    async fn languages(&self) -> Result<Vec<String>, LlmClientError> {
+        Ok(vec!["en".into(), "ru".into()])
     }
 }
 
 #[tokio::test]
 async fn provider_failure_preserves_basic_rock_command() {
-    let interpreter = LlmCommandInterpreter::new(Arc::new(FailingProvider));
+    let interpreter = LlmCommandInterpreter::new(Arc::new(FailingService));
     let command = interpreter.interpret("включи рок", "ru").await.unwrap();
     assert_eq!(command.intent, Intent::PlayRadio);
     assert_eq!(command.query.unwrap().genres, ["rock"]);
@@ -41,7 +112,7 @@ async fn provider_failure_preserves_basic_rock_command() {
 
 #[tokio::test]
 async fn provider_failure_preserves_black_metal_command() {
-    let interpreter = LlmCommandInterpreter::new(Arc::new(FailingProvider));
+    let interpreter = LlmCommandInterpreter::new(Arc::new(FailingService));
     for transcript in ["Включи блэк метал", "Включи блэк металл"] {
         let command = interpreter.interpret(transcript, "ru").await.unwrap();
         assert_eq!(command.intent, Intent::PlayRadio);
@@ -51,20 +122,47 @@ async fn provider_failure_preserves_black_metal_command() {
 
 #[tokio::test]
 async fn malformed_provider_response_preserves_stop_command() {
-    let interpreter = LlmCommandInterpreter::new(Arc::new(MalformedProvider));
+    let interpreter = LlmCommandInterpreter::new(Arc::new(MalformedService));
     let command = interpreter.interpret("останови", "ru").await.unwrap();
     assert_eq!(command.intent, Intent::Stop);
 }
 
 #[tokio::test]
-async fn provider_failure_does_not_turn_unrelated_speech_into_radio() {
-    let interpreter = LlmCommandInterpreter::new(Arc::new(FailingProvider));
-    assert!(interpreter.interpret("какая погода", "ru").await.is_err());
+async fn provider_failure_falls_back_for_volume_phrases_end_to_end() {
+    let interpreter = LlmCommandInterpreter::new(Arc::new(FailingService));
+
+    // Volume up: «громче» -> VolumeChange(5)
+    let louder = interpreter.interpret("громче", "ru").await.unwrap();
+    assert_eq!(louder.intent, Intent::VolumeChange);
+    assert_eq!(louder.volume_delta, Some(5));
+
+    // Volume down: «тише» -> VolumeChange(-5)
+    let quieter = interpreter.interpret("тише", "ru").await.unwrap();
+    assert_eq!(quieter.intent, Intent::VolumeChange);
+    assert_eq!(quieter.volume_delta, Some(-5));
+
+    // Absolute volume: "set volume to 50" -> SetVolume(50)
+    let set_vol = interpreter
+        .interpret("set volume to 50", "en")
+        .await
+        .unwrap();
+    assert_eq!(set_vol.intent, Intent::SetVolume);
+    assert_eq!(set_vol.volume_level, Some(50));
+}
+
+#[tokio::test]
+async fn provider_failure_preserves_unsupported_commands_as_unknown() {
+    let interpreter = LlmCommandInterpreter::new(Arc::new(FailingService));
+    let command = interpreter
+        .interpret("какая температура", "ru")
+        .await
+        .unwrap();
+    assert_eq!(command.intent, Intent::Unknown);
 }
 
 #[tokio::test]
 async fn provider_failure_preserves_core_device_commands() {
-    let interpreter = LlmCommandInterpreter::new(Arc::new(FailingProvider));
+    let interpreter = LlmCommandInterpreter::new(Arc::new(FailingService));
     for (transcript, expected) in [
         ("роксервер стоп", Intent::Stop),
         ("роксервер старт", Intent::Resume),
@@ -73,23 +171,11 @@ async fn provider_failure_preserves_core_device_commands() {
         let command = interpreter.interpret(transcript, "ru").await.unwrap();
         assert_eq!(command.intent, expected, "transcript: {transcript}");
     }
-    let louder = interpreter
-        .interpret("роксервер громче", "ru")
-        .await
-        .unwrap();
-    assert_eq!(louder.intent, Intent::VolumeChange);
-    assert_eq!(louder.volume_delta, Some(5));
-    let quieter = interpreter.interpret("роксервер тише", "ru").await.unwrap();
-    assert_eq!(quieter.intent, Intent::VolumeChange);
-    assert_eq!(quieter.volume_delta, Some(-5));
 }
 
 #[tokio::test]
 async fn unknown_verdict_is_rescued_for_basic_commands() {
-    // Measured on device: the provider answers unknown for valid wake-word
-    // prefixed commands often enough that every device session failed with
-    // unsupported_intent. A recognized basic command must rescue the session.
-    let interpreter = LlmCommandInterpreter::new(Arc::new(UnknownProvider));
+    let interpreter = LlmCommandInterpreter::new(Arc::new(UnknownService));
     for (transcript, expected) in [
         ("роксервер стоп", Intent::Stop),
         ("роксервер старт", Intent::Resume),
@@ -105,7 +191,7 @@ async fn unknown_verdict_is_rescued_for_basic_commands() {
 
 #[tokio::test]
 async fn unknown_verdict_stands_for_unrelated_speech() {
-    let interpreter = LlmCommandInterpreter::new(Arc::new(UnknownProvider));
+    let interpreter = LlmCommandInterpreter::new(Arc::new(UnknownService));
     let command = interpreter.interpret("какая погода", "ru").await.unwrap();
     assert_eq!(command.intent, Intent::Unknown);
 }

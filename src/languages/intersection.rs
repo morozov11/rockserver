@@ -149,6 +149,22 @@ impl LanguageIntersectionService {
         self.retry_pause
     }
 
+    /// Runs a background loop refreshing service language statuses until process exit.
+    pub async fn run_polling(self: Arc<Self>) {
+        loop {
+            self.refresh().await;
+            let pause = {
+                let (llm, stt) = self.cached_statuses.read().await.clone();
+                if llm == ServiceLanguageStatus::Unknown || stt == ServiceLanguageStatus::Unknown {
+                    self.retry_pause
+                } else {
+                    Duration::from_secs(60)
+                }
+            };
+            tokio::time::sleep(pause).await;
+        }
+    }
+
     /// Computes the published communication languages according to the contract intersection rules.
     pub async fn published_languages(&self) -> Vec<LanguageSummary> {
         let (llm_status, stt_status) = self.cached_statuses.read().await.clone();

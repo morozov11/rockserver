@@ -3,16 +3,20 @@ use std::{env, error::Error, sync::Arc};
 use rockserver::{
     config::Config,
     http::TRUSTED_PROXY_TOKEN_ENV,
+    languages::{
+        LanguageIntersectionService, ServiceLanguageSource, UnconnectedServiceLanguageSource,
+        bundled_registry_arc,
+    },
     persistence::{
         DATABASE_URL_ENV, PostgresAccountStore, PostgresAdminStore, PostgresGenreTaxonomySource,
         repository_from_env,
     },
     providers::embedder::{EmbedderClient, EmbedderConfig, EmbedderGateway, EmbedderLifecycle},
+    providers::llm::{LlmClient, LlmConfig, LlmLanguageSource, LlmService},
     providers::yandex_home::YandexHomeClient,
-    providers::yandex_llm::YandexLlmProvider,
     providers::yandex_speechkit::YandexSpeechKitRecognizer,
     providers::yandex_speechkit_streaming::YandexSpeechKitStreamingRecognizer,
-    search::{DeterministicQueryParser, LlmProvider, LlmQueryParser, QueryParser, SearchService},
+    search::{DeterministicQueryParser, LlmQueryParser, QueryParser, SearchService},
     serve, shutdown_signal, telemetry,
     voice::{CommandInterpreter, DeterministicCommandInterpreter, LlmCommandInterpreter},
 };
@@ -51,15 +55,27 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
         None => (None, None),
     };
-    let structured_provider = YandexLlmProvider::optional_from_env()?
-        .map(|provider| Arc::new(provider) as Arc<dyn LlmProvider>);
-    let has_structured_provider = structured_provider.is_some();
-    let query_parser: Arc<dyn QueryParser> = match &structured_provider {
-        Some(provider) => Arc::new(LlmQueryParser::new(Arc::clone(provider))),
+    let llm_config = LlmConfig::from_env()?;
+    let (llm_service, llm_language_source) = match llm_config {
+        Some(config) => {
+            let client = Arc::new(LlmClient::lazy(config)?);
+            let source = Arc::new(LlmLanguageSource::new(Some(
+                Arc::clone(&client) as Arc<dyn LlmService>
+            ))) as Arc<dyn ServiceLanguageSource>;
+            (Some(client as Arc<dyn LlmService>), source)
+        }
+        None => (
+            None,
+            Arc::new(LlmLanguageSource::unconnected()) as Arc<dyn ServiceLanguageSource>,
+        ),
+    };
+    let has_structured_provider = llm_service.is_some();
+    let query_parser: Arc<dyn QueryParser> = match &llm_service {
+        Some(service) => Arc::new(LlmQueryParser::new(Arc::clone(service))),
         None => Arc::new(DeterministicQueryParser),
     };
-    let voice_command_interpreter: Arc<dyn CommandInterpreter> = match structured_provider {
-        Some(provider) => Arc::new(LlmCommandInterpreter::new(provider)),
+    let voice_command_interpreter: Arc<dyn CommandInterpreter> = match llm_service {
+        Some(service) => Arc::new(LlmCommandInterpreter::new(service)),
         None => Arc::new(DeterministicCommandInterpreter),
     };
     let mut search_service =
@@ -72,6 +88,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             PostgresGenreTaxonomySource::from_pool(taxonomy_pool),
         ));
     }
+    let language_registry = bundled_registry_arc();
+    let stt_source = Arc::new(UnconnectedServiceLanguageSource) as Arc<dyn ServiceLanguageSource>;
+    let language_intersection = Arc::new(LanguageIntersectionService::new(
+        language_registry,
+        llm_language_source,
+        stt_source,
+    ));
+    language_intersection.refresh().await;
+    tokio::spawn(Arc::clone(&language_intersection).run_polling());
+
     let listener = TcpListener::bind(config.bind_addr).await?;
     tracing::info!(address = %config.bind_addr, "RockServer listening");
 
@@ -89,7 +115,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
     serve(
         listener,
-        rockserver::http::router_with_speech_recognizers_bearer_account_admin_store_proxy_and_voice_interpreter(
+        rockserver::http::router_with_all_services(
             search_service,
             (
                 rockserver::voice::SpeechRecognizers::new(
@@ -104,6 +130,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             admin_store,
             trusted_proxy_token,
             yandex_home,
+            language_intersection,
         ),
         shutdown_signal(),
     )

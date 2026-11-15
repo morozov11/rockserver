@@ -49,7 +49,7 @@
 | E3 | Удаление ONNX и классификатора из rockserver | rockserver | E2 | Выполнено 2026-11-14 (ONNX, ort/ndarray/tokenizers, классификатор, старый PostgresEmbeddingStore и deploy-ассеты удалены; сборка и тесты зелёные) |
 | E4 | Таксономия из БД с версией | rockserver | — (до E6) | Выполнено локально 2026-11-15 (хеш по контракту §5.1, TTL-кэш, детерминированный отбор промпт-тегов, аудит 10 закрыт) |
 | E5 | Языковые модули, API списка языков, язык общения | rockserver | — (до E6/E7/E8) | Выполнено локально 2026-11-15 (схема, ru/en модули, API /api/v1/languages, цепочка языка общения, миграция 0031, OpenAPI; см. результат ниже) |
-| E6 | Сервис LLM (поиск + команды), клиент, фолбэки, фикс фильтров | модули + rockserver | E4, E5 | Не начат |
+| E6 | Сервис LLM (поиск + команды), клиент, фолбэки, фикс фильтров | модули + rockserver | E4, E5 | Выполнено локально 2026-11-15 (gRPC llm.v1 клиент, breaker по контракту, повтор с prompt_tags, deterministic fallback поиска и команд, опрос Languages в intersection, снятие yandex_llm; аудит 9 и 10 закрыты) |
 | E7 | Сервис распознавания (gRPC), голосовой прокси, три формы входа | модули + rockserver | E5 | Не начат |
 | E8a | RockMobile: убрать зашитые `ru-RU`/`en-US` | rockmobile | E5, E6, E7 | Не начат |
 | E8b | RockCast: настройка языка общения | rockcast | E5 | Не начат |
@@ -289,6 +289,18 @@ gRPC-редакции (раздел 5). Клиент rockserver — `tonic`, о�
 Негативные сценарии: отказ основного провайдера; обоих; сервиса целиком; обрыв клиента; неизвестная версия таксономии.
 
 Приёмка: аудит 9 (breaker/кэш/запасной/закреплённая модель/лимиты — тесты на фейках); аудит 10.
+
+Результат реализации E6 в rockserver (2026-11-15):
+- Proto `llm/v1/llm.proto` скопирован из `rock-llm-service` коммит `dfb9a76` (SHA-256 зафиксирован в `proto/README.md`); `build.rs` и `src/grpc.rs` расширены.
+- Реализован gRPC-клиент `LlmClient` в `src/providers/llm/` (модули < 400 строк: `config.rs`, `error.rs`, `traits.rs`, `mapping.rs`, `client.rs`, `provider.rs`, `language_source.rs`, `mod.rs`, `tests.rs`).
+- Breaker: параметризован на 5 отказов / 30 с; соблюдено правило контракта — ошибки провайдера (`providers_unavailable`, `model_not_loaded`) не открывают breaker сервиса.
+- Таксономия (E4): при `unknown_taxonomy_version` клиент повторяет вызов 1 раз со списком `prompt_tags()`, если остаток дедлайна ≥ 500 мс. При `taxonomy_version_conflict` запрос сразу завершается ошибкой без повтора.
+- Фильтры языка и страны: строго проверены правилами клиента (явный маркер, цитата в запросе, отсутствие отрицания, вето прилагательных, запрет нескольких стран/языков).
+- Фикс потери фильтров: в `src/search/service.rs` принятые `country_code` сохраняются при подстановке детерминированного интента при пустых `terms`/`tags` (находка E0 №4).
+- Голосовые команды: `LlmCommandInterpreter` при сбоях LLM-сервиса или ошибках модели полностью переходит на `DeterministicCommandInterpreter` со словарём модуля языка (E5); volume-фразы («громче», "set volume to 50") успешно спасаются.
+- Пересечение языков: `LlmLanguageSource` опрашивает `Languages` RPC сервиса и подключён к `LanguageIntersectionService` (STT остаётся заглушкой до E7).
+- Снятие встроенного провайдера: `src/providers/yandex_llm.rs`, `tests/yandex_llm_live.rs`, `src/search/llm.rs` удалены; `YANDEX_LLM_*` переменные убраны из `.env.example`, `compose.yaml`, ops-скриптов. `grep -ri yandex_llm src/ tests/` — пусто.
+- Аудиты 9 и 10 закрыты.
 
 Откат: revert релиза.
 

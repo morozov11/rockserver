@@ -1,5 +1,3 @@
-use serde_json::json;
-
 use super::*;
 
 #[test]
@@ -7,14 +5,6 @@ fn serde_round_trip_and_schema_are_strict() {
     let command: VoiceCommand = serde_json::from_str(r#"{"intent":"next_station"}"#).unwrap();
     assert_eq!(command.intent, Intent::NextStation);
     assert!(serde_json::from_str::<VoiceCommand>(r#"{"intent":"stop","extra":true}"#).is_err());
-    let schema = voice_command_request("Включи джаз", "ru-RU");
-    assert_eq!(schema.response_schema()["additionalProperties"], false);
-    assert!(
-        schema.response_schema()["properties"]["intent"]["enum"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("volume_change"))
-    );
 }
 
 #[test]
@@ -27,12 +17,6 @@ fn resume_and_add_favorite_round_trip_through_schema_and_serde() {
         assert_eq!(command.intent, expected);
         assert!(command.query.is_none() && command.volume_delta.is_none());
     }
-    let schema = voice_command_request("play that again", "en-US");
-    let intents = schema.response_schema()["properties"]["intent"]["enum"]
-        .as_array()
-        .unwrap();
-    assert!(intents.contains(&json!("resume")));
-    assert!(intents.contains(&json!("add_favorite")));
 }
 
 #[test]
